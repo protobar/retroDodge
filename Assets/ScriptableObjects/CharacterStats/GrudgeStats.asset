@@ -9,17 +9,19 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 29f99d9b02c182442b3c12bbe22444ab, type: 3}
+  m_Script: {fileID: 11500000, guid: 7ed0b2842e3b6094892b765089416d4d, type: 3}
   m_Name: GrudgeStats
   m_EditorClassIdentifier: 
-  maxHealth: 120
-  movementSpeed: 4
-  jumpHeight: 3.5
-  damageMultiplier: 1.3
-  throwPowerMultiplier: 1
   characterName: Grudge
-  description: The Inferno Bruiser - Heavy hitter with fire attacks
-  characterIcon: {fileID: 0}
+  maxHealth: 120
+  moveSpeed: 10
+  jumpHeight: 8
+  damageMultiplier: 1.3
+  throwPower: 1
+  chargeTime: 1.5
   hasAirDash: 0
   airDashCooldown: 2
+  airDashDistance: 3
+  ultimateName: Meteor Strike
   ultimateDamage: 30
+  ultimateDescription: 

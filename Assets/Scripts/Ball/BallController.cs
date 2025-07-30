@@ -1,489 +1,348 @@
 using UnityEngine;
-using Photon.Pun;
-using System.Collections;
-using System.Collections.Generic;
 
-// ==================== BALL CONTROLLER ====================
-public class BallController : MonoBehaviourPun, IPunObservable
+public class BallController : MonoBehaviour
 {
     [Header("Ball Settings")]
-    public float baseSpeed = 20f;
-    public float gravity = -9.8f;
-    public LayerMask playerLayer;
-    public LayerMask groundLayer;
+    [SerializeField] private float baseSpeed = 25f;
+    [SerializeField] private float gravity = 20f;
+    [SerializeField] private float pickupRange = 1.2f;
+    [SerializeField] private float bounceMultiplier = 0.6f;
+    [SerializeField] private bool homingEnabled = true;
+    [SerializeField] private float homingStrength = 1f;
 
-    [Header("Possession Settings")]
-    public float possessionStartTime;
-    public int currentHolderID = -1;
+    [Header("Visual Settings")]
+    [SerializeField] private float rotationSpeed = 360f;
+    [SerializeField] private Color availableColor = Color.white;
+    [SerializeField] private Color heldColor = Color.yellow;
 
     // Ball state
-    public enum BallType { Basic, Charged, Jump, Ultimate, Special }
-    public enum BallState { Free, Held, Thrown, Caught }
-    public BallType currentType;
-    public BallState currentState;
-    public int damage;
-    public int ownerID;
-    public bool isActive = true;
+    public enum BallState { Free, Held, Thrown }
+    [SerializeField] private BallState currentState = BallState.Free;
 
-    // Custom physics
+    // Physics
     private Vector3 velocity;
-    private Vector3 curveDirection;
-    private float curveIntensity;
-    private TrailRenderer trail;
+    private bool isGrounded = false;
 
-    // Visual indicators
-    public GameObject warningGlow;
-    public GameObject dangerGlow;
-    public ParticleSystem corruptionParticles;
+    // References
+    private Transform ballTransform;
+    private Renderer ballRenderer;
+    private CharacterController holder;
 
-    // Network prediction
-    private Queue<BallSnapshot> stateBuffer = new Queue<BallSnapshot>();
-    private float lastNetworkUpdate = 0f;
+    // Throw properties
+    private Vector3 throwDirection;
+    private float throwPower;
 
-    // Components
-    private Rigidbody rb;
-    private SphereCollider sphereCollider;
+    // Ground detection
+    [SerializeField] private LayerMask groundLayer = 1;
+    [SerializeField] private float groundCheckDistance = 0.6f;
 
     void Awake()
     {
-        rb = GetComponent<Rigidbody>();
-        sphereCollider = GetComponent<SphereCollider>();
-        trail = GetComponent<TrailRenderer>();
+        ballTransform = transform;
+        ballRenderer = GetComponent<Renderer>();
 
-        if (rb == null)
-        {
-            rb = gameObject.AddComponent<Rigidbody>();
-        }
-
-        if (sphereCollider == null)
-        {
-            sphereCollider = gameObject.AddComponent<SphereCollider>();
-            sphereCollider.radius = 0.2f;
-        }
+        // Set initial state
+        SetBallState(BallState.Free);
     }
 
-    void Start()
+    void Update()
     {
-        ResetBall();
-    }
-
-    public void OnPickup(int playerID)
-    {
-        currentHolderID = playerID;
-        currentState = BallState.Held;
-        possessionStartTime = Time.time;
-
-        // Disable physics while held
-        velocity = Vector3.zero;
-        rb.isKinematic = true;
-
-        // Attach to player
-        CharacterBase holder = FindPlayerByID(playerID);
-        if (holder != null)
+        switch (currentState)
         {
-            transform.SetParent(holder.transform);
-            transform.localPosition = new Vector3(0, 1.5f, 0.5f);
-        }
-
-        if (photonView.IsMine)
-        {
-            photonView.RPC("SyncBallPickup", RpcTarget.Others, playerID, possessionStartTime);
-        }
-    }
-
-    public void LaunchBall(Vector3 direction, float power, BallType type, int throwerId)
-    {
-        currentState = BallState.Thrown;
-        currentType = type;
-        ownerID = throwerId;
-        currentHolderID = -1;
-
-        // Detach from player
-        transform.SetParent(null);
-        rb.isKinematic = false;
-
-        // Calculate velocity based on throw type
-        velocity = direction.normalized * (baseSpeed * power);
-        rb.velocity = velocity;
-
-        // Apply throw-specific properties
-        ApplyThrowProperties(type);
-
-        isActive = true;
-
-        if (photonView.IsMine)
-        {
-            photonView.RPC("SyncBallLaunch", RpcTarget.Others, velocity, type, throwerId);
-        }
-    }
-
-    void ApplyThrowProperties(BallType type)
-    {
-        switch (type)
-        {
-            case BallType.Basic:
-                damage = 10;
-                trail.enabled = false;
+            case BallState.Free:
+                HandleFreeBall();
                 break;
-
-            case BallType.Charged:
-                damage = 15;
-                trail.enabled = true;
-                trail.startColor = Color.red;
-                trail.endColor = Color.yellow;
+            case BallState.Held:
+                HandleHeldBall();
                 break;
-
-            case BallType.Jump:
-                damage = 12;
-                velocity.y += 5f; // Extra upward force
-                rb.velocity = velocity;
-                break;
-
-            case BallType.Ultimate:
-                // Character-specific ultimate damage will be set by character
-                trail.enabled = true;
-                trail.startColor = Color.white;
-                trail.endColor = Color.blue;
-                break;
-
-            case BallType.Special:
-                // For character-specific special throws
+            case BallState.Thrown:
+                HandleThrownBall();
                 break;
         }
+
+        CheckPickupRange();
+        UpdateVisuals();
     }
 
-    void FixedUpdate()
+    void HandleFreeBall()
     {
-        if (!photonView.IsMine || !isActive) return;
-
-        if (currentState == BallState.Thrown)
+        // Apply gravity when not grounded
+        if (!isGrounded)
         {
-            // Apply curve if needed (for Echo character)
-            if (curveIntensity > 0)
-            {
-                Vector3 curveForce = curveDirection * curveIntensity * Time.fixedDeltaTime;
-                rb.AddForce(curveForce);
-            }
-
-            // Check for collisions using raycast
-            CheckCollisions();
-
-            // Check if ball went out of bounds
-            if (transform.position.y < -10f || Vector3.Distance(transform.position, Vector3.zero) > 50f)
-            {
-                ResetBall();
-            }
-        }
-        else if (currentState == BallState.Held)
-        {
-            UpdatePossessionVisuals();
-        }
-
-        // Send position updates for network sync
-        if (Time.time - lastNetworkUpdate > 0.1f)
-        {
-            photonView.RPC("SyncBallPosition", RpcTarget.Others, transform.position, rb.velocity);
-            lastNetworkUpdate = Time.time;
-        }
-    }
-
-    void CheckCollisions()
-    {
-        // Check for player collisions
-        Collider[] hitColliders = Physics.OverlapSphere(transform.position, sphereCollider.radius, playerLayer);
-
-        foreach (var collider in hitColliders)
-        {
-            CharacterBase character = collider.GetComponent<CharacterBase>();
-            if (character != null && character.photonView.Owner.ActorNumber != ownerID)
-            {
-                OnPlayerHit(character);
-                return;
-            }
-        }
-
-        // Check for ground collision
-        if (Physics.CheckSphere(transform.position, sphereCollider.radius, groundLayer))
-        {
-            OnGroundHit();
-        }
-    }
-
-    void OnPlayerHit(CharacterBase character)
-    {
-        // Check if player is trying to catch
-        CatchController catchController = character.GetComponent<CatchController>();
-        if (catchController != null && catchController.TryToCatch(this))
-        {
-            // Successful catch
-            character.OnBallPickup();
-            currentState = BallState.Caught;
-
-            // Award ultimate charge to catcher
-            UltimateManager ultimateManager = character.GetComponent<UltimateManager>();
-            ultimateManager?.AddCharge(0.20f);
-
-            AudioManager.Instance?.PlaySound("BallCatch");
+            velocity.y -= gravity * Time.deltaTime;
         }
         else
         {
-            // Hit player - deal damage
-            character.TakeDamage(damage, currentType == BallType.Ultimate ? DamageType.Ultimate : DamageType.BallHit);
-
-            // Award ultimate charge to thrower
-            CharacterBase thrower = FindPlayerByID(ownerID);
-            if (thrower != null)
+            // Ball bounces or comes to rest
+            if (velocity.y < -1f)
             {
-                UltimateManager throwerUltimate = thrower.GetComponent<UltimateManager>();
-                throwerUltimate?.AddCharge(0.15f);
-            }
-
-            // Visual and audio feedback
-            CreateHitEffect(transform.position);
-            CameraShake.Instance?.Shake(0.3f, 0.4f);
-            AudioManager.Instance?.PlaySound("BallHit");
-
-            ResetBall();
-        }
-    }
-
-    void OnGroundHit()
-    {
-        if (currentType == BallType.Jump)
-        {
-            // Special bounce behavior for jump throws
-            Vector3 bounceVelocity = rb.velocity;
-            bounceVelocity.y = Mathf.Abs(bounceVelocity.y) * 0.8f;
-            rb.velocity = bounceVelocity;
-
-            // Create ground impact effect
-            CreateGroundImpactEffect();
-            AudioManager.Instance?.PlaySound("GroundImpact");
-        }
-        else
-        {
-            // Normal ground hit - ball becomes inactive
-            ResetBall();
-        }
-    }
-
-    public float GetHoldDuration()
-    {
-        return Time.time - possessionStartTime;
-    }
-
-    public void UpdatePossessionVisuals()
-    {
-        float holdTime = GetHoldDuration();
-
-        if (holdTime >= 5f)
-        {
-            if (dangerGlow != null) dangerGlow.SetActive(true);
-            if (warningGlow != null) warningGlow.SetActive(false);
-            if (corruptionParticles != null && !corruptionParticles.isPlaying)
-            {
-                corruptionParticles.Play();
-            }
-        }
-        else if (holdTime >= 3f)
-        {
-            if (warningGlow != null) warningGlow.SetActive(true);
-            if (dangerGlow != null) dangerGlow.SetActive(false);
-            if (corruptionParticles != null && corruptionParticles.isPlaying)
-            {
-                corruptionParticles.Stop();
-            }
-        }
-        else
-        {
-            if (warningGlow != null) warningGlow.SetActive(false);
-            if (dangerGlow != null) dangerGlow.SetActive(false);
-            if (corruptionParticles != null && corruptionParticles.isPlaying)
-            {
-                corruptionParticles.Stop();
-            }
-        }
-    }
-
-    public void SetCurve(Vector3 direction, float intensity)
-    {
-        curveDirection = direction;
-        curveIntensity = intensity;
-    }
-
-    void ResetBall()
-    {
-        currentState = BallState.Free;
-        currentHolderID = -1;
-        ownerID = -1;
-        isActive = false;
-        velocity = Vector3.zero;
-
-        if (rb != null) rb.velocity = Vector3.zero;
-        if (trail != null) trail.enabled = false;
-
-        // Reset visual effects
-        if (warningGlow != null) warningGlow.SetActive(false);
-        if (dangerGlow != null) dangerGlow.SetActive(false);
-        if (corruptionParticles != null) corruptionParticles.Stop();
-
-        // Return to pool or spawn new ball
-        if (BallPool.Instance != null)
-        {
-            BallPool.Instance.ReturnBall(this);
-        }
-
-        // Spawn new ball after delay
-        if (GameManager.Instance != null && PhotonNetwork.IsMasterClient)
-        {
-            GameManager.Instance.SpawnNewBall(1.5f);
-        }
-    }
-
-    void CreateHitEffect(Vector3 position)
-    {
-        // Create particle effect at hit position
-        if (EffectsPool.Instance != null)
-        {
-            GameObject hitEffect = EffectsPool.Instance.GetEffect("BallHit");
-            if (hitEffect != null)
-            {
-                hitEffect.transform.position = position;
-            }
-        }
-    }
-
-    void CreateGroundImpactEffect()
-    {
-        if (EffectsPool.Instance != null)
-        {
-            GameObject impactEffect = EffectsPool.Instance.GetEffect("GroundImpact");
-            if (impactEffect != null)
-            {
-                impactEffect.transform.position = transform.position;
-            }
-        }
-    }
-
-    CharacterBase FindPlayerByID(int playerID)
-    {
-        foreach (var player in PhotonNetwork.PlayerList)
-        {
-            if (player.ActorNumber == playerID)
-            {
-                // Find the player's character in the scene
-                GameObject[] playerObjects = GameObject.FindGameObjectsWithTag("Player");
-                foreach (var obj in playerObjects)
+                velocity.y = -velocity.y * bounceMultiplier;
+                if (velocity.y < 2f) // Stop small bounces
                 {
-                    PhotonView pv = obj.GetComponent<PhotonView>();
-                    if (pv != null && pv.Owner.ActorNumber == playerID)
-                    {
-                        return obj.GetComponent<CharacterBase>();
-                    }
+                    velocity.y = 0f;
                 }
             }
+            else
+            {
+                velocity.y = 0f;
+            }
+
+            // Apply friction on ground
+            velocity.x *= 0.95f;
+            velocity.z *= 0.95f;
         }
-        return null;
+
+        // Move the ball
+        ballTransform.Translate(velocity * Time.deltaTime, Space.World);
+        CheckGrounded();
     }
 
-    // Network RPCs
-    [PunRPC]
-    void SyncBallPickup(int playerID, float pickupTime)
+    void HandleHeldBall()
     {
-        currentHolderID = playerID;
-        possessionStartTime = pickupTime;
-        currentState = BallState.Held;
-
-        // Attach to player for non-owners
-        CharacterBase holder = FindPlayerByID(playerID);
         if (holder != null)
         {
-            transform.SetParent(holder.transform);
-            transform.localPosition = new Vector3(0, 1.5f, 0.5f);
-        }
-    }
+            // Follow the holder
+            Vector3 holdPosition = holder.transform.position + Vector3.up * 1.5f + holder.transform.right * 0.5f;
+            ballTransform.position = Vector3.Lerp(ballTransform.position, holdPosition, 10f * Time.deltaTime);
 
-    [PunRPC]
-    void SyncBallLaunch(Vector3 vel, BallType type, int throwerId)
-    {
-        transform.SetParent(null);
-        velocity = vel;
-        currentType = type;
-        ownerID = throwerId;
-        currentState = BallState.Thrown;
-
-        if (rb != null)
-        {
-            rb.isKinematic = false;
-            rb.velocity = vel;
-        }
-
-        ApplyThrowProperties(type);
-    }
-
-    [PunRPC]
-    void SyncBallPosition(Vector3 pos, Vector3 vel)
-    {
-        // Interpolate for smooth movement on non-owner clients
-        stateBuffer.Enqueue(new BallSnapshot
-        {
-            position = pos,
-            velocity = vel,
-            timestamp = Time.time
-        });
-
-        // Keep buffer size reasonable
-        while (stateBuffer.Count > 10)
-        {
-            stateBuffer.Dequeue();
-        }
-
-        if (!photonView.IsMine && currentState == BallState.Thrown)
-        {
-            // Smooth interpolation to network position
-            transform.position = Vector3.Lerp(transform.position, pos, Time.deltaTime * 15f);
-            if (rb != null) rb.velocity = vel;
-        }
-    }
-
-    // IPunObservable implementation
-    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
-    {
-        if (stream.IsWriting)
-        {
-            // Send data
-            stream.SendNext(transform.position);
-            stream.SendNext(rb.velocity);
-            stream.SendNext((int)currentState);
-            stream.SendNext(currentHolderID);
+            // Reset velocity
+            velocity = Vector3.zero;
         }
         else
         {
-            // Receive data
-            Vector3 networkPos = (Vector3)stream.ReceiveNext();
-            Vector3 networkVel = (Vector3)stream.ReceiveNext();
-            BallState networkState = (BallState)stream.ReceiveNext();
-            int networkHolderID = (int)stream.ReceiveNext();
+            // Lost holder, become free
+            SetBallState(BallState.Free);
+        }
+    }
 
-            if (!photonView.IsMine)
+    void HandleThrownBall()
+    {
+        // Apply homing behavior - ball tracks toward opponent like a missile
+        if (homingEnabled && BallManager.Instance != null)
+        {
+            Vector3 targetPos = BallManager.Instance.GetCurrentOpponentPosition();
+            Vector3 currentPos = ballTransform.position;
+
+            // Calculate direct line to opponent
+            Vector3 homingDirection = (targetPos - currentPos).normalized;
+
+            // Adjust velocity to track toward opponent
+            Vector3 currentDirection = velocity.normalized;
+            Vector3 newDirection = Vector3.Lerp(currentDirection, homingDirection, homingStrength * Time.deltaTime);
+
+            // Maintain speed but update direction
+            float currentSpeed = velocity.magnitude;
+            velocity = newDirection * currentSpeed;
+
+            // Debug line showing homing direction
+            Debug.DrawLine(currentPos, targetPos, Color.magenta, 0.1f);
+        }
+        else
+        {
+            // Apply gravity only if not homing
+            velocity.y -= gravity * Time.deltaTime;
+        }
+
+        // Move the ball
+        ballTransform.Translate(velocity * Time.deltaTime, Space.World);
+
+        // Check for ground collision
+        CheckGrounded();
+
+        if (isGrounded && velocity.y <= 0)
+        {
+            // Ball hit ground, bounce or become free
+            velocity.y = -velocity.y * bounceMultiplier;
+
+            if (velocity.magnitude < 5f)
             {
-                // Apply lag compensation
-                float lag = Mathf.Abs((float)(PhotonNetwork.Time - info.SentServerTime));
-                networkPos += networkVel * lag;
+                SetBallState(BallState.Free);
+            }
+        }
 
-                transform.position = Vector3.Lerp(transform.position, networkPos, Time.deltaTime * 20f);
-                currentState = networkState;
-                currentHolderID = networkHolderID;
+        // Check if ball went out of bounds
+        if (ballTransform.position.y < -5f)
+        {
+            ResetBall();
+        }
+    }
+
+    void CheckPickupRange()
+    {
+        if (currentState != BallState.Free) return;
+
+        // Find nearby players
+        GameObject player = GameObject.FindGameObjectWithTag("Player");
+        if (player != null)
+        {
+            float distance = Vector3.Distance(ballTransform.position, player.transform.position);
+            if (distance <= pickupRange)
+            {
+                // Player can pick up ball
+                ShowPickupIndicator(true);
+            }
+            else
+            {
+                ShowPickupIndicator(false);
             }
         }
     }
-}
 
-// ==================== BALL SNAPSHOT ====================
-[System.Serializable]
-public class BallSnapshot
-{
-    public Vector3 position;
-    public Vector3 velocity;
-    public float timestamp;
+    void CheckGrounded()
+    {
+        // Raycast down to check for ground
+        Vector3 rayStart = ballTransform.position;
+        isGrounded = Physics.Raycast(rayStart, Vector3.down, groundCheckDistance, groundLayer);
+
+        // Debug ray
+        Debug.DrawRay(rayStart, Vector3.down * groundCheckDistance, isGrounded ? Color.green : Color.red);
+    }
+
+    void UpdateVisuals()
+    {
+        // Rotate the ball for visual effect
+        if (currentState == BallState.Thrown || velocity.magnitude > 0.1f)
+        {
+            ballTransform.Rotate(Vector3.right * rotationSpeed * Time.deltaTime, Space.Self);
+        }
+
+        // Update color based on state
+        if (ballRenderer != null)
+        {
+            switch (currentState)
+            {
+                case BallState.Free:
+                    ballRenderer.material.color = availableColor;
+                    break;
+                case BallState.Held:
+                    ballRenderer.material.color = heldColor;
+                    break;
+                case BallState.Thrown:
+                    ballRenderer.material.color = Color.red;
+                    break;
+            }
+        }
+    }
+
+    void ShowPickupIndicator(bool show)
+    {
+        // Simple scale effect for pickup indication
+        if (show && currentState == BallState.Free)
+        {
+            float scale = 1f + Mathf.Sin(Time.time * 8f) * 0.1f;
+            ballTransform.localScale = Vector3.one * scale;
+        }
+        else
+        {
+            ballTransform.localScale = Vector3.one;
+        }
+    }
+
+    // Public methods
+    public bool TryPickup(CharacterController character)
+    {
+        if (currentState != BallState.Free) return false;
+
+        float distance = Vector3.Distance(ballTransform.position, character.transform.position);
+        if (distance <= pickupRange)
+        {
+            holder = character;
+            SetBallState(BallState.Held);
+            character.SetHasBall(true);
+
+            Debug.Log($"{character.name} picked up the ball!");
+            return true;
+        }
+
+        return false;
+    }
+
+    public void ThrowBall(Vector3 direction, float power)
+    {
+        if (currentState != BallState.Held) return;
+
+        // Set throw properties
+        throwDirection = direction.normalized;
+        throwPower = power;
+
+        // Calculate throw velocity
+        velocity = throwDirection * baseSpeed * power;
+
+        // Add slight upward arc for better visual
+        velocity.y += 3f * power;
+
+        // Release from holder
+        if (holder != null)
+        {
+            holder.SetHasBall(false);
+            holder = null;
+        }
+
+        SetBallState(BallState.Thrown);
+
+        Debug.Log($"Ball thrown with power {power} in direction {direction}!");
+    }
+
+    public void ResetBall()
+    {
+        // Reset to center spawn position
+        Vector3 spawnPosition = new Vector3(0, 2f, 0); // Slightly elevated
+        ballTransform.position = spawnPosition;
+        velocity = Vector3.zero;
+
+        if (holder != null)
+        {
+            holder.SetHasBall(false);
+            holder = null;
+        }
+
+        SetBallState(BallState.Free);
+
+        Debug.Log("Ball reset to center!");
+    }
+
+    void SetBallState(BallState newState)
+    {
+        currentState = newState;
+
+        // Handle state changes
+        switch (newState)
+        {
+            case BallState.Free:
+                // Ball is available for pickup
+                break;
+            case BallState.Held:
+                // Ball is being carried
+                velocity = Vector3.zero;
+                break;
+            case BallState.Thrown:
+                // Ball is in flight
+                break;
+        }
+    }
+
+    // Getters
+    public BallState GetBallState() => currentState;
+    public bool IsHeld() => currentState == BallState.Held;
+    public bool IsFree() => currentState == BallState.Free;
+    public CharacterController GetHolder() => holder;
+
+    // Debug visualization
+    void OnDrawGizmosSelected()
+    {
+        // Draw pickup range
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, pickupRange);
+
+        // Draw ground check
+        Gizmos.color = isGrounded ? Color.green : Color.red;
+        Gizmos.DrawRay(transform.position, Vector3.down * groundCheckDistance);
+
+        // Draw velocity vector when thrown
+        if (currentState == BallState.Thrown)
+        {
+            Gizmos.color = Color.cyan;
+            Gizmos.DrawRay(transform.position, velocity.normalized * 2f);
+        }
+    }
 }

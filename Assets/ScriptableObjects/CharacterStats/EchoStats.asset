@@ -9,17 +9,19 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 29f99d9b02c182442b3c12bbe22444ab, type: 3}
+  m_Script: {fileID: 11500000, guid: 7ed0b2842e3b6094892b765089416d4d, type: 3}
   m_Name: EchoStats
   m_EditorClassIdentifier: 
-  maxHealth: 100
-  movementSpeed: 5
-  jumpHeight: 4
-  damageMultiplier: 1.1
-  throwPowerMultiplier: 1
   characterName: Echo
-  description: The Illusionist - Balanced fighter with tricky abilities
-  characterIcon: {fileID: 0}
+  maxHealth: 100
+  moveSpeed: 5
+  jumpHeight: 10
+  damageMultiplier: 1.1
+  throwPower: 1
+  chargeTime: 1.5
   hasAirDash: 0
   airDashCooldown: 2
+  airDashDistance: 3
+  ultimateName: Mirror Maze
   ultimateDamage: 25
+  ultimateDescription: 
