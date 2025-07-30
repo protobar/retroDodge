@@ -206,6 +206,35 @@ public class BallManager : MonoBehaviour
         {
             SpawnBall();
         }
+
+        // Debug key to throw ball at player from dummy position
+        if (Input.GetKeyDown(KeyCode.Y))
+        {
+            ThrowBallAtPlayer();
+        }
+    }
+
+    void ThrowBallAtPlayer()
+    {
+        if (currentBall == null) return;
+
+        GameObject player = GameObject.FindGameObjectWithTag("Player");
+        if (player == null) return;
+
+        // Position ball at dummy opponent
+        if (dummyOpponent != null)
+        {
+            currentBall.transform.position = dummyOpponent.position + Vector3.up * 1.5f;
+        }
+
+        // Calculate direction to player
+        Vector3 direction = (player.transform.position - currentBall.transform.position).normalized;
+        direction.y = 0.3f; // Add upward arc
+
+        // Throw ball at player
+        currentBall.ThrowBall(direction.normalized, 1.5f);
+
+        Debug.Log("Debug: Ball thrown at player from dummy position!");
     }
 
     void OnDrawGizmosSelected()

@@ -118,7 +118,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5c4866fdc96300b4fbfb875011a9a6e2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  baseSpeed: 35
+  baseSpeed: 10
   gravity: 20
   pickupRange: 1.2
   bounceMultiplier: 0.6

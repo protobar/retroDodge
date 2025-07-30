@@ -41,6 +41,14 @@ public class BallController : MonoBehaviour
         ballTransform = transform;
         ballRenderer = GetComponent<Renderer>();
 
+        // Ensure ball has a collider for catch detection
+        if (GetComponent<Collider>() == null)
+        {
+            SphereCollider ballCollider = gameObject.AddComponent<SphereCollider>();
+            ballCollider.radius = 0.5f;
+            ballCollider.isTrigger = false; // For physics collision
+        }
+
         // Set initial state
         SetBallState(BallState.Free);
     }
@@ -255,6 +263,34 @@ public class BallController : MonoBehaviour
         }
 
         return false;
+    }
+
+    public void OnCaught(CharacterController catcher)
+    {
+        // Ball was successfully caught
+        holder = catcher;
+        SetBallState(BallState.Held);
+        catcher.SetHasBall(true);
+
+        // Stop all movement
+        velocity = Vector3.zero;
+
+        Debug.Log($"{catcher.name} caught the ball!");
+    }
+
+    public void OnCatchFailed()
+    {
+        // Ball catch was attempted but failed
+        // Ball continues with modified trajectory (bounce effect)
+
+        // Reduce speed slightly
+        velocity *= 0.8f;
+
+        // Add some random deviation
+        velocity.x += Random.Range(-2f, 2f);
+        velocity.y += Random.Range(1f, 3f);
+
+        Debug.Log("Ball catch failed - ball deflected!");
     }
 
     public void ThrowBall(Vector3 direction, float power)

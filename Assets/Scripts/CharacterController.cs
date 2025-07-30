@@ -17,6 +17,7 @@ public class CharacterController : MonoBehaviour
     [Header("Ball Interaction")]
     [SerializeField] private KeyCode pickupKey = KeyCode.J;
     [SerializeField] private KeyCode throwKey = KeyCode.K;
+    [SerializeField] private KeyCode catchKey = KeyCode.L;
     [SerializeField] private float throwPower = 1f;
 
     [Header("Character State")]
@@ -27,6 +28,8 @@ public class CharacterController : MonoBehaviour
     // Components
     private Transform characterTransform;
     private CapsuleCollider characterCollider;
+    private ChargedThrowSystem chargedThrowSystem;
+    private CatchSystem catchSystem;
 
     // Movement variables
     private Vector3 velocity;
@@ -43,6 +46,8 @@ public class CharacterController : MonoBehaviour
         // Cache components
         characterTransform = transform;
         characterCollider = GetComponent<CapsuleCollider>();
+        chargedThrowSystem = GetComponent<ChargedThrowSystem>();
+        catchSystem = GetComponent<CatchSystem>();
 
         // Store original collider dimensions for ducking
         if (characterCollider != null)
@@ -222,23 +227,27 @@ public class CharacterController : MonoBehaviour
             BallManager.Instance.RequestBallPickup(this);
         }
 
-        // Throw ball
-        if (Input.GetKeyDown(throwKey) && hasBall)
+        // Throw ball - now handled by ChargedThrowSystem
+        // The ChargedThrowSystem will handle both quick throws and charged throws
+        if (!hasBall && chargedThrowSystem != null && chargedThrowSystem.IsCharging())
         {
-            ThrowBall();
+            // If we lost the ball while charging, stop charging
+            chargedThrowSystem.OnBallLost();
         }
     }
 
     void ThrowBall()
     {
+        // This method is now primarily used for quick throws
+        // Charged throws are handled by ChargedThrowSystem
         if (!hasBall || BallManager.Instance == null) return;
 
         // Get throw direction toward opponent
         Vector3 throwDirection = BallManager.Instance.GetThrowDirection(this);
 
-        // Throw the ball
+        // Execute quick throw with base power
         BallManager.Instance.RequestBallThrow(this, throwDirection, throwPower);
 
-        Debug.Log("Character threw the ball!");
+        Debug.Log("Character executed quick throw!");
     }
 }
