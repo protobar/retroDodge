@@ -8,28 +8,20 @@ public class CharacterController : MonoBehaviour
     [SerializeField] private float groundCheckDistance = 0.1f;
     [SerializeField] private LayerMask groundLayer = 1;
 
-    [Header("Input Settings")]
-    [SerializeField] private KeyCode leftKey = KeyCode.A;
-    [SerializeField] private KeyCode rightKey = KeyCode.D;
-    [SerializeField] private KeyCode jumpKey = KeyCode.Space;
-    [SerializeField] private KeyCode duckKey = KeyCode.S;
-
-    [Header("Ball Interaction")]
-    [SerializeField] private KeyCode pickupKey = KeyCode.J;
-    [SerializeField] private KeyCode throwKey = KeyCode.K;
-    [SerializeField] private KeyCode catchKey = KeyCode.L;
-    [SerializeField] private float throwPower = 1f;
-
     [Header("Character State")]
     [SerializeField] private bool isGrounded = false;
     [SerializeField] private bool isDucking = false;
     [SerializeField] private bool hasBall = false;
+
+    [Header("Ball Interaction")]
+    [SerializeField] private float throwPower = 1f;
 
     // Components
     private Transform characterTransform;
     private CapsuleCollider characterCollider;
     private ChargedThrowSystem chargedThrowSystem;
     private CatchSystem catchSystem;
+    private PlayerInputHandler inputHandler; // NEW: Input handler reference
 
     // Movement variables
     private Vector3 velocity;
@@ -48,6 +40,13 @@ public class CharacterController : MonoBehaviour
         characterCollider = GetComponent<CapsuleCollider>();
         chargedThrowSystem = GetComponent<ChargedThrowSystem>();
         catchSystem = GetComponent<CatchSystem>();
+        inputHandler = GetComponent<PlayerInputHandler>(); // NEW: Get input handler
+
+        // Validate input handler
+        if (inputHandler == null)
+        {
+            Debug.LogError($"{gameObject.name} - PlayerInputHandler component is missing! Please add it.");
+        }
 
         // Store original collider dimensions for ducking
         if (characterCollider != null)
@@ -68,22 +67,25 @@ public class CharacterController : MonoBehaviour
 
     void HandleInput()
     {
-        // Horizontal movement input (immediate response)
-        horizontalInput = 0f;
+        if (inputHandler == null) return;
 
-        if (Input.GetKey(leftKey))
-            horizontalInput = -1f;
-        else if (Input.GetKey(rightKey))
-            horizontalInput = 1f;
+        // Get horizontal movement input from input handler
+        horizontalInput = inputHandler.GetHorizontal();
+
+        // Debug horizontal input
+        if (horizontalInput != 0)
+        {
+            Debug.Log($"{gameObject.name} - Horizontal Input: {horizontalInput}");
+        }
 
         // Jump input (only when grounded and not ducking)
-        if (Input.GetKeyDown(jumpKey) && isGrounded && !isDucking)
+        if (inputHandler.GetJumpPressed() && isGrounded && !isDucking)
         {
             Jump();
         }
 
         // Duck input - state-based crouching
-        bool duckInput = Input.GetKey(duckKey) && isGrounded;
+        bool duckInput = inputHandler.GetDuckHeld() && isGrounded;
 
         // Check if ducking state changed
         if (duckInput != isDucking)
@@ -125,7 +127,7 @@ public class CharacterController : MonoBehaviour
         isGrounded = false;
 
         // Optional: Add jump sound effect hook here
-        Debug.Log("Character Jumped!");
+        Debug.Log($"{gameObject.name} Jumped!");
     }
 
     void HandleDucking()
@@ -142,7 +144,7 @@ public class CharacterController : MonoBehaviour
                 originalColliderCenter.z
             );
 
-            Debug.Log("Character Ducked!");
+            Debug.Log($"{gameObject.name} Ducked!");
         }
         else
         {
@@ -150,11 +152,45 @@ public class CharacterController : MonoBehaviour
             characterCollider.height = originalColliderHeight;
             characterCollider.center = originalColliderCenter;
 
-            Debug.Log("Character Stood Up!");
+            Debug.Log($"{gameObject.name} Stood Up!");
         }
 
         // Reset the state change flag
         duckingStateChanged = false;
+    }
+
+    void HandleBallInteraction()
+    {
+        if (BallManager.Instance == null || inputHandler == null) return;
+
+        // Pickup ball
+        if (inputHandler.GetPickupPressed() && !hasBall)
+        {
+            BallManager.Instance.RequestBallPickup(this);
+        }
+
+        // Throw ball - now handled by ChargedThrowSystem
+        // The ChargedThrowSystem will handle both quick throws and charged throws
+        if (!hasBall && chargedThrowSystem != null && chargedThrowSystem.IsCharging())
+        {
+            // If we lost the ball while charging, stop charging
+            chargedThrowSystem.OnBallLost();
+        }
+    }
+
+    void ThrowBall()
+    {
+        // This method is now primarily used for quick throws
+        // Charged throws are handled by ChargedThrowSystem
+        if (!hasBall || BallManager.Instance == null) return;
+
+        // Get throw direction toward opponent
+        Vector3 throwDirection = BallManager.Instance.GetThrowDirection(this);
+
+        // Execute quick throw with base power
+        BallManager.Instance.RequestBallThrow(this, throwDirection, throwPower);
+
+        Debug.Log($"{gameObject.name} executed quick throw!");
     }
 
     void CheckGrounded()
@@ -182,6 +218,7 @@ public class CharacterController : MonoBehaviour
     public bool IsDucking() => isDucking;
     public bool HasBall() => hasBall;
     public void SetHasBall(bool value) => hasBall = value;
+    public PlayerInputHandler GetInputHandler() => inputHandler; // NEW: Get input handler reference
 
     // Get current facing direction (for ball throwing)
     public Vector3 GetFacingDirection()
@@ -215,39 +252,5 @@ public class CharacterController : MonoBehaviour
             Gizmos.color = Color.cyan;
             Gizmos.DrawRay(transform.position + Vector3.up, throwDir * 3f);
         }
-    }
-
-    void HandleBallInteraction()
-    {
-        if (BallManager.Instance == null) return;
-
-        // Pickup ball
-        if (Input.GetKeyDown(pickupKey) && !hasBall)
-        {
-            BallManager.Instance.RequestBallPickup(this);
-        }
-
-        // Throw ball - now handled by ChargedThrowSystem
-        // The ChargedThrowSystem will handle both quick throws and charged throws
-        if (!hasBall && chargedThrowSystem != null && chargedThrowSystem.IsCharging())
-        {
-            // If we lost the ball while charging, stop charging
-            chargedThrowSystem.OnBallLost();
-        }
-    }
-
-    void ThrowBall()
-    {
-        // This method is now primarily used for quick throws
-        // Charged throws are handled by ChargedThrowSystem
-        if (!hasBall || BallManager.Instance == null) return;
-
-        // Get throw direction toward opponent
-        Vector3 throwDirection = BallManager.Instance.GetThrowDirection(this);
-
-        // Execute quick throw with base power
-        BallManager.Instance.RequestBallThrow(this, throwDirection, throwPower);
-
-        Debug.Log("Character executed quick throw!");
     }
 }

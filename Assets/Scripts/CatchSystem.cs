@@ -210,9 +210,11 @@ public class CatchSystem : MonoBehaviour
         }
     }
 
+    // In CatchSystem.cs, replace Input.GetKeyDown(catchKey) with:
     void HandleCatchInput()
     {
-        if (Input.GetKeyDown(catchKey) && isCatchingAvailable)
+        PlayerInputHandler inputHandler = character.GetInputHandler();
+        if (inputHandler != null && inputHandler.GetCatchPressed() && isCatchingAvailable)
         {
             AttemptCatch();
         }

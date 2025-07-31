@@ -26,6 +26,7 @@ public class ChargedThrowSystem : MonoBehaviour
 
     // References
     private CharacterController character;
+    private PlayerInputHandler inputHandler;
     private BallController heldBall;
     private Renderer ballRenderer;
 
@@ -36,6 +37,12 @@ public class ChargedThrowSystem : MonoBehaviour
     void Awake()
     {
         character = GetComponent<CharacterController>();
+        inputHandler = GetComponent<PlayerInputHandler>();
+
+        if (inputHandler == null)
+        {
+            Debug.LogError($"{gameObject.name} - PlayerInputHandler component is missing for ChargedThrowSystem!");
+        }
 
         // Setup audio
         if (audioSource == null)
@@ -54,26 +61,26 @@ public class ChargedThrowSystem : MonoBehaviour
 
     void HandleChargedThrow()
     {
-        if (!character.HasBall())
+        if (!character.HasBall() || inputHandler == null)
         {
             StopCharging();
             return;
         }
 
         // Start charging when throw button is pressed
-        if (Input.GetKeyDown(KeyCode.K) && !isCharging)
+        if (inputHandler.GetThrowPressed() && !isCharging)
         {
             StartCharging();
         }
 
         // Continue charging while button is held
-        if (Input.GetKey(KeyCode.K) && isCharging)
+        if (inputHandler.GetThrowHeld() && isCharging)
         {
             UpdateCharging();
         }
 
         // Release charged throw when button is released
-        if (Input.GetKeyUp(KeyCode.K) && isCharging)
+        if (!inputHandler.GetThrowHeld() && isCharging)
         {
             ExecuteChargedThrow();
         }

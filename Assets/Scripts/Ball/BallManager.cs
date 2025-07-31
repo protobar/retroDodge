@@ -39,6 +39,7 @@ public class BallManager : MonoBehaviour
         SpawnBall();
     }
 
+
     void SetupDummyOpponent()
     {
         if (dummyOpponent == null)
@@ -195,6 +196,8 @@ public class BallManager : MonoBehaviour
     // Debug methods
     void Update()
     {
+        SetupDummyOpponent();
+
         // Debug key to reset ball
         if (Input.GetKeyDown(KeyCode.R))
         {
