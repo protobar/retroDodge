@@ -168,11 +168,8 @@ public class ChargedThrowSystem : MonoBehaviour
             return;
         }
 
-        // Get throw direction
-        Vector3 throwDirection = BallManager.Instance.GetThrowDirection(character);
-
-        // Execute throw with charged power
-        BallManager.Instance.RequestBallThrow(character, throwDirection, chargePower);
+        // FIXED: Use the new simplified method that lets BallController determine direction
+        BallManager.Instance.RequestBallThrowSimple(character, chargePower);
 
         // Play release sound
         if (audioSource != null && releaseSound != null)

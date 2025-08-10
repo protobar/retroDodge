@@ -7,6 +7,7 @@ TagManager:
   - Ball
   - Ground
   - SpawnPoint
+  - Wall
   layers:
   - Default
   - TransparentFX
@@ -20,7 +21,7 @@ TagManager:
   - Ball
   - Ground
   - UI
-  - 
+  - Wall
   - 
   - 
   - 

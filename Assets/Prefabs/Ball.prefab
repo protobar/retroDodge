@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 8129527973047542639}
   - component: {fileID: 6169506922559312790}
   - component: {fileID: 3588486909696021081}
+  - component: {fileID: -7697450473114152567}
   m_Layer: 9
   m_Name: Ball
   m_TagString: Ball
@@ -118,17 +119,70 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5c4866fdc96300b4fbfb875011a9a6e2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  baseSpeed: 5
+  baseSpeed: 0
   gravity: 20
-  pickupRange: 1.2
+  pickupRange: 1.84
   bounceMultiplier: 0.6
-  homingEnabled: 1
-  homingStrength: 50
+  normalThrowSpeed: 50
+  jumpThrowSpeed: 55
+  useNeoGeoPhysics: 1
+  collisionDistance: 0
+  duckingHeightThreshold: 0
+  playerCollisionHeight: 0
+  enablePredictiveCollision: 1
+  predictionDistance: 1.5
   rotationSpeed: 360
   availableColor: {r: 1, g: 1, b: 1, a: 1}
   heldColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  holdOffset: {x: 0.5, y: 0.25, z: 0}
+  useRelativeToPlayer: 1
+  holdFollowSpeed: 10
+  smoothHoldMovement: 1
+  debugMode: 1
+  showCollisionGizmos: 1
+  showPlayerColliders: 1
+  showDuckingThreshold: 1
+  showBallHeight: 1
+  showCollisionLines: 1
   currentState: 0
+  velocity: {x: 0, y: 0, z: 0}
   groundLayer:
     serializedVersion: 2
-    m_Bits: 1024
+    m_Bits: 5120
   groundCheckDistance: 0.6
+--- !u!114 &-7697450473114152567
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8401581377007119221}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b62136ffb5d1bf5488afb981e0030e55, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  collisionRange: 0.9
+  duckingHeightThreshold: 0.82
+  playerCollisionHeight: 0
+  hitStopDuration: 1
+  enablePredictiveCollision: 0
+  predictionDistance: 5
+  baseDamage: 10
+  chargedDamageMultiplier: 15
+  jumpThrowDamage: 12
+  ultimateDamage: 25
+  bounceForce: 8
+  bounceRandomness: 0
+  knockbackForce: 0
+  enableBallBounce: 1
+  hitEffectPrefab: {fileID: 0}
+  screenShakeIntensity: 0.3
+  screenShakeDuration: 0.2
+  damageColor: {r: 1, g: 0, b: 0, a: 1}
+  hitSound: {fileID: 0}
+  criticalHitSound: {fileID: 0}
+  deflectSound: {fileID: 0}
+  debugMode: 1
+  showCollisionGizmos: 1
+  showDuckingVisualization: 1

@@ -19,9 +19,8 @@ public class CharacterController : MonoBehaviour
     // Components
     private Transform characterTransform;
     private CapsuleCollider characterCollider;
-    private ChargedThrowSystem chargedThrowSystem;
     private CatchSystem catchSystem;
-    private PlayerInputHandler inputHandler; // NEW: Input handler reference
+    private PlayerInputHandler inputHandler;
 
     // Movement variables
     private Vector3 velocity;
@@ -38,9 +37,8 @@ public class CharacterController : MonoBehaviour
         // Cache components
         characterTransform = transform;
         characterCollider = GetComponent<CapsuleCollider>();
-        chargedThrowSystem = GetComponent<ChargedThrowSystem>();
         catchSystem = GetComponent<CatchSystem>();
-        inputHandler = GetComponent<PlayerInputHandler>(); // NEW: Get input handler
+        inputHandler = GetComponent<PlayerInputHandler>();
 
         // Validate input handler
         if (inputHandler == null)
@@ -125,8 +123,6 @@ public class CharacterController : MonoBehaviour
     {
         velocity.y = jumpForce;
         isGrounded = false;
-
-        // Optional: Add jump sound effect hook here
         Debug.Log($"{gameObject.name} Jumped!");
     }
 
@@ -143,7 +139,6 @@ public class CharacterController : MonoBehaviour
                 originalColliderCenter.y - (originalColliderHeight * 0.25f),
                 originalColliderCenter.z
             );
-
             Debug.Log($"{gameObject.name} Ducked!");
         }
         else
@@ -151,7 +146,6 @@ public class CharacterController : MonoBehaviour
             // Stand up - restore original collider dimensions
             characterCollider.height = originalColliderHeight;
             characterCollider.center = originalColliderCenter;
-
             Debug.Log($"{gameObject.name} Stood Up!");
         }
 
@@ -169,34 +163,26 @@ public class CharacterController : MonoBehaviour
             BallManager.Instance.RequestBallPickup(this);
         }
 
-        // Throw ball - now handled by ChargedThrowSystem
-        // The ChargedThrowSystem will handle both quick throws and charged throws
-        if (!hasBall && chargedThrowSystem != null && chargedThrowSystem.IsCharging())
+        // SIMPLIFIED: Direct throw with no charging system
+        if (inputHandler.GetThrowPressed() && hasBall)
         {
-            // If we lost the ball while charging, stop charging
-            chargedThrowSystem.OnBallLost();
+            ThrowBall();
         }
     }
 
     void ThrowBall()
     {
-        // This method is now primarily used for quick throws
-        // Charged throws are handled by ChargedThrowSystem
         if (!hasBall || BallManager.Instance == null) return;
 
-        // Get throw direction toward opponent
-        Vector3 throwDirection = BallManager.Instance.GetThrowDirection(this);
+        // Execute simple throw - BallController handles targeting
+        BallManager.Instance.RequestBallThrowSimple(this, throwPower);
 
-        // Execute quick throw with base power
-        BallManager.Instance.RequestBallThrow(this, throwDirection, throwPower);
-
-        Debug.Log($"{gameObject.name} executed quick throw!");
+        Debug.Log($"{gameObject.name} executed throw!");
     }
 
     void CheckGrounded()
     {
         // Ground check from bottom of original collider (not modified collider)
-        // This prevents issues when ducking changes collider size
         groundCheckPosition = characterTransform.position;
         groundCheckPosition.y -= (originalColliderHeight * 0.5f);
 
@@ -210,7 +196,7 @@ public class CharacterController : MonoBehaviour
 
         // Debug visualization
         Debug.DrawRay(groundCheckPosition, Vector3.down * groundCheckDistance,
-                     isGrounded ? Color.green : Color.red);
+            isGrounded ? Color.green : Color.red);
     }
 
     // Public methods for other systems
@@ -218,13 +204,12 @@ public class CharacterController : MonoBehaviour
     public bool IsDucking() => isDucking;
     public bool HasBall() => hasBall;
     public void SetHasBall(bool value) => hasBall = value;
-    public PlayerInputHandler GetInputHandler() => inputHandler; // NEW: Get input handler reference
+    public PlayerInputHandler GetInputHandler() => inputHandler;
 
     // Get current facing direction (for ball throwing)
     public Vector3 GetFacingDirection()
     {
         // For now, assume facing right is positive X
-        // This will be enhanced when we add opponent targeting
         return Vector3.right;
     }
 
@@ -243,14 +228,6 @@ public class CharacterController : MonoBehaviour
             // Show the ground check point
             Gizmos.color = Color.yellow;
             Gizmos.DrawWireSphere(checkPos, 0.1f);
-        }
-
-        // Show throw direction when holding ball
-        if (hasBall && BallManager.Instance != null)
-        {
-            Vector3 throwDir = BallManager.Instance.GetThrowDirection(this);
-            Gizmos.color = Color.cyan;
-            Gizmos.DrawRay(transform.position + Vector3.up, throwDir * 3f);
         }
     }
 }

@@ -1,36 +1,65 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 public class BallController : MonoBehaviour
 {
     [Header("Ball Settings")]
     [SerializeField] private float baseSpeed = 25f;
-    [SerializeField] private float gravity = 20f;
+    [SerializeField] private float gravity = 15f;
     [SerializeField] private float pickupRange = 1.2f;
     [SerializeField] private float bounceMultiplier = 0.6f;
-    [SerializeField] private bool homingEnabled = true;
-    [SerializeField] private float homingStrength = 1f;
+
+    [Header("NEO GEO 1996 Authentic Physics")]
+    [SerializeField] private float normalThrowSpeed = 18f;
+    [SerializeField] private float jumpThrowSpeed = 22f;
+    [SerializeField] private bool useNeoGeoPhysics = true;
+    [Header("Collision Settings")]
+    [SerializeField] private float collisionDistance = 1.0f; // Ball radius + Player radius
+    [SerializeField] private float duckingHeightThreshold = 1.0f; // Ball must be below this to hit ducking player
+    [SerializeField] private float playerCollisionHeight = 1.0f; // Height offset for player collision center
+    [SerializeField] private bool enablePredictiveCollision = true;
+    [SerializeField] private float predictionDistance = 1.5f;
 
     [Header("Visual Settings")]
     [SerializeField] private float rotationSpeed = 360f;
     [SerializeField] private Color availableColor = Color.white;
     [SerializeField] private Color heldColor = Color.yellow;
 
+    [Header("Ball Hold Position")]
+    [SerializeField] private Vector3 holdOffset = new Vector3(0.5f, 1.5f, 0f); // Right, Up, Forward
+    [SerializeField] private bool useRelativeToPlayer = true; // Use player's right/forward or world space
+    [SerializeField] private float holdFollowSpeed = 10f;
+    [SerializeField] private bool smoothHoldMovement = true;
+
+    [Header("Debug Visualization")]
+    [SerializeField] private bool debugMode = true;
+    [SerializeField] private bool showCollisionGizmos = true;
+    [SerializeField] private bool showPlayerColliders = true;
+    [SerializeField] private bool showDuckingThreshold = true;
+    [SerializeField] private bool showBallHeight = true;
+    [SerializeField] private bool showCollisionLines = true;
+
     // Ball state
     public enum BallState { Free, Held, Thrown }
+    public enum ThrowType { Normal, JumpThrow, PowerShot }
+
     [SerializeField] private BallState currentState = BallState.Free;
+    private ThrowType currentThrowType = ThrowType.Normal;
 
     // Physics
-    private Vector3 velocity;
+    public Vector3 velocity;
     private bool isGrounded = false;
+    private bool hasHitTarget = false;
 
     // References
     private Transform ballTransform;
     private Renderer ballRenderer;
     private CharacterController holder;
+    private CollisionDamageSystem collisionSystem;
 
-    // Throw properties
-    private Vector3 throwDirection;
-    private float throwPower;
+    // FIXED: Simple targeting without BallTargetManager
+    private CharacterController thrower;
+    private Transform targetOpponent;
+    private bool isJumpThrow = false;
 
     // Ground detection
     [SerializeField] private LayerMask groundLayer = 1;
@@ -41,15 +70,21 @@ public class BallController : MonoBehaviour
         ballTransform = transform;
         ballRenderer = GetComponent<Renderer>();
 
-        // Ensure ball has a collider for catch detection
+        // Setup collision damage system
+        collisionSystem = GetComponent<CollisionDamageSystem>();
+        if (collisionSystem == null)
+        {
+            collisionSystem = gameObject.AddComponent<CollisionDamageSystem>();
+        }
+
+        // Ensure ball has a collider
         if (GetComponent<Collider>() == null)
         {
             SphereCollider ballCollider = gameObject.AddComponent<SphereCollider>();
             ballCollider.radius = 0.5f;
-            ballCollider.isTrigger = false; // For physics collision
+            ballCollider.isTrigger = false;
         }
 
-        // Set initial state
         SetBallState(BallState.Free);
     }
 
@@ -74,7 +109,7 @@ public class BallController : MonoBehaviour
 
     void HandleFreeBall()
     {
-        // Apply gravity when not grounded
+        // FIXED: Apply gravity when ball is FREE
         if (!isGrounded)
         {
             velocity.y -= gravity * Time.deltaTime;
@@ -85,7 +120,7 @@ public class BallController : MonoBehaviour
             if (velocity.y < -1f)
             {
                 velocity.y = -velocity.y * bounceMultiplier;
-                if (velocity.y < 2f) // Stop small bounces
+                if (velocity.y < 2f)
                 {
                     velocity.y = 0f;
                 }
@@ -109,62 +144,82 @@ public class BallController : MonoBehaviour
     {
         if (holder != null)
         {
-            // Follow the holder
-            Vector3 holdPosition = holder.transform.position + Vector3.up * 1.5f + holder.transform.right * 0.5f;
-            ballTransform.position = Vector3.Lerp(ballTransform.position, holdPosition, 10f * Time.deltaTime);
+            Vector3 holdPosition = CalculateHoldPosition();
 
-            // Reset velocity
+            if (smoothHoldMovement)
+            {
+                // Smooth following with lerp
+                ballTransform.position = Vector3.Lerp(ballTransform.position, holdPosition, holdFollowSpeed * Time.deltaTime);
+            }
+            else
+            {
+                // Instant positioning
+                ballTransform.position = holdPosition;
+            }
+
             velocity = Vector3.zero;
         }
         else
         {
-            // Lost holder, become free
             SetBallState(BallState.Free);
+        }
+    }
+
+    /// <summary>
+    /// Calculate ball position when held by player based on inspector settings
+    /// </summary>
+    Vector3 CalculateHoldPosition()
+    {
+        Vector3 basePosition = holder.transform.position;
+
+        if (useRelativeToPlayer)
+        {
+            // Position relative to player's orientation
+            Vector3 holdPosition = basePosition;
+            holdPosition += holder.transform.right * holdOffset.x;    // Right/Left offset
+            holdPosition += Vector3.up * holdOffset.y;                // Up/Down offset  
+            holdPosition += holder.transform.forward * holdOffset.z;  // Forward/Back offset
+
+            return holdPosition;
+        }
+        else
+        {
+            // Position in world space
+            return basePosition + holdOffset;
         }
     }
 
     void HandleThrownBall()
     {
-        // Apply homing behavior - ball tracks toward opponent like a missile
-        if (homingEnabled && BallManager.Instance != null)
+        // FIXED: NO GRAVITY during thrown state - ball maintains exact trajectory
+        // This gives us authentic Neo Geo physics:
+        // - Normal throws: perfectly horizontal
+        // - Jump throws: sharp diagonal lines
+
+        if (useNeoGeoPhysics)
         {
-            Vector3 targetPos = BallManager.Instance.GetCurrentOpponentPosition();
-            Vector3 currentPos = ballTransform.position;
-
-            // Calculate direct line to opponent
-            Vector3 homingDirection = (targetPos - currentPos).normalized;
-
-            // Adjust velocity to track toward opponent
-            Vector3 currentDirection = velocity.normalized;
-            Vector3 newDirection = Vector3.Lerp(currentDirection, homingDirection, homingStrength * Time.deltaTime);
-
-            // Maintain speed but update direction
-            float currentSpeed = velocity.magnitude;
-            velocity = newDirection * currentSpeed;
-
-            // Debug line showing homing direction
-            Debug.DrawLine(currentPos, targetPos, Color.magenta, 0.1f);
+            HandleNeoGeoPhysics();
         }
         else
         {
-            // Apply gravity only if not homing
-            velocity.y -= gravity * Time.deltaTime;
+            HandleLegacyPhysics();
         }
 
-        // Move the ball
+        // Move the ball (no gravity applied here)
         ballTransform.Translate(velocity * Time.deltaTime, Space.World);
+
+        // Check for collision with target
+        CheckForCollision();
 
         // Check for ground collision
         CheckGrounded();
-
         if (isGrounded && velocity.y <= 0)
         {
-            // Ball hit ground, bounce or become free
+            // When ball hits ground, apply bounce and transition to FREE state
             velocity.y = -velocity.y * bounceMultiplier;
-
             if (velocity.magnitude < 5f)
             {
-                SetBallState(BallState.Free);
+                SetBallState(BallState.Free); // Gravity resumes in FREE state
             }
         }
 
@@ -175,18 +230,205 @@ public class BallController : MonoBehaviour
         }
     }
 
+    void HandleNeoGeoPhysics()
+    {
+        // FIXED: No gravity during thrown state - gravity handled by ball state
+        // This allows for perfectly horizontal normal throws and sharp diagonal jump throws
+
+        if (debugMode && Time.frameCount % 60 == 0)
+        {
+            Debug.Log($"Neo Geo Physics: {currentThrowType}, Speed: {velocity.magnitude:F1}, Velocity: {velocity}");
+        }
+    }
+
+    void HandleLegacyPhysics()
+    {
+        velocity.y -= gravity * Time.deltaTime;
+    }
+
+    void CheckForCollision()
+    {
+        if (hasHitTarget) return;
+
+        // Find all players and check for collision
+        CharacterController[] allPlayers = FindObjectsOfType<CharacterController>();
+
+        foreach (CharacterController player in allPlayers)
+        {
+            if (player == null || player == thrower) continue;
+
+            // FIXED: Proper collision with ducking pass-through
+            bool shouldCollide = CheckPlayerCollision(player);
+
+            if (shouldCollide)
+            {
+                if (debugMode)
+                {
+                    Debug.Log($"COLLISION: Ball hit {player.name} (Ducking: {player.IsDucking()})");
+                }
+                OnPlayerHit(player);
+                return;
+            }
+        }
+
+        // FIXED: Check wall collisions separately
+        CheckWallCollisions();
+    }
+
+    /// <summary>
+    /// Check if ball should collide with player - handles ducking pass-through
+    /// </summary>
+    bool CheckPlayerCollision(CharacterController player)
+    {
+        Vector3 playerCenter = player.transform.position + Vector3.up * playerCollisionHeight;
+        float distanceToPlayer = Vector3.Distance(ballTransform.position, playerCenter);
+
+        // First check: Is ball close enough to player?
+        if (distanceToPlayer > collisionDistance)
+            return false;
+
+        // Second check: If player is ducking, ball must be low enough to hit
+        if (player.IsDucking())
+        {
+            if (ballTransform.position.y > duckingHeightThreshold)
+            {
+                // Ball is too high - passes over ducking player
+                if (debugMode)
+                {
+                    Debug.Log($"Ball passed over ducking {player.name} (Ball Y: {ballTransform.position.y:F2}, Threshold: {duckingHeightThreshold})");
+                }
+                return false;
+            }
+        }
+
+        // Ball should hit the player
+        return true;
+    }
+
+    /// <summary>
+    /// Check collisions with walls and environment
+    /// </summary>
+    void CheckWallCollisions()
+    {
+        // Cast a sphere to detect wall collisions
+        RaycastHit hit;
+        float ballRadius = 0.5f; // Ball's sphere collider radius
+
+        if (Physics.SphereCast(ballTransform.position, ballRadius, velocity.normalized, out hit,
+            velocity.magnitude * Time.deltaTime, groundLayer))
+        {
+            // Hit a wall - bounce off
+            if (hit.collider.CompareTag("Wall") || hit.collider.name.Contains("Wall"))
+            {
+                OnWallHit(hit);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Handle ball hitting walls
+    /// </summary>
+    void OnWallHit(RaycastHit hit)
+    {
+        // Reflect velocity off the wall
+        Vector3 reflection = Vector3.Reflect(velocity, hit.normal);
+        velocity = reflection * 0.8f; // Reduce speed slightly
+
+        // Move ball slightly away from wall to prevent sticking
+        ballTransform.position = hit.point + hit.normal * 0.6f;
+
+        // Ball becomes free after wall hit - gravity resumes
+        SetBallState(BallState.Free);
+
+        if (debugMode)
+        {
+            Debug.Log($"Ball hit wall: {hit.collider.name}, bounced with velocity: {velocity}");
+        }
+    }
+
+    void OnPlayerHit(CharacterController hitPlayer)
+    {
+        hasHitTarget = true;
+
+        if (debugMode)
+        {
+            Debug.Log($"NEO GEO HIT: Ball hit {hitPlayer.name}!");
+        }
+
+        // Check for catch attempt
+        CatchSystem catchSystem = hitPlayer.GetComponent<CatchSystem>();
+        bool caughtSuccessfully = false;
+
+        if (catchSystem != null && catchSystem.IsBallInRange())
+        {
+            PlayerInputHandler inputHandler = hitPlayer.GetComponent<PlayerInputHandler>();
+            if (inputHandler != null && inputHandler.GetCatchPressed())
+            {
+                // Successful catch
+                OnCaught(hitPlayer);
+                caughtSuccessfully = true;
+                return;
+            }
+        }
+
+        // If not caught, apply damage and bounce
+        if (collisionSystem != null)
+        {
+            hasHitTarget = true; // Prevent multiple hits
+        }
+
+        // FIXED: Immediately turn gravity back on and create bounce
+        CreateNeoGeoBounce(hitPlayer);
+
+        // FIXED: Ball becomes FREE immediately (gravity resumes)
+        SetBallState(BallState.Free);
+    }
+
+    void CreateNeoGeoBounce(CharacterController hitPlayer)
+    {
+        // Realistic bounce away from player
+        Vector3 bounceDirection = (ballTransform.position - hitPlayer.transform.position).normalized;
+
+        if (currentThrowType == ThrowType.JumpThrow)
+        {
+            bounceDirection.y = 0.3f;
+        }
+        else
+        {
+            bounceDirection.y = 0.2f;
+        }
+
+        bounceDirection = bounceDirection.normalized;
+
+        float bounceSpeed = currentThrowType == ThrowType.JumpThrow ? jumpThrowSpeed * 0.4f : normalThrowSpeed * 0.3f;
+        velocity = bounceDirection * bounceSpeed;
+
+        // REMOVED: Don't use Invoke - ball is already FREE state, gravity is already on
+
+        if (debugMode)
+        {
+            Debug.Log($"Neo Geo bounce: {currentThrowType}, Direction {bounceDirection}, Speed: {velocity.magnitude:F1}");
+        }
+    }
+
+    void MakeBallFree()
+    {
+        if (currentState == BallState.Thrown)
+        {
+            SetBallState(BallState.Free);
+        }
+    }
+
     void CheckPickupRange()
     {
         if (currentState != BallState.Free) return;
 
-        // Find nearby players
         GameObject player = GameObject.FindGameObjectWithTag("Player");
         if (player != null)
         {
             float distance = Vector3.Distance(ballTransform.position, player.transform.position);
             if (distance <= pickupRange)
             {
-                // Player can pick up ball
                 ShowPickupIndicator(true);
             }
             else
@@ -198,23 +440,18 @@ public class BallController : MonoBehaviour
 
     void CheckGrounded()
     {
-        // Raycast down to check for ground
         Vector3 rayStart = ballTransform.position;
         isGrounded = Physics.Raycast(rayStart, Vector3.down, groundCheckDistance, groundLayer);
-
-        // Debug ray
         Debug.DrawRay(rayStart, Vector3.down * groundCheckDistance, isGrounded ? Color.green : Color.red);
     }
 
     void UpdateVisuals()
     {
-        // Rotate the ball for visual effect
         if (currentState == BallState.Thrown || velocity.magnitude > 0.1f)
         {
             ballTransform.Rotate(Vector3.right * rotationSpeed * Time.deltaTime, Space.Self);
         }
 
-        // Update color based on state
         if (ballRenderer != null)
         {
             switch (currentState)
@@ -234,7 +471,6 @@ public class BallController : MonoBehaviour
 
     void ShowPickupIndicator(bool show)
     {
-        // Simple scale effect for pickup indication
         if (show && currentState == BallState.Free)
         {
             float scale = 1f + Mathf.Sin(Time.time * 8f) * 0.1f;
@@ -244,6 +480,47 @@ public class BallController : MonoBehaviour
         {
             ballTransform.localScale = Vector3.one;
         }
+    }
+
+    // ================================
+    // FIXED: SIMPLE TARGETING SYSTEM
+    // ================================
+
+    /// <summary>
+    /// Find opponent for the given thrower using simple position-based logic
+    /// </summary>
+    private Transform FindOpponentForThrower(CharacterController throwerPlayer)
+    {
+        if (throwerPlayer == null) return null;
+
+        // Find all character controllers
+        CharacterController[] allPlayers = FindObjectsOfType<CharacterController>();
+
+        foreach (CharacterController player in allPlayers)
+        {
+            // Skip self
+            if (player == throwerPlayer) continue;
+
+            // Skip if no health component (dummy objects)
+            if (player.GetComponent<PlayerHealth>() == null) continue;
+
+            // Return first valid opponent found
+            return player.transform;
+        }
+
+        // Fallback: Look for dummy opponent
+        GameObject dummy = GameObject.Find("DummyOpponent");
+        if (dummy != null)
+        {
+            return dummy.transform;
+        }
+
+        if (debugMode)
+        {
+            Debug.LogWarning($"No opponent found for {throwerPlayer.name}!");
+        }
+
+        return null;
     }
 
     // Public methods
@@ -258,73 +535,161 @@ public class BallController : MonoBehaviour
             SetBallState(BallState.Held);
             character.SetHasBall(true);
 
-            Debug.Log($"{character.name} picked up the ball!");
+            if (debugMode)
+            {
+                Debug.Log($"{character.name} picked up the ball!");
+            }
             return true;
         }
-
         return false;
     }
 
     public void OnCaught(CharacterController catcher)
     {
-        // Ball was successfully caught
         holder = catcher;
         SetBallState(BallState.Held);
         catcher.SetHasBall(true);
-
-        // Stop all movement
         velocity = Vector3.zero;
+        thrower = null;
+        targetOpponent = null;
+        hasHitTarget = false;
 
-        Debug.Log($"{catcher.name} caught the ball!");
+        if (debugMode)
+        {
+            Debug.Log($"{catcher.name} caught the ball!");
+        }
     }
 
     public void OnCatchFailed()
     {
-        // Ball catch was attempted but failed
-        // Ball continues with modified trajectory (bounce effect)
-
-        // Reduce speed slightly
         velocity *= 0.8f;
-
-        // Add some random deviation
         velocity.x += Random.Range(-2f, 2f);
         velocity.y += Random.Range(1f, 3f);
 
-        Debug.Log("Ball catch failed - ball deflected!");
+        if (debugMode)
+        {
+            Debug.Log("Ball catch failed - ball deflected!");
+        }
     }
 
+    // FIXED: ThrowBall with simple targeting system
     public void ThrowBall(Vector3 direction, float power)
     {
-        if (currentState != BallState.Held) return;
+        if (currentState != BallState.Held || holder == null) return;
 
-        // Set throw properties
-        throwDirection = direction.normalized;
-        throwPower = power;
+        thrower = holder;
+        hasHitTarget = false;
 
-        // Calculate throw velocity
-        velocity = throwDirection * baseSpeed * power;
+        // Detect if this is a jump throw
+        CharacterController character = holder;
+        isJumpThrow = !character.IsGrounded();
 
-        // Add slight upward arc for better visual
-        velocity.y += 3f * power;
-
-        // Release from holder
-        if (holder != null)
+        if (collisionSystem != null)
         {
-            holder.SetHasBall(false);
-            holder = null;
+            collisionSystem.OnBallThrown(thrower);
         }
 
+        if (debugMode)
+        {
+            Debug.Log($"=== NEO GEO THROW START ===");
+            Debug.Log($"Thrower: {thrower.name}");
+            Debug.Log($"Jump Throw: {isJumpThrow}");
+        }
+
+        // FIXED: Find opponent using simple system
+        targetOpponent = FindOpponentForThrower(thrower);
+
+        Vector3 throwDirection;
+        float throwSpeed;
+
+        if (targetOpponent != null)
+        {
+            Vector3 throwPos = ballTransform.position;
+            Vector3 targetPos = targetOpponent.position;
+
+            if (isJumpThrow)
+            {
+                // FIXED: Jump throws create sharp diagonal trajectory
+                // Calculate direct diagonal line to target
+                Vector3 directDirection = (targetPos - throwPos).normalized;
+                throwDirection = directDirection; // Direct diagonal - no arc!
+                throwSpeed = jumpThrowSpeed;
+                currentThrowType = ThrowType.JumpThrow;
+
+                if (debugMode)
+                {
+                    Debug.Log($"JUMP THROW: Direct diagonal to target, no arc");
+                }
+            }
+            else
+            {
+                // FIXED: Normal throws go perfectly horizontal (no Y component)
+                Vector3 horizontalDirection = new Vector3(
+                    targetPos.x - throwPos.x,
+                    0f, // NO upward component for normal throws
+                    targetPos.z - throwPos.z
+                );
+
+                throwDirection = horizontalDirection.normalized;
+                throwSpeed = normalThrowSpeed;
+                currentThrowType = ThrowType.Normal;
+
+                if (debugMode)
+                {
+                    Debug.Log($"NORMAL THROW: Perfectly horizontal, no arc");
+                }
+            }
+
+            // DON'T normalize again - we want the exact direction calculated above
+
+            if (debugMode)
+            {
+                Debug.Log($"Target: {targetOpponent.name} at {targetPos}");
+                Debug.Log($"Throw Direction: {throwDirection}");
+                Debug.Log($"Throw Type: {currentThrowType}");
+            }
+        }
+        else
+        {
+            // Fallback to forward direction
+            Debug.LogWarning($"No target found for thrower: {thrower.name}! Using forward direction.");
+
+            if (isJumpThrow)
+            {
+                // Jump throw fallback: 45-degree diagonal
+                throwDirection = new Vector3(1f, -0.5f, 0f).normalized; // Diagonal down-forward
+                throwSpeed = jumpThrowSpeed;
+            }
+            else
+            {
+                // Normal throw fallback: perfectly horizontal
+                throwDirection = Vector3.right; // Perfectly horizontal
+                throwSpeed = normalThrowSpeed;
+            }
+            currentThrowType = isJumpThrow ? ThrowType.JumpThrow : ThrowType.Normal;
+        }
+
+        // Set velocity
+        velocity = throwDirection * throwSpeed * power;
+
+        // Release from holder
+        holder.SetHasBall(false);
+        holder = null;
         SetBallState(BallState.Thrown);
 
-        Debug.Log($"Ball thrown with power {power} in direction {direction}!");
+        if (debugMode)
+        {
+            Debug.Log($"NEO GEO: Ball thrown with velocity {velocity} (speed: {velocity.magnitude:F1})");
+            Debug.Log($"=== NEO GEO THROW END ===");
+        }
     }
 
     public void ResetBall()
     {
-        // Reset to center spawn position
-        Vector3 spawnPosition = new Vector3(0, 2f, 0); // Slightly elevated
+        Vector3 spawnPosition = new Vector3(0, 2f, 0);
         ballTransform.position = spawnPosition;
         velocity = Vector3.zero;
+        hasHitTarget = false;
 
         if (holder != null)
         {
@@ -332,27 +697,43 @@ public class BallController : MonoBehaviour
             holder = null;
         }
 
+        thrower = null;
+        targetOpponent = null;
+        isJumpThrow = false;
+
+        if (collisionSystem != null)
+        {
+            collisionSystem.OnBallReset();
+        }
+
         SetBallState(BallState.Free);
 
-        Debug.Log("Ball reset to center!");
+        if (debugMode)
+        {
+            Debug.Log("Ball reset to center!");
+        }
     }
 
-    void SetBallState(BallState newState)
+    public void SetBallState(BallState newState)
     {
         currentState = newState;
-
-        // Handle state changes
         switch (newState)
         {
             case BallState.Free:
-                // Ball is available for pickup
+                thrower = null;
+                targetOpponent = null;
+                hasHitTarget = false;
+                isJumpThrow = false;
+                if (collisionSystem != null)
+                {
+                    collisionSystem.OnBallReset();
+                }
                 break;
             case BallState.Held:
-                // Ball is being carried
                 velocity = Vector3.zero;
                 break;
             case BallState.Thrown:
-                // Ball is in flight
+                // Physics handled in ThrowBall()
                 break;
         }
     }
@@ -362,6 +743,12 @@ public class BallController : MonoBehaviour
     public bool IsHeld() => currentState == BallState.Held;
     public bool IsFree() => currentState == BallState.Free;
     public CharacterController GetHolder() => holder;
+    public Transform GetCurrentTarget() => targetOpponent;
+    public CharacterController GetThrower() => thrower;
+    public Vector3 GetVelocity() => velocity;
+    public void SetVelocity(Vector3 newVelocity) => velocity = newVelocity;
+    public ThrowType GetThrowType() => currentThrowType;
+    public void SetBallStatePublic(BallState newState) => SetBallState(newState);
 
     // Debug visualization
     void OnDrawGizmosSelected()
@@ -374,11 +761,162 @@ public class BallController : MonoBehaviour
         Gizmos.color = isGrounded ? Color.green : Color.red;
         Gizmos.DrawRay(transform.position, Vector3.down * groundCheckDistance);
 
-        // Draw velocity vector when thrown
-        if (currentState == BallState.Thrown)
+        // Draw trajectory line
+        if (currentState == BallState.Thrown && useNeoGeoPhysics)
         {
+            Gizmos.color = isJumpThrow ? Color.green : Color.cyan;
+            Vector3 trajectoryEnd = transform.position + velocity.normalized * 8f;
+            Gizmos.DrawLine(transform.position, trajectoryEnd);
+
+            if (isJumpThrow)
+            {
+                Gizmos.color = Color.green;
+                Gizmos.DrawWireCube(transform.position + Vector3.up, Vector3.one * 0.5f);
+            }
+        }
+
+        // Draw collision distance
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(transform.position, collisionDistance);
+
+        // Draw target opponent
+        if (targetOpponent != null)
+        {
+            Gizmos.color = Color.magenta;
+            Gizmos.DrawLine(transform.position, targetOpponent.position);
+            Gizmos.DrawWireSphere(targetOpponent.position, 0.5f);
+        }
+
+        // CUSTOMIZABLE: Collision and ducking visualization
+        if (debugMode && showCollisionGizmos)
+        {
+            CharacterController[] allPlayers = FindObjectsOfType<CharacterController>();
+
+            foreach (CharacterController player in allPlayers)
+            {
+                if (player == null || player == thrower) continue;
+
+                Vector3 playerCenter = player.transform.position + Vector3.up * playerCollisionHeight;
+                float distance = Vector3.Distance(transform.position, playerCenter);
+
+                if (player.IsDucking())
+                {
+                    // Show ducking player collision area
+                    Gizmos.color = Color.blue;
+                    Gizmos.DrawWireSphere(playerCenter, collisionDistance);
+
+                    // Show ducking height threshold
+                    if (showDuckingThreshold)
+                    {
+                        Gizmos.color = Color.yellow;
+                        Vector3 thresholdStart = player.transform.position + Vector3.up * duckingHeightThreshold + Vector3.left * 1.5f;
+                        Vector3 thresholdEnd = player.transform.position + Vector3.up * duckingHeightThreshold + Vector3.right * 1.5f;
+                        Gizmos.DrawLine(thresholdStart, thresholdEnd);
+
+                        // Draw threshold plane
+                        Vector3 thresholdCenter = player.transform.position + Vector3.up * duckingHeightThreshold;
+                        Gizmos.DrawWireCube(thresholdCenter, new Vector3(3f, 0.1f, 1f));
+                    }
+
+                    // Show collision status line
+                    if (showCollisionLines)
+                    {
+                        bool ballPassesThrough = transform.position.y > duckingHeightThreshold;
+                        Gizmos.color = ballPassesThrough ? Color.green : Color.red;
+                        Gizmos.DrawLine(transform.position, playerCenter);
+                    }
+
+                    // Show ball height indicator
+                    if (showBallHeight)
+                    {
+                        Gizmos.color = Color.cyan;
+                        Vector3 ballHeightLine = new Vector3(player.transform.position.x, transform.position.y, player.transform.position.z);
+                        Gizmos.DrawLine(player.transform.position, ballHeightLine);
+                        Gizmos.DrawWireCube(ballHeightLine, Vector3.one * 0.15f);
+
+                        // Show ball height text position
+                        Vector3 heightTextPos = ballHeightLine + Vector3.right * 0.5f;
+                        Gizmos.DrawWireCube(heightTextPos, Vector3.one * 0.1f);
+                    }
+                }
+                else
+                {
+                    // Show standing player collision area
+                    Gizmos.color = Color.green;
+                    Gizmos.DrawWireSphere(playerCenter, collisionDistance);
+
+                    // Show collision status line
+                    if (showCollisionLines)
+                    {
+                        Gizmos.color = distance <= collisionDistance ? Color.red : Color.white;
+                        Gizmos.DrawLine(transform.position, playerCenter);
+                    }
+                }
+
+                // Show player's actual collider bounds for reference
+                if (showPlayerColliders)
+                {
+                    Collider playerCollider = player.GetComponent<Collider>();
+                    if (playerCollider != null)
+                    {
+                        Gizmos.color = new Color(1f, 1f, 1f, 0.3f); // Semi-transparent white
+                        Gizmos.DrawWireCube(playerCollider.bounds.center, playerCollider.bounds.size);
+                    }
+                }
+
+                // Show predictive collision if enabled
+                if (enablePredictiveCollision && currentState == BallState.Thrown && velocity.magnitude > 15f)
+                {
+                    Gizmos.color = Color.magenta;
+                    Vector3 predictedPos = transform.position + velocity.normalized * predictionDistance;
+                    Gizmos.DrawLine(transform.position, predictedPos);
+                    Gizmos.DrawWireSphere(predictedPos, collisionDistance * 0.5f);
+                }
+            }
+
+            // Show collision distance around ball
+            Gizmos.color = new Color(1f, 0f, 0f, 0.2f); // Semi-transparent red
+            Gizmos.DrawWireSphere(transform.position, collisionDistance);
+        }
+        {
+            Vector3 holdPos = CalculateHoldPosition();
             Gizmos.color = Color.cyan;
-            Gizmos.DrawRay(transform.position, velocity.normalized * 2f);
+            Gizmos.DrawWireSphere(holdPos, 0.3f);
+            Gizmos.DrawLine(holder.transform.position, holdPos);
+
+            // Draw coordinate axes for hold position
+            Gizmos.color = Color.red;
+            Gizmos.DrawRay(holdPos, Vector3.right * 0.5f); // X axis
+            Gizmos.color = Color.green;
+            Gizmos.DrawRay(holdPos, Vector3.up * 0.5f);    // Y axis
+            Gizmos.color = Color.blue;
+            Gizmos.DrawRay(holdPos, Vector3.forward * 0.5f); // Z axis
+        }
+
+        // NEW: Draw hold position preview even when not held (for setup)
+        if (currentState != BallState.Held && debugMode)
+        {
+            // Find any character controller to preview hold position
+            CharacterController previewHolder = FindObjectOfType<CharacterController>();
+            if (previewHolder != null)
+            {
+                Vector3 previewPos = previewHolder.transform.position;
+
+                if (useRelativeToPlayer)
+                {
+                    previewPos += previewHolder.transform.right * holdOffset.x;
+                    previewPos += Vector3.up * holdOffset.y;
+                    previewPos += previewHolder.transform.forward * holdOffset.z;
+                }
+                else
+                {
+                    previewPos += holdOffset;
+                }
+
+                Gizmos.color = Color.white;
+                Gizmos.DrawWireSphere(previewPos, 0.2f);
+                Gizmos.DrawLine(previewHolder.transform.position, previewPos);
+            }
         }
     }
 }
