@@ -208,10 +208,10 @@ public class BallController : MonoBehaviour
         // Move the ball (no gravity applied here)
         ballTransform.Translate(velocity * Time.deltaTime, Space.World);
 
-        // Check for collision with target
-        CheckForCollision();
+        // REMOVED: CheckForCollision() - CollisionDamageSystem handles this now
+        // REMOVED: CheckWallCollisions() - CollisionDamageSystem handles this now
 
-        // Check for ground collision
+        // Check for ground collision only
         CheckGrounded();
         if (isGrounded && velocity.y <= 0)
         {
@@ -346,16 +346,17 @@ public class BallController : MonoBehaviour
         }
     }
 
+    // CALLED BY CollisionDamageSystem when collision is detected
     void OnPlayerHit(CharacterController hitPlayer)
     {
         hasHitTarget = true;
 
         if (debugMode)
         {
-            Debug.Log($"NEO GEO HIT: Ball hit {hitPlayer.name}!");
+            Debug.Log($"BallController: Player hit confirmed by CollisionDamageSystem - {hitPlayer.name}");
         }
 
-        // Check for catch attempt
+        // Check for catch attempt (this logic can stay here as it's ball-specific)
         CatchSystem catchSystem = hitPlayer.GetComponent<CatchSystem>();
         bool caughtSuccessfully = false;
 
@@ -371,45 +372,12 @@ public class BallController : MonoBehaviour
             }
         }
 
-        // If not caught, apply damage and bounce
-        if (collisionSystem != null)
-        {
-            hasHitTarget = true; // Prevent multiple hits
-        }
-
-        // FIXED: Immediately turn gravity back on and create bounce
-        CreateNeoGeoBounce(hitPlayer);
-
+        // If not caught, CollisionDamageSystem will handle damage and bounce
         // FIXED: Ball becomes FREE immediately (gravity resumes)
         SetBallState(BallState.Free);
     }
 
-    void CreateNeoGeoBounce(CharacterController hitPlayer)
-    {
-        // Realistic bounce away from player
-        Vector3 bounceDirection = (ballTransform.position - hitPlayer.transform.position).normalized;
-
-        if (currentThrowType == ThrowType.JumpThrow)
-        {
-            bounceDirection.y = 0.3f;
-        }
-        else
-        {
-            bounceDirection.y = 0.2f;
-        }
-
-        bounceDirection = bounceDirection.normalized;
-
-        float bounceSpeed = currentThrowType == ThrowType.JumpThrow ? jumpThrowSpeed * 0.4f : normalThrowSpeed * 0.3f;
-        velocity = bounceDirection * bounceSpeed;
-
-        // REMOVED: Don't use Invoke - ball is already FREE state, gravity is already on
-
-        if (debugMode)
-        {
-            Debug.Log($"Neo Geo bounce: {currentThrowType}, Direction {bounceDirection}, Speed: {velocity.magnitude:F1}");
-        }
-    }
+    // REMOVED: CreateNeoGeoBounce() - CollisionDamageSystem handles all post-impact physics
 
     void MakeBallFree()
     {
@@ -775,9 +743,12 @@ public class BallController : MonoBehaviour
             }
         }
 
-        // Draw collision distance
-        Gizmos.color = Color.red;
-        Gizmos.DrawWireSphere(transform.position, collisionDistance);
+        // Draw collision distance (for reference - CollisionDamageSystem does actual collision)
+        if (debugMode)
+        {
+            Gizmos.color = new Color(0.5f, 0.5f, 0.5f, 0.3f); // Semi-transparent gray
+            Gizmos.DrawWireSphere(transform.position, collisionDistance);
+        }
 
         // Draw target opponent
         if (targetOpponent != null)
@@ -785,98 +756,6 @@ public class BallController : MonoBehaviour
             Gizmos.color = Color.magenta;
             Gizmos.DrawLine(transform.position, targetOpponent.position);
             Gizmos.DrawWireSphere(targetOpponent.position, 0.5f);
-        }
-
-        // CUSTOMIZABLE: Collision and ducking visualization
-        if (debugMode && showCollisionGizmos)
-        {
-            CharacterController[] allPlayers = FindObjectsOfType<CharacterController>();
-
-            foreach (CharacterController player in allPlayers)
-            {
-                if (player == null || player == thrower) continue;
-
-                Vector3 playerCenter = player.transform.position + Vector3.up * playerCollisionHeight;
-                float distance = Vector3.Distance(transform.position, playerCenter);
-
-                if (player.IsDucking())
-                {
-                    // Show ducking player collision area
-                    Gizmos.color = Color.blue;
-                    Gizmos.DrawWireSphere(playerCenter, collisionDistance);
-
-                    // Show ducking height threshold
-                    if (showDuckingThreshold)
-                    {
-                        Gizmos.color = Color.yellow;
-                        Vector3 thresholdStart = player.transform.position + Vector3.up * duckingHeightThreshold + Vector3.left * 1.5f;
-                        Vector3 thresholdEnd = player.transform.position + Vector3.up * duckingHeightThreshold + Vector3.right * 1.5f;
-                        Gizmos.DrawLine(thresholdStart, thresholdEnd);
-
-                        // Draw threshold plane
-                        Vector3 thresholdCenter = player.transform.position + Vector3.up * duckingHeightThreshold;
-                        Gizmos.DrawWireCube(thresholdCenter, new Vector3(3f, 0.1f, 1f));
-                    }
-
-                    // Show collision status line
-                    if (showCollisionLines)
-                    {
-                        bool ballPassesThrough = transform.position.y > duckingHeightThreshold;
-                        Gizmos.color = ballPassesThrough ? Color.green : Color.red;
-                        Gizmos.DrawLine(transform.position, playerCenter);
-                    }
-
-                    // Show ball height indicator
-                    if (showBallHeight)
-                    {
-                        Gizmos.color = Color.cyan;
-                        Vector3 ballHeightLine = new Vector3(player.transform.position.x, transform.position.y, player.transform.position.z);
-                        Gizmos.DrawLine(player.transform.position, ballHeightLine);
-                        Gizmos.DrawWireCube(ballHeightLine, Vector3.one * 0.15f);
-
-                        // Show ball height text position
-                        Vector3 heightTextPos = ballHeightLine + Vector3.right * 0.5f;
-                        Gizmos.DrawWireCube(heightTextPos, Vector3.one * 0.1f);
-                    }
-                }
-                else
-                {
-                    // Show standing player collision area
-                    Gizmos.color = Color.green;
-                    Gizmos.DrawWireSphere(playerCenter, collisionDistance);
-
-                    // Show collision status line
-                    if (showCollisionLines)
-                    {
-                        Gizmos.color = distance <= collisionDistance ? Color.red : Color.white;
-                        Gizmos.DrawLine(transform.position, playerCenter);
-                    }
-                }
-
-                // Show player's actual collider bounds for reference
-                if (showPlayerColliders)
-                {
-                    Collider playerCollider = player.GetComponent<Collider>();
-                    if (playerCollider != null)
-                    {
-                        Gizmos.color = new Color(1f, 1f, 1f, 0.3f); // Semi-transparent white
-                        Gizmos.DrawWireCube(playerCollider.bounds.center, playerCollider.bounds.size);
-                    }
-                }
-
-                // Show predictive collision if enabled
-                if (enablePredictiveCollision && currentState == BallState.Thrown && velocity.magnitude > 15f)
-                {
-                    Gizmos.color = Color.magenta;
-                    Vector3 predictedPos = transform.position + velocity.normalized * predictionDistance;
-                    Gizmos.DrawLine(transform.position, predictedPos);
-                    Gizmos.DrawWireSphere(predictedPos, collisionDistance * 0.5f);
-                }
-            }
-
-            // Show collision distance around ball
-            Gizmos.color = new Color(1f, 0f, 0f, 0.2f); // Semi-transparent red
-            Gizmos.DrawWireSphere(transform.position, collisionDistance);
         }
         {
             Vector3 holdPos = CalculateHoldPosition();
