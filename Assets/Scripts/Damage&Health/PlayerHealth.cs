@@ -4,7 +4,7 @@ using System.Collections;
 
 /// <summary>
 /// Manages player health, damage, and death states
-/// Network-ready for PUN2 integration
+/// Network-ready for PUN2 integration with Ultimate support
 /// </summary>
 public class PlayerHealth : MonoBehaviour
 {
@@ -20,6 +20,7 @@ public class PlayerHealth : MonoBehaviour
     [SerializeField] private Image healthBarFill;
     [SerializeField] private Color healthyColor = Color.green;
     [SerializeField] private Color lowHealthColor = Color.red;
+    [SerializeField] private Color invulnerableColor = Color.yellow;
     [SerializeField] private float lowHealthThreshold = 0.3f;
 
     [Header("Visual Effects")]
@@ -33,6 +34,7 @@ public class PlayerHealth : MonoBehaviour
     [SerializeField] private AudioClip hurtSound;
     [SerializeField] private AudioClip deathSound;
     [SerializeField] private AudioClip healSound;
+    [SerializeField] private AudioClip invulnerabilitySound;
 
     [Header("Debug")]
     [SerializeField] private bool debugMode = true;
@@ -40,14 +42,20 @@ public class PlayerHealth : MonoBehaviour
     // State management
     private bool isDead = false;
     private bool isInvulnerable = false;
+    private bool hasTemporaryInvulnerability = false;
     private float lastDamageTime = 0f;
     private CharacterController characterController;
+    private PlayerCharacter playerCharacter;
     private AudioSource audioSource;
 
     // Damage tracking
     private int totalDamageTaken = 0;
     private int totalDamageDealt = 0;
     private CharacterController lastAttacker;
+
+    // Visual components
+    private Renderer playerRenderer;
+    private Color originalRendererColor;
 
     // Events
     public System.Action<int, int> OnHealthChanged; // currentHealth, maxHealth
@@ -58,13 +66,21 @@ public class PlayerHealth : MonoBehaviour
     void Awake()
     {
         characterController = GetComponent<CharacterController>();
+        playerCharacter = GetComponent<PlayerCharacter>();
         audioSource = GetComponent<AudioSource>();
+        playerRenderer = GetComponentInChildren<Renderer>();
 
         if (audioSource == null)
         {
             audioSource = gameObject.AddComponent<AudioSource>();
             audioSource.playOnAwake = false;
             audioSource.volume = 0.7f;
+        }
+
+        // Store original renderer color
+        if (playerRenderer != null)
+        {
+            originalRendererColor = playerRenderer.material.color;
         }
 
         // Initialize health
@@ -103,15 +119,23 @@ public class PlayerHealth : MonoBehaviour
             }
         }
 
-        // Debug key to test damage
-        if (debugMode && Input.GetKeyDown(KeyCode.Minus))
+        // Debug controls
+        if (debugMode)
         {
-            TakeDamage(10, null);
-        }
+            if (Input.GetKeyDown(KeyCode.Minus))
+            {
+                TakeDamage(10, null);
+            }
 
-        if (debugMode && Input.GetKeyDown(KeyCode.Plus))
-        {
-            Heal(10);
+            if (Input.GetKeyDown(KeyCode.Plus))
+            {
+                Heal(10);
+            }
+
+            if (Input.GetKeyDown(KeyCode.I))
+            {
+                SetTemporaryInvulnerability(3f);
+            }
         }
     }
 
@@ -156,7 +180,6 @@ public class PlayerHealth : MonoBehaviour
         // Visual feedback for invulnerability (flashing)
         float flashInterval = 0.1f;
         float elapsed = 0f;
-        Renderer playerRenderer = GetComponentInChildren<Renderer>();
 
         while (elapsed < invulnerabilityDuration)
         {
@@ -183,6 +206,55 @@ public class PlayerHealth : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Set temporary invulnerability for ultimate abilities
+    /// </summary>
+    public void SetTemporaryInvulnerability(float duration)
+    {
+        if (debugMode)
+        {
+            Debug.Log($"{gameObject.name} gained temporary invulnerability for {duration} seconds!");
+        }
+
+        PlaySound(invulnerabilitySound);
+        StartCoroutine(TemporaryInvulnerabilityCoroutine(duration));
+    }
+
+    IEnumerator TemporaryInvulnerabilityCoroutine(float duration)
+    {
+        bool wasInvulnerable = isInvulnerable;
+        isInvulnerable = true;
+        hasTemporaryInvulnerability = true;
+
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            // Pulsing effect to show invulnerability
+            if (playerRenderer != null)
+            {
+                float pulse = Mathf.Sin(elapsed * 10f) * 0.3f + 0.7f;
+                playerRenderer.material.color = Color.Lerp(originalRendererColor, invulnerableColor, pulse);
+            }
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        // Restore original state and color
+        isInvulnerable = wasInvulnerable;
+        hasTemporaryInvulnerability = false;
+
+        if (playerRenderer != null)
+        {
+            playerRenderer.material.color = originalRendererColor;
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"{gameObject.name} temporary invulnerability ended");
+        }
+    }
+
     public void TakeDamage(int damage, CharacterController attacker)
     {
         if (isDead || isInvulnerable) return;
@@ -193,6 +265,12 @@ public class PlayerHealth : MonoBehaviour
         totalDamageTaken += actualDamage;
         lastDamageTime = Time.time;
         lastAttacker = attacker;
+
+        // Add ultimate charge for taking damage
+        if (playerCharacter != null)
+        {
+            playerCharacter.OnDamageTaken(actualDamage);
+        }
 
         // Play hurt sound
         PlaySound(hurtSound);
@@ -263,6 +341,18 @@ public class PlayerHealth : MonoBehaviour
         isDead = true;
         currentHealth = 0;
 
+        // Stop any temporary invulnerability
+        if (hasTemporaryInvulnerability)
+        {
+            StopCoroutine(nameof(TemporaryInvulnerabilityCoroutine));
+            hasTemporaryInvulnerability = false;
+            isInvulnerable = false;
+            if (playerRenderer != null)
+            {
+                playerRenderer.material.color = originalRendererColor;
+            }
+        }
+
         // Play death sound
         PlaySound(deathSound);
 
@@ -320,6 +410,12 @@ public class PlayerHealth : MonoBehaviour
         isDead = false;
         totalDamageTaken = 0; // Reset damage taken for this life
 
+        // Reset renderer color
+        if (playerRenderer != null)
+        {
+            playerRenderer.material.color = originalRendererColor;
+        }
+
         // Re-enable player
         if (characterController != null)
         {
@@ -327,7 +423,6 @@ public class PlayerHealth : MonoBehaviour
         }
 
         // Reset position to spawn point
-        // TODO: Implement proper spawn point system
         Vector3 spawnPosition = GetSpawnPosition();
         transform.position = spawnPosition;
 
@@ -392,8 +487,16 @@ public class PlayerHealth : MonoBehaviour
             // Update health bar color
             if (healthBarFill != null)
             {
-                Color targetColor = healthPercentage <= lowHealthThreshold ? lowHealthColor : healthyColor;
-                healthBarFill.color = Color.Lerp(lowHealthColor, healthyColor, healthPercentage);
+                Color targetColor;
+                if (hasTemporaryInvulnerability)
+                {
+                    targetColor = invulnerableColor;
+                }
+                else
+                {
+                    targetColor = healthPercentage <= lowHealthThreshold ? lowHealthColor : healthyColor;
+                }
+                healthBarFill.color = Color.Lerp(lowHealthColor, targetColor, healthPercentage);
             }
         }
 
@@ -411,12 +514,35 @@ public class PlayerHealth : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Called when player successfully catches a ball - for ultimate charge
+    /// </summary>
+    public void OnSuccessfulCatch()
+    {
+        if (playerCharacter != null)
+        {
+            playerCharacter.OnSuccessfulCatch();
+        }
+    }
+
+    /// <summary>
+    /// Called when player successfully dodges - for ultimate charge
+    /// </summary>
+    public void OnSuccessfulDodge()
+    {
+        if (playerCharacter != null)
+        {
+            playerCharacter.OnSuccessfulDodge();
+        }
+    }
+
     // Public getters
     public int GetCurrentHealth() => currentHealth;
     public int GetMaxHealth() => maxHealth;
     public float GetHealthPercentage() => (float)currentHealth / maxHealth;
     public bool IsDead() => isDead;
     public bool IsInvulnerable() => isInvulnerable;
+    public bool HasTemporaryInvulnerability() => hasTemporaryInvulnerability;
     public int GetTotalDamageTaken() => totalDamageTaken;
     public int GetTotalDamageDealt() => totalDamageDealt;
     public CharacterController GetLastAttacker() => lastAttacker;
@@ -438,14 +564,34 @@ public class PlayerHealth : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Force remove all invulnerability effects (for admin/cheat prevention)
+    /// </summary>
+    public void RemoveAllInvulnerability()
+    {
+        StopCoroutine(nameof(TemporaryInvulnerabilityCoroutine));
+        isInvulnerable = false;
+        hasTemporaryInvulnerability = false;
+
+        if (playerRenderer != null)
+        {
+            playerRenderer.material.color = originalRendererColor;
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"{gameObject.name} all invulnerability removed");
+        }
+    }
+
     // Debug methods
     void OnGUI()
     {
         if (!debugMode) return;
 
-        float yOffset = gameObject.name.Contains("2") ? 100f : 50f;
+        float yOffset = gameObject.name.Contains("2") ? 150f : 50f;
 
-        GUILayout.BeginArea(new Rect(10, yOffset, 200, 100));
+        GUILayout.BeginArea(new Rect(10, yOffset, 250, 120));
         GUILayout.BeginVertical("box");
 
         GUILayout.Label($"{gameObject.name} Health");
@@ -454,8 +600,12 @@ public class PlayerHealth : MonoBehaviour
 
         if (isInvulnerable)
         {
-            GUILayout.Label("INVULNERABLE", GUI.skin.box);
+            string invulnType = hasTemporaryInvulnerability ? "TEMP INVULN" : "INVULNERABLE";
+            GUILayout.Label(invulnType, GUI.skin.box);
         }
+
+        GUILayout.Label($"Damage Taken: {totalDamageTaken}");
+        GUILayout.Label($"Damage Dealt: {totalDamageDealt}");
 
         GUILayout.EndVertical();
         GUILayout.EndArea();

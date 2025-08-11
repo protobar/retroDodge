@@ -16,6 +16,8 @@ public class PlayerInputHandler : MonoBehaviour
     [SerializeField] private KeyCode customThrowKey = KeyCode.K;
     [SerializeField] private KeyCode customCatchKey = KeyCode.L;
     [SerializeField] private KeyCode customPickupKey = KeyCode.J;
+    [SerializeField] private KeyCode customDashKey = KeyCode.LeftShift;
+    [SerializeField] private KeyCode customUltimateKey = KeyCode.U;
 
     [Header("Input Buffer Settings")]
     [SerializeField] private float inputBufferTime = 0.15f;
@@ -35,12 +37,16 @@ public class PlayerInputHandler : MonoBehaviour
     private bool throwHeld = false;
     private bool catchPressed = false;
     private bool pickupPressed = false;
+    private bool dashPressed = false;
+    private bool ultimatePressed = false;
 
     // Input buffering for responsive controls
     private float lastJumpInput = -1f;
     private float lastThrowInput = -1f;
     private float lastCatchInput = -1f;
     private float lastPickupInput = -1f;
+    private float lastDashInput = -1f;
+    private float lastUltimateInput = -1f;
 
     // FIXED: Better mobile input state management
     private float mobileHorizontal = 0f;
@@ -51,9 +57,11 @@ public class PlayerInputHandler : MonoBehaviour
     private bool mobileJumpPressedThisFrame = false;
     private bool mobileCatchPressedThisFrame = false;
     private bool mobilePickupPressedThisFrame = false;
+    private bool mobileDashPressedThisFrame = false;
+    private bool mobileUltimatePressedThisFrame = false;
 
     // Key mappings based on player type
-    private KeyCode leftKey, rightKey, jumpKey, duckKey, throwKey, catchKey, pickupKey;
+    private KeyCode leftKey, rightKey, jumpKey, duckKey, throwKey, catchKey, pickupKey, dashKey, ultimateKey;
 
     public enum PlayerInputType
     {
@@ -111,6 +119,8 @@ public class PlayerInputHandler : MonoBehaviour
             throwKey = customThrowKey;
             catchKey = customCatchKey;
             pickupKey = customPickupKey;
+            dashKey = customDashKey;
+            ultimateKey = customUltimateKey;
         }
         else
         {
@@ -125,6 +135,8 @@ public class PlayerInputHandler : MonoBehaviour
                     throwKey = KeyCode.K;
                     catchKey = KeyCode.L;
                     pickupKey = KeyCode.J;
+                    dashKey = KeyCode.LeftShift;
+                    ultimateKey = KeyCode.Q;
                     break;
 
                 case PlayerInputType.Player2:
@@ -135,6 +147,8 @@ public class PlayerInputHandler : MonoBehaviour
                     throwKey = KeyCode.Keypad1;
                     catchKey = KeyCode.Keypad2;
                     pickupKey = KeyCode.Keypad0;
+                    dashKey = KeyCode.RightShift;
+                    ultimateKey = KeyCode.Keypad3;
                     break;
             }
         }
@@ -143,7 +157,8 @@ public class PlayerInputHandler : MonoBehaviour
         {
             Debug.Log($"{gameObject.name} - Player {playerType} keys: " +
                      $"Move: {leftKey}/{rightKey}, Jump: {jumpKey}, Duck: {duckKey}, " +
-                     $"Throw: {throwKey}, Catch: {catchKey}, Pickup: {pickupKey}");
+                     $"Throw: {throwKey}, Catch: {catchKey}, Pickup: {pickupKey}, " +
+                     $"Dash: {dashKey}, Ultimate: {ultimateKey}");
         }
     }
 
@@ -183,6 +198,8 @@ public class PlayerInputHandler : MonoBehaviour
         throwPressed = false;
         catchPressed = false;
         pickupPressed = false;
+        dashPressed = false;
+        ultimatePressed = false;
     }
 
     void ResetMobileFrameInputs()
@@ -192,6 +209,8 @@ public class PlayerInputHandler : MonoBehaviour
         mobileThrowPressedThisFrame = false;
         mobileCatchPressedThisFrame = false;
         mobilePickupPressedThisFrame = false;
+        mobileDashPressedThisFrame = false;
+        mobileUltimatePressedThisFrame = false;
     }
 
     void HandleKeyboardInput()
@@ -234,6 +253,20 @@ public class PlayerInputHandler : MonoBehaviour
             pickupPressed = true;
             lastPickupInput = Time.time;
         }
+
+        // FIXED: Add dash input
+        if (Input.GetKeyDown(dashKey))
+        {
+            dashPressed = true;
+            lastDashInput = Time.time;
+        }
+
+        // FIXED: Add ultimate input
+        if (Input.GetKeyDown(ultimateKey))
+        {
+            ultimatePressed = true;
+            lastUltimateInput = Time.time;
+        }
     }
 
     void HandleMobileInput()
@@ -274,6 +307,16 @@ public class PlayerInputHandler : MonoBehaviour
         if (mobilePickupPressedThisFrame)
         {
             pickupPressed = true;
+        }
+
+        if (mobileDashPressedThisFrame)
+        {
+            dashPressed = true;
+        }
+
+        if (mobileUltimatePressedThisFrame)
+        {
+            ultimatePressed = true;
         }
 
         // Handle duck (mobile overrides keyboard)
@@ -395,6 +438,30 @@ public class PlayerInputHandler : MonoBehaviour
 
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Pickup");
+    }
+
+    /// <summary>
+    /// FIXED: Call this from mobile dash button OnClick
+    /// </summary>
+    public void OnMobileDash()
+    {
+        mobileDashPressedThisFrame = true;
+        lastDashInput = Time.time;
+
+        if (showDebugInfo)
+            Debug.Log($"{gameObject.name} - Mobile Dash");
+    }
+
+    /// <summary>
+    /// FIXED: Call this from mobile ultimate button OnClick
+    /// </summary>
+    public void OnMobileUltimate()
+    {
+        mobileUltimatePressedThisFrame = true;
+        lastUltimateInput = Time.time;
+
+        if (showDebugInfo)
+            Debug.Log($"{gameObject.name} - Mobile Ultimate");
     }
 
     /// <summary>
@@ -526,6 +593,42 @@ public class PlayerInputHandler : MonoBehaviour
         return false;
     }
 
+    /// <summary>
+    /// FIXED: Check if dash was pressed this frame
+    /// </summary>
+    public bool GetDashPressed() => dashPressed;
+
+    /// <summary>
+    /// FIXED: Check if dash was pressed with input buffering
+    /// </summary>
+    public bool GetDashBuffered()
+    {
+        if (Time.time - lastDashInput <= inputBufferTime)
+        {
+            lastDashInput = -1f; // Consume the input
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// FIXED: Check if ultimate was pressed this frame
+    /// </summary>
+    public bool GetUltimatePressed() => ultimatePressed;
+
+    /// <summary>
+    /// FIXED: Check if ultimate was pressed with input buffering
+    /// </summary>
+    public bool GetUltimateBuffered()
+    {
+        if (Time.time - lastUltimateInput <= inputBufferTime)
+        {
+            lastUltimateInput = -1f; // Consume the input
+            return true;
+        }
+        return false;
+    }
+
     // ===========================================
     // UTILITY METHODS
     // ===========================================
@@ -542,7 +645,8 @@ public class PlayerInputHandler : MonoBehaviour
     {
         return mobileLeftPressed || mobileRightPressed || mobileDuckPressed ||
                mobileJumpPressedThisFrame || mobileThrowPressedThisFrame ||
-               mobileCatchPressedThisFrame || mobilePickupPressedThisFrame;
+               mobileCatchPressedThisFrame || mobilePickupPressedThisFrame ||
+               mobileDashPressedThisFrame || mobileUltimatePressedThisFrame;
     }
 
     /// <summary>
@@ -556,11 +660,13 @@ public class PlayerInputHandler : MonoBehaviour
 
     void DisplayDebugInfo()
     {
-        if (horizontalInput != 0 || jumpPressed || duckHeld || throwPressed || catchPressed || pickupPressed)
+        if (horizontalInput != 0 || jumpPressed || duckHeld || throwPressed || catchPressed ||
+            pickupPressed || dashPressed || ultimatePressed)
         {
             Debug.Log($"{gameObject.name} ({playerType}) - " +
                      $"H:{horizontalInput:F1} J:{jumpPressed} D:{duckHeld} " +
                      $"T:{throwPressed} C:{catchPressed} P:{pickupPressed} " +
+                     $"Dash:{dashPressed} Ult:{ultimatePressed} " +
                      $"Mobile:{IsMobileInputActive()}");
         }
     }
@@ -581,6 +687,8 @@ public class PlayerInputHandler : MonoBehaviour
         if (key == throwKey) return throwPressed;
         if (key == catchKey) return catchPressed;
         if (key == pickupKey) return pickupPressed;
+        if (key == dashKey) return dashPressed;
+        if (key == ultimateKey) return ultimatePressed;
 
         return false;
     }
@@ -601,6 +709,8 @@ public class PlayerInputHandler : MonoBehaviour
         mobileThrowPressedThisFrame = false;
         mobileCatchPressedThisFrame = false;
         mobilePickupPressedThisFrame = false;
+        mobileDashPressedThisFrame = false;
+        mobileUltimatePressedThisFrame = false;
         mobileHorizontal = 0f;
 
         if (showDebugInfo)

@@ -1,11 +1,15 @@
 using UnityEngine;
 
+/// <summary>
+/// Updated BallManager that integrates with the character system
+/// Requests damage values from character data instead of hardcoding
+/// </summary>
 public class BallManager : MonoBehaviour
 {
     public static BallManager Instance { get; private set; }
 
     [Header("Ball Settings")]
-    [SerializeField] private GameObject ballPrefab;
+    [SerializeField] public GameObject ballPrefab;
     [SerializeField] private Vector3 spawnPosition = new Vector3(0, 2f, 0);
     [SerializeField] private float respawnDelay = 2f;
 
@@ -63,11 +67,30 @@ public class BallManager : MonoBehaviour
         Debug.Log("Ball spawned at center!");
     }
 
-    public void RequestBallPickup(CharacterController character)
+    /// <summary>
+    /// Request ball pickup - works with any character type
+    /// </summary>
+    public void RequestBallPickup(PlayerCharacter character)
     {
         if (currentBall != null && gameActive)
         {
             bool success = currentBall.TryPickup(character);
+            if (success && debugMode)
+            {
+                string characterName = character.GetCharacterData()?.characterName ?? character.name;
+                Debug.Log($"{characterName} successfully picked up the ball!");
+            }
+        }
+    }
+
+    /// <summary>
+    /// LEGACY: For backward compatibility with old CharacterController
+    /// </summary>
+    public void RequestBallPickup(CharacterController character)
+    {
+        if (currentBall != null && gameActive)
+        {
+            bool success = currentBall.TryPickupLegacy(character);
             if (success && debugMode)
             {
                 Debug.Log($"{character.name} successfully picked up the ball!");
@@ -75,30 +98,170 @@ public class BallManager : MonoBehaviour
         }
     }
 
-    // SIMPLIFIED: Direct throw method - no targeting system needed
-    public void RequestBallThrow(CharacterController thrower, Vector3 direction, float power)
+    /// <summary>
+    /// NEW: Request ball throw with character data integration
+    /// This method gets damage from the character's data
+    /// </summary>
+    public void RequestBallThrowWithCharacterData(PlayerCharacter thrower, CharacterData characterData, ThrowType throwType, int damage)
     {
         if (currentBall != null && currentBall.GetHolder() == thrower)
         {
-            // Ball controller handles its own targeting now
-            currentBall.ThrowBall(direction, power);
+            // Apply character-specific throw modifications
+            float throwSpeed = characterData.GetThrowSpeed(GetBaseThrowSpeed(throwType));
+            Vector3 direction = Vector3.right; // BallController will handle targeting
+
+            // Apply accuracy modifier
+            if (currentBall.GetCurrentTarget() != null)
+            {
+                Vector3 targetDir = (currentBall.GetCurrentTarget().position - currentBall.transform.position).normalized;
+                direction = characterData.ApplyThrowAccuracy(targetDir);
+            }
+
+            // Set ball damage and throw properties
+            currentBall.SetThrowData(throwType, damage, throwSpeed);
+
+            // Execute throw
+            currentBall.ThrowBall(direction, 1f);
+
+            // Apply throw effects
+            if (characterData.throwEffect != null)
+            {
+                Instantiate(characterData.throwEffect, currentBall.transform.position, Quaternion.identity);
+            }
+
+            if (debugMode)
+            {
+                Debug.Log($"{characterData.characterName} threw {throwType} ball: {damage} damage, {throwSpeed} speed");
+            }
 
             // Schedule respawn if ball goes out of bounds
             StartCoroutine(CheckForRespawn());
         }
     }
 
-    // NEW: Simplified throw method that lets BallController handle everything
-    public void RequestBallThrowSimple(CharacterController thrower, float power = 1f)
+    /// <summary>
+    /// LEGACY: Simplified throw method for backward compatibility
+    /// </summary>
+    public void RequestBallThrowSimple(PlayerCharacter thrower, float power = 1f)
     {
         if (currentBall != null && currentBall.GetHolder() == thrower)
         {
-            // BallController determines direction internally
-            Vector3 anyDirection = Vector3.right; // Will be overridden by BallController
-            currentBall.ThrowBall(anyDirection, power);
+            CharacterData characterData = thrower.GetCharacterData();
+            if (characterData != null)
+            {
+                // Use character data for throw
+                ThrowType throwType = thrower.IsGrounded() ? ThrowType.Normal : ThrowType.JumpThrow;
+                int damage = characterData.GetThrowDamage(throwType);
+                RequestBallThrowWithCharacterData(thrower, characterData, throwType, damage);
+            }
+            else
+            {
+                // Fallback to basic throw
+                currentBall.ThrowBall(Vector3.right, power);
+                StartCoroutine(CheckForRespawn());
+            }
+        }
+    }
 
-            // Schedule respawn if ball goes out of bounds
+    /// <summary>
+    /// LEGACY: For old CharacterController compatibility
+    /// </summary>
+    public void RequestBallThrowSimple(CharacterController thrower, float power = 1f)
+    {
+        if (currentBall != null && currentBall.GetHolderLegacy() == thrower)
+        {
+            // Basic throw without character data
+            currentBall.ThrowBall(Vector3.right, power);
             StartCoroutine(CheckForRespawn());
+        }
+    }
+
+    /// <summary>
+    /// Get base throw speed based on throw type
+    /// </summary>
+    float GetBaseThrowSpeed(ThrowType throwType)
+    {
+        switch (throwType)
+        {
+            case ThrowType.Normal:
+                return 18f;
+            case ThrowType.JumpThrow:
+                return 22f;
+            case ThrowType.Ultimate:
+                return 25f;
+            case ThrowType.PowerThrow:
+                return 20f;
+            default:
+                return 18f;
+        }
+    }
+
+    /// <summary>
+    /// Handle ultimate throws with special effects
+    /// </summary>
+    public void RequestUltimateThrow(PlayerCharacter thrower, UltimateAbilityType ultimateType)
+    {
+        if (currentBall == null || currentBall.GetHolder() != thrower) return;
+
+        CharacterData characterData = thrower.GetCharacterData();
+        if (characterData == null) return;
+
+        int ultimateDamage = characterData.GetThrowDamage(ThrowType.Ultimate);
+
+        switch (ultimateType)
+        {
+            case UltimateAbilityType.PowerThrow:
+                // Single powerful throw
+                RequestBallThrowWithCharacterData(thrower, characterData, ThrowType.Ultimate, ultimateDamage);
+                break;
+
+            case UltimateAbilityType.MultiThrow:
+                // Create multiple balls (implementation needed)
+                StartCoroutine(MultiThrowCoroutine(thrower, characterData));
+                break;
+
+            case UltimateAbilityType.HomingBall:
+                // Enable homing for this throw
+                currentBall.EnableHoming(true);
+                RequestBallThrowWithCharacterData(thrower, characterData, ThrowType.Ultimate, ultimateDamage);
+                break;
+
+            default:
+                // Default to power throw
+                RequestBallThrowWithCharacterData(thrower, characterData, ThrowType.Ultimate, ultimateDamage);
+                break;
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"{characterData.characterName} used ultimate: {ultimateType}");
+        }
+    }
+
+    /// <summary>
+    /// Handle multi-throw ultimate
+    /// </summary>
+    System.Collections.IEnumerator MultiThrowCoroutine(PlayerCharacter thrower, CharacterData characterData)
+    {
+        int throwCount = 3; // Throw 3 balls in sequence
+        int damagePerBall = characterData.GetThrowDamage(ThrowType.Ultimate) / 2; // Reduced damage per ball
+
+        for (int i = 0; i < throwCount; i++)
+        {
+            // Create a temporary ball for multi-throw
+            GameObject tempBallObj = Instantiate(ballPrefab, thrower.transform.position + Vector3.up * 1.5f, Quaternion.identity);
+            BallController tempBall = tempBallObj.GetComponent<BallController>();
+
+            if (tempBall != null)
+            {
+                tempBall.SetThrowData(ThrowType.Ultimate, damagePerBall, GetBaseThrowSpeed(ThrowType.Ultimate));
+
+                // Throw in slightly different directions
+                Vector3 throwDir = Vector3.right + Vector3.up * (i * 0.1f - 0.1f);
+                tempBall.ThrowBall(throwDir.normalized, 1f);
+            }
+
+            yield return new WaitForSeconds(0.2f); // Small delay between throws
         }
     }
 
@@ -142,6 +305,17 @@ public class BallManager : MonoBehaviour
         gameActive = active;
     }
 
+    // Character registration for multiplayer
+    public void RegisterPlayer(int playerId, Transform playerTransform, PlayerCharacter playerCharacter, bool isLocal = true)
+    {
+        // TODO: Implement player registration for multiplayer
+        if (debugMode)
+        {
+            string characterName = playerCharacter.GetCharacterData()?.characterName ?? "Unknown";
+            Debug.Log($"Registered player {playerId} ({characterName}) - Local: {isLocal}");
+        }
+    }
+
     // Debug methods
     void Update()
     {
@@ -157,35 +331,27 @@ public class BallManager : MonoBehaviour
             SpawnBall();
         }
 
-        // Debug key to throw ball at player from dummy position
-        if (Input.GetKeyDown(KeyCode.Y))
+        // Debug key to show character info
+        if (debugMode && Input.GetKeyDown(KeyCode.I))
         {
-            ThrowBallAtPlayerFromDummy();
+            ShowCharacterDebugInfo();
         }
     }
 
-    void ThrowBallAtPlayerFromDummy()
+    void ShowCharacterDebugInfo()
     {
-        if (currentBall == null) return;
+        PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
 
-        GameObject player = GameObject.FindGameObjectWithTag("Player");
-        if (player == null) return;
-
-        // Find dummy opponent
-        GameObject dummy = GameObject.Find("DummyOpponent");
-        if (dummy == null) return;
-
-        // Position ball at dummy
-        currentBall.transform.position = dummy.transform.position + Vector3.up * 1.5f;
-
-        // Calculate direction to player
-        Vector3 direction = (player.transform.position - currentBall.transform.position).normalized;
-        direction.y = 0.3f; // Add upward arc
-
-        // Throw ball at player
-        currentBall.ThrowBall(direction.normalized, 1.5f);
-
-        Debug.Log("Debug: Ball thrown at player from dummy position!");
+        Debug.Log("=== CHARACTER DEBUG INFO ===");
+        foreach (PlayerCharacter player in allPlayers)
+        {
+            CharacterData data = player.GetCharacterData();
+            if (data != null)
+            {
+                Debug.Log($"{data.characterName}: HP={data.maxHealth}, Speed={data.moveSpeed}, " +
+                         $"Damage={data.normalThrowDamage}/{data.jumpThrowDamage}/{data.ultimateThrowDamage}");
+            }
+        }
     }
 
     void OnDrawGizmosSelected()
@@ -193,5 +359,22 @@ public class BallManager : MonoBehaviour
         // Draw spawn position
         Gizmos.color = Color.green;
         Gizmos.DrawWireSphere(spawnPosition, 0.5f);
+
+        // Draw character throw ranges (if ball exists)
+        if (currentBall != null)
+        {
+            PlayerCharacter holder = currentBall.GetHolder();
+            if (holder != null)
+            {
+                CharacterData data = holder.GetCharacterData();
+                if (data != null)
+                {
+                    // Visualize throw accuracy
+                    Gizmos.color = Color.yellow;
+                    float accuracy = data.throwAccuracy;
+                    Gizmos.DrawWireSphere(currentBall.transform.position, (1f - accuracy) * 2f);
+                }
+            }
+        }
     }
 }

@@ -42,9 +42,22 @@ public class CatchSystem : MonoBehaviour
 
     public enum CatchResult { Perfect, Good, Miss, TooEarly, TooLate }
 
+    // Replace the Awake method in CatchSystem.cs
+
     void Awake()
     {
+        // Try to get CharacterController first (legacy system)
         character = GetComponent<CharacterController>();
+
+        // If no CharacterController, we're probably using the new PlayerCharacter system
+        if (character == null)
+        {
+            if (debugMode)
+            {
+                Debug.Log($"CatchSystem on {gameObject.name}: No CharacterController found, assuming new PlayerCharacter system");
+            }
+        }
+
         SetupCatchTrigger();
         SetupVisualIndicators();
         SetupAudio();
@@ -211,12 +224,46 @@ public class CatchSystem : MonoBehaviour
     }
 
     // In CatchSystem.cs, replace Input.GetKeyDown(catchKey) with:
+    // Replace the HandleCatchInput method in CatchSystem.cs (around line 216)
+
     void HandleCatchInput()
     {
-        PlayerInputHandler inputHandler = character.GetInputHandler();
+        PlayerInputHandler inputHandler = null;
+
+        // Try to get input handler from both character systems
+        if (character != null)
+        {
+            // Legacy CharacterController system
+            inputHandler = character.GetInputHandler();
+        }
+        else
+        {
+            // New PlayerCharacter system - look for PlayerCharacter component
+            PlayerCharacter playerCharacter = GetComponent<PlayerCharacter>();
+            if (playerCharacter != null)
+            {
+                inputHandler = playerCharacter.GetInputHandler();
+            }
+        }
+
+        // Fallback: try to get PlayerInputHandler directly from this GameObject
+        if (inputHandler == null)
+        {
+            inputHandler = GetComponent<PlayerInputHandler>();
+        }
+
+        // Check for catch input
         if (inputHandler != null && inputHandler.GetCatchPressed() && isCatchingAvailable)
         {
             AttemptCatch();
+        }
+        else if (inputHandler == null && debugMode)
+        {
+            // Only log this once to avoid spam
+            if (Time.frameCount % 60 == 0) // Log once per second at 60fps
+            {
+                Debug.LogWarning($"CatchSystem on {gameObject.name}: No PlayerInputHandler found! Make sure your player has either CharacterController with GetInputHandler() or PlayerCharacter component.");
+            }
         }
     }
 
@@ -421,13 +468,32 @@ public class CatchSystem : MonoBehaviour
         Debug.Log($"Catch attempt: {result}");
     }
 
+    // Replace the ExecuteSuccessfulCatch method in CatchSystem.cs (around line 476)
+
     void ExecuteSuccessfulCatch(BallController ball, CatchResult result)
     {
         if (ball != null)
         {
-            // Stop the ball and give it to player
-            ball.OnCaught(character);
-            character.SetHasBall(true);
+            // Determine which character system we're using and call appropriate method
+            PlayerCharacter playerCharacter = GetComponent<PlayerCharacter>();
+
+            if (playerCharacter != null)
+            {
+                // New character system - use PlayerCharacter
+                ball.OnCaught(playerCharacter);
+                playerCharacter.SetHasBall(true);
+            }
+            else if (character != null)
+            {
+                // Legacy character system - use CharacterController
+                ball.OnCaught(character);
+                character.SetHasBall(true);
+            }
+            else
+            {
+                Debug.LogError($"CatchSystem on {gameObject.name}: No valid character component found for catch!");
+                return;
+            }
 
             // Clear ball reference
             nearestThrownBall = null;
@@ -442,6 +508,38 @@ public class CatchSystem : MonoBehaviour
         Debug.Log($"Successful catch! ({result})");
     }
 
+    /// <summary>
+    /// Helper method to determine which character system we're using
+    /// </summary>
+    private bool IsUsingPlayerCharacterSystem()
+    {
+        return GetComponent<PlayerCharacter>() != null;
+    }
+
+    /// <summary>
+    /// Get the appropriate character component for ball operations
+    /// </summary>
+    private void SetHasBallOnCharacter(bool hasBall)
+    {
+        PlayerCharacter playerCharacter = GetComponent<PlayerCharacter>();
+
+        if (playerCharacter != null)
+        {
+            // New character system
+            playerCharacter.SetHasBall(hasBall);
+        }
+        else if (character != null)
+        {
+            // Legacy character system
+            character.SetHasBall(hasBall);
+        }
+        else
+        {
+            Debug.LogError($"CatchSystem on {gameObject.name}: No valid character component found!");
+        }
+    }
+
+    // Also update the ExecuteFailedCatch method to be consistent:
     void ExecuteFailedCatch(BallController ball, CatchResult result)
     {
         // Ball continues its trajectory or bounces
