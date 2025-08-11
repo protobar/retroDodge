@@ -138,6 +138,8 @@ MonoBehaviour:
   useRelativeToPlayer: 1
   holdFollowSpeed: 10
   smoothHoldMovement: 1
+  courtWidth: 15
+  courtLength: 15
   debugMode: 1
   showCollisionGizmos: 1
   showPlayerColliders: 1
@@ -170,8 +172,8 @@ MonoBehaviour:
   predictionDistance: 5
   baseDamage: 10
   chargedDamageMultiplier: 15
-  jumpThrowDamage: 12
-  ultimateDamage: 25
+  jumpThrowDamage: 50
+  ultimateDamage: 15
   bounceForce: 8
   bounceRandomness: 0
   knockbackForce: 0

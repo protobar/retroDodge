@@ -30,6 +30,10 @@ public class BallController : MonoBehaviour
     [SerializeField] private float holdFollowSpeed = 10f;
     [SerializeField] private bool smoothHoldMovement = true;
 
+    [Header("Ball Hold Position")]
+    [SerializeField] float courtWidth = 15f;   // Half-width of the court
+    [SerializeField] float courtLength = 20f;
+
     [Header("Debug Visualization")]
     [SerializeField] private bool debugMode = true;
     [SerializeField] private bool showCollisionGizmos = true;
@@ -208,8 +212,8 @@ public class BallController : MonoBehaviour
         // Move the ball (no gravity applied here)
         ballTransform.Translate(velocity * Time.deltaTime, Space.World);
 
-        // REMOVED: CheckForCollision() - CollisionDamageSystem handles this now
-        // REMOVED: CheckWallCollisions() - CollisionDamageSystem handles this now
+        // FIXED: RE-ENABLED wall collision checking
+        CheckWallCollisions();
 
         // Check for ground collision only
         CheckGrounded();
@@ -306,7 +310,7 @@ public class BallController : MonoBehaviour
     }
 
     /// <summary>
-    /// Check collisions with walls and environment
+    /// Check collisions with walls and environment - RE-ENABLED
     /// </summary>
     void CheckWallCollisions()
     {
@@ -314,19 +318,24 @@ public class BallController : MonoBehaviour
         RaycastHit hit;
         float ballRadius = 0.5f; // Ball's sphere collider radius
 
+        // Use a more comprehensive approach for wall detection
         if (Physics.SphereCast(ballTransform.position, ballRadius, velocity.normalized, out hit,
-            velocity.magnitude * Time.deltaTime, groundLayer))
+            velocity.magnitude * Time.deltaTime + ballRadius, groundLayer))
         {
             // Hit a wall - bounce off
-            if (hit.collider.CompareTag("Wall") || hit.collider.name.Contains("Wall"))
+            if (hit.collider.CompareTag("Wall") || hit.collider.name.Contains("Wall") ||
+                hit.collider.gameObject.layer == LayerMask.NameToLayer("Wall"))
             {
                 OnWallHit(hit);
             }
         }
+
+        // Additional boundary checks if no walls are tagged properly
+        CheckBoundaries();
     }
 
     /// <summary>
-    /// Handle ball hitting walls
+    /// Handle ball hitting walls - IMPROVED
     /// </summary>
     void OnWallHit(RaycastHit hit)
     {
@@ -343,6 +352,44 @@ public class BallController : MonoBehaviour
         if (debugMode)
         {
             Debug.Log($"Ball hit wall: {hit.collider.name}, bounced with velocity: {velocity}");
+        }
+    }
+
+    /// <summary>
+    /// Check boundaries if walls aren't properly tagged
+    /// </summary>
+    void CheckBoundaries()
+    {
+        Vector3 pos = ballTransform.position;
+        bool hitBoundary = false;
+
+        
+
+        // Check X boundaries (left/right walls)
+        if (pos.x > courtWidth || pos.x < -courtWidth)
+        {
+            velocity.x = -velocity.x * 0.8f;
+            pos.x = Mathf.Clamp(pos.x, -courtWidth, courtWidth);
+            hitBoundary = true;
+        }
+
+        // Check Z boundaries (front/back walls)  
+        if (pos.z > courtLength || pos.z < -courtLength)
+        {
+            velocity.z = -velocity.z * 0.8f;
+            pos.z = Mathf.Clamp(pos.z, -courtLength, courtLength);
+            hitBoundary = true;
+        }
+
+        if (hitBoundary)
+        {
+            ballTransform.position = pos;
+            SetBallState(BallState.Free);
+
+            if (debugMode)
+            {
+                Debug.Log($"Ball hit boundary, bounced with velocity: {velocity}");
+            }
         }
     }
 
