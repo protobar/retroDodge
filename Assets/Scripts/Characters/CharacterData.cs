@@ -1,8 +1,8 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 /// <summary>
-/// ScriptableObject that defines all character stats and abilities
-/// Create new characters by making new instances of this asset
+/// Enhanced CharacterData with clean ability system
+/// Full customization for Ultimate, Trick, and Treat abilities
 /// </summary>
 [CreateAssetMenu(fileName = "New Character", menuName = "Retro Dodge/Character Data")]
 public class CharacterData : ScriptableObject
@@ -11,7 +11,7 @@ public class CharacterData : ScriptableObject
     public string characterName = "Unknown Fighter";
     public string characterDescription = "A mysterious dodgeball warrior";
     public Sprite characterIcon;
-    public GameObject characterPrefab; // Visual representation
+    public GameObject characterPrefab;
 
     [Header("Movement Stats")]
     [Range(1f, 10f)]
@@ -23,7 +23,7 @@ public class CharacterData : ScriptableObject
     public bool canDoubleJump = false;
     public bool canDash = false;
 
-    [Header("Dash Settings")]
+    [Header("Dash Settings (if enabled)")]
     [SerializeField] private float dashDistance = 3f;
     [SerializeField] private float dashCooldown = 2f;
     [SerializeField] private float dashDuration = 0.2f;
@@ -33,7 +33,7 @@ public class CharacterData : ScriptableObject
     public int maxHealth = 100;
 
     [Range(0.5f, 2f)]
-    public float damageResistance = 1f; // 1 = normal, 0.5 = takes half damage, 2 = takes double
+    public float damageResistance = 1f;
 
     [Header("Throw Damage")]
     [Range(5, 25)]
@@ -42,52 +42,122 @@ public class CharacterData : ScriptableObject
     [Range(8, 35)]
     public int jumpThrowDamage = 12;
 
-    [Range(15, 50)]
-    public int ultimateThrowDamage = 25;
-
     [Header("Throw Properties")]
     [Range(0.5f, 2f)]
     public float throwSpeedMultiplier = 1f;
 
     [Range(0f, 1f)]
-    public float throwAccuracy = 1f; // 1 = perfect accuracy, 0 = very inaccurate
-
-    public ThrowType specialThrowType = ThrowType.Normal;
-
-    [Header("Ultimate Ability")]
-    public UltimateAbilityType ultimateType = UltimateAbilityType.PowerThrow;
-
-    [Range(50f, 200f)]
-    public float ultimateChargeRequired = 100f;
-
-    [Range(0.5f, 3f)]
-    public float ultimateChargeRate = 1f; // Multiplier for gaining ultimate charge
-
-    [Header("Special Abilities")]
-    public bool hasWallJump = false;
-    public bool hasAirDash = false;
-    public bool hasQuickThrow = false; // Throws faster than normal
+    public float throwAccuracy = 1f;
 
     [Header("Visual Effects")]
     public Color characterColor = Color.white;
-    public GameObject ultimateEffect;
     public GameObject throwEffect;
     public GameObject dashEffect;
 
     [Header("Audio")]
     public AudioClip[] throwSounds;
     public AudioClip[] jumpSounds;
-    public AudioClip ultimateSound;
     public AudioClip dashSound;
 
-    // Properties for easy access
+    [Header("═══════════════════════════════════")]
+    [Header("ABILITY SYSTEM")]
+    [Header("═══════════════════════════════════")]
+
+    [Header("Ultimate Ability")]
+    public UltimateType ultimateType = UltimateType.PowerThrow;
+
+    [Header("Ultimate: PowerThrow Settings")]
+    [SerializeField] private int powerThrowDamage = 35;
+    [SerializeField] private float powerThrowSpeed = 30f;
+    [SerializeField] private float powerThrowKnockback = 12f;
+    [SerializeField] private float powerThrowScreenShake = 1.2f;
+    [SerializeField] private GameObject powerThrowEffect;
+    [SerializeField] private AudioClip powerThrowSound;
+
+    [Header("Ultimate: MultiThrow Settings")]
+    [SerializeField] private int multiThrowCount = 4;
+    [SerializeField] private int multiThrowDamagePerBall = 12;
+    [SerializeField] private float multiThrowSpeed = 22f;
+    [SerializeField] private float multiThrowSpread = 20f; // degrees
+    [SerializeField] private float multiThrowDelay = 0.15f; // seconds between balls
+    [SerializeField] private Vector3 multiThrowSpawnOffset = new Vector3(0.8f, 0.5f, 0f); // spawn position offset
+    [SerializeField] private GameObject multiThrowEffect;
+    [SerializeField] private AudioClip multiThrowSound;
+
+    [Header("Ultimate: Curveball Settings")]
+    [SerializeField] private int curveballDamage = 25;
+    [SerializeField] private float curveballSpeed = 20f;
+    [SerializeField] private float curveballAmplitude = 3f; // Y-axis curve height
+    [SerializeField] private float curveballFrequency = 4f; // How fast it oscillates
+    [SerializeField] private float curveballDuration = 2f; // How long curve lasts
+    [SerializeField] private GameObject curveballEffect;
+    [SerializeField] private AudioClip curveballSound;
+
+    [Header("Ultimate Charge")]
+    [Range(50f, 200f)]
+    public float ultimateChargeRequired = 100f;
+    [Range(0.5f, 3f)]
+    public float ultimateChargeRate = 1f;
+
+    [Header("Trick Ability (Opponent-Focused)")]
+    public TrickType trickType = TrickType.SlowSpeed;
+
+    [Header("Trick: Slow Speed Settings")]
+    [SerializeField] private float slowSpeedMultiplier = 0.3f; // 30% of normal speed
+    [SerializeField] private float slowSpeedDuration = 4f;
+    [SerializeField] private GameObject slowSpeedEffect;
+    [SerializeField] private AudioClip slowSpeedSound;
+
+    [Header("Trick: Freeze Settings")]
+    [SerializeField] private float freezeDuration = 2.5f;
+    [SerializeField] private GameObject freezeEffect;
+    [SerializeField] private AudioClip freezeSound;
+
+    [Header("Trick: Instant Damage Settings")]
+    [SerializeField] private int instantDamageAmount = 15;
+    [SerializeField] private GameObject instantDamageEffect;
+    [SerializeField] private AudioClip instantDamageSound;
+
+    [Header("Trick Charge")]
+    [Range(30f, 100f)]
+    public float trickChargeRequired = 60f;
+    [Range(0.5f, 3f)]
+    public float trickChargeRate = 1f;
+
+    [Header("Treat Ability (Self-Focused)")]
+    public TreatType treatType = TreatType.Shield;
+
+    [Header("Treat: Shield Settings")]
+    [SerializeField] private float shieldDuration = 4f;
+    [SerializeField] private GameObject shieldEffect;
+    [SerializeField] private AudioClip shieldSound;
+
+    [Header("Treat: Teleport Settings")]
+    [SerializeField] private float teleportRange = 8f;
+    [SerializeField] private GameObject teleportEffect;
+    [SerializeField] private AudioClip teleportSound;
+
+    [Header("Treat: Speed Boost Settings")]
+    [SerializeField] private float speedBoostMultiplier = 2.5f;
+    [SerializeField] private float speedBoostDuration = 5f;
+    [SerializeField] private GameObject speedBoostEffect;
+    [SerializeField] private AudioClip speedBoostSound;
+
+    [Header("Treat Charge")]
+    [Range(30f, 100f)]
+    public float treatChargeRequired = 60f;
+    [Range(0.5f, 3f)]
+    public float treatChargeRate = 1f;
+
+    // ═══════════════════════════════════════════════════════════════
+    // PROPERTY GETTERS FOR CLEAN ACCESS
+    // ═══════════════════════════════════════════════════════════════
+
+    #region Basic Properties
     public float GetDashDistance() => dashDistance;
     public float GetDashCooldown() => dashCooldown;
     public float GetDashDuration() => dashDuration;
 
-    /// <summary>
-    /// Get damage value based on throw type
-    /// </summary>
     public int GetThrowDamage(ThrowType throwType)
     {
         switch (throwType)
@@ -96,81 +166,30 @@ public class CharacterData : ScriptableObject
                 return normalThrowDamage;
             case ThrowType.JumpThrow:
                 return jumpThrowDamage;
-            case ThrowType.Ultimate:
-                return ultimateThrowDamage;
             default:
                 return normalThrowDamage;
         }
     }
 
-    /// <summary>
-    /// Calculate final damage after applying character multipliers
-    /// </summary>
-    public int GetModifiedDamage(ThrowType throwType, float powerMultiplier = 1f)
-    {
-        int baseDamage = GetThrowDamage(throwType);
-        float finalDamage = baseDamage * powerMultiplier;
-
-        // Apply special throw modifications
-        if (specialThrowType == ThrowType.PowerThrow && throwType == ThrowType.Normal)
-        {
-            finalDamage *= 1.2f; // 20% bonus for power throw characters
-        }
-
-        return Mathf.RoundToInt(finalDamage);
-    }
-
-    /// <summary>
-    /// Get throw speed based on character stats
-    /// </summary>
     public float GetThrowSpeed(float baseSpeed)
     {
         return baseSpeed * throwSpeedMultiplier;
     }
 
-    /// <summary>
-    /// Apply accuracy modifier to throw direction
-    /// </summary>
     public Vector3 ApplyThrowAccuracy(Vector3 targetDirection)
     {
         if (throwAccuracy >= 1f) return targetDirection;
 
-        // Add random offset based on accuracy
         float inaccuracy = 1f - throwAccuracy;
         Vector3 randomOffset = new Vector3(
             Random.Range(-inaccuracy, inaccuracy),
-            Random.Range(-inaccuracy * 0.5f, inaccuracy * 0.5f), // Less Y variation
+            Random.Range(-inaccuracy * 0.5f, inaccuracy * 0.5f),
             Random.Range(-inaccuracy, inaccuracy)
         );
 
         return (targetDirection + randomOffset * 0.2f).normalized;
     }
 
-    /// <summary>
-    /// Check if character can perform a specific ability
-    /// </summary>
-    public bool CanPerformAbility(CharacterAbility ability)
-    {
-        switch (ability)
-        {
-            case CharacterAbility.DoubleJump:
-                return canDoubleJump;
-            case CharacterAbility.Dash:
-                return canDash;
-            case CharacterAbility.WallJump:
-                return hasWallJump;
-            case CharacterAbility.AirDash:
-                return hasAirDash;
-            case CharacterAbility.QuickThrow:
-                return hasQuickThrow;
-            default:
-                return false;
-        }
-    }
-
-    /// <summary>
-    /// Get random audio clip for specific action
-    /// </summary>
     public AudioClip GetRandomAudioClip(CharacterAudioType audioType)
     {
         switch (audioType)
@@ -179,66 +198,211 @@ public class CharacterData : ScriptableObject
                 return throwSounds?.Length > 0 ? throwSounds[Random.Range(0, throwSounds.Length)] : null;
             case CharacterAudioType.Jump:
                 return jumpSounds?.Length > 0 ? jumpSounds[Random.Range(0, jumpSounds.Length)] : null;
-            case CharacterAudioType.Ultimate:
-                return ultimateSound;
             case CharacterAudioType.Dash:
                 return dashSound;
             default:
                 return null;
         }
     }
+    #endregion
+
+    #region Ultimate Ability Properties
+    public int GetUltimateDamage()
+    {
+        switch (ultimateType)
+        {
+            case UltimateType.PowerThrow:
+                return powerThrowDamage;
+            case UltimateType.MultiThrow:
+                return multiThrowDamagePerBall;
+            case UltimateType.Curveball:
+                return curveballDamage;
+            default:
+                return 30;
+        }
+    }
+
+    public float GetUltimateSpeed()
+    {
+        switch (ultimateType)
+        {
+            case UltimateType.PowerThrow:
+                return powerThrowSpeed;
+            case UltimateType.MultiThrow:
+                return multiThrowSpeed;
+            case UltimateType.Curveball:
+                return curveballSpeed;
+            default:
+                return 25f;
+        }
+    }
+
+    public GameObject GetUltimateEffect()
+    {
+        switch (ultimateType)
+        {
+            case UltimateType.PowerThrow:
+                return powerThrowEffect;
+            case UltimateType.MultiThrow:
+                return multiThrowEffect;
+            case UltimateType.Curveball:
+                return curveballEffect;
+            default:
+                return null;
+        }
+    }
+
+    public AudioClip GetUltimateSound()
+    {
+        switch (ultimateType)
+        {
+            case UltimateType.PowerThrow:
+                return powerThrowSound;
+            case UltimateType.MultiThrow:
+                return multiThrowSound;
+            case UltimateType.Curveball:
+                return curveballSound;
+            default:
+                return null;
+        }
+    }
+
+    // PowerThrow specific
+    public float GetPowerThrowKnockback() => powerThrowKnockback;
+    public float GetPowerThrowScreenShake() => powerThrowScreenShake;
+
+    // MultiThrow specific
+    public int GetMultiThrowCount() => multiThrowCount;
+    public float GetMultiThrowSpread() => multiThrowSpread;
+    public float GetMultiThrowDelay() => multiThrowDelay;
+    public Vector3 GetMultiThrowSpawnOffset() => multiThrowSpawnOffset;
+
+    // Curveball specific
+    public float GetCurveballAmplitude() => curveballAmplitude;
+    public float GetCurveballFrequency() => curveballFrequency;
+    public float GetCurveballDuration() => curveballDuration;
+    #endregion
+
+    #region Trick Ability Properties
+    public GameObject GetTrickEffect()
+    {
+        switch (trickType)
+        {
+            case TrickType.SlowSpeed:
+                return slowSpeedEffect;
+            case TrickType.Freeze:
+                return freezeEffect;
+            case TrickType.InstantDamage:
+                return instantDamageEffect;
+            default:
+                return null;
+        }
+    }
+
+    public AudioClip GetTrickSound()
+    {
+        switch (trickType)
+        {
+            case TrickType.SlowSpeed:
+                return slowSpeedSound;
+            case TrickType.Freeze:
+                return freezeSound;
+            case TrickType.InstantDamage:
+                return instantDamageSound;
+            default:
+                return null;
+        }
+    }
+
+    // SlowSpeed specific
+    public float GetSlowSpeedMultiplier() => slowSpeedMultiplier;
+    public float GetSlowSpeedDuration() => slowSpeedDuration;
+
+    // Freeze specific
+    public float GetFreezeDuration() => freezeDuration;
+
+    // InstantDamage specific
+    public int GetInstantDamageAmount() => instantDamageAmount;
+    #endregion
+
+    #region Treat Ability Properties
+    public GameObject GetTreatEffect()
+    {
+        switch (treatType)
+        {
+            case TreatType.Shield:
+                return shieldEffect;
+            case TreatType.Teleport:
+                return teleportEffect;
+            case TreatType.SpeedBoost:
+                return speedBoostEffect;
+            default:
+                return null;
+        }
+    }
+
+    public AudioClip GetTreatSound()
+    {
+        switch (treatType)
+        {
+            case TreatType.Shield:
+                return shieldSound;
+            case TreatType.Teleport:
+                return teleportSound;
+            case TreatType.SpeedBoost:
+                return speedBoostSound;
+            default:
+                return null;
+        }
+    }
+
+    // Shield specific
+    public float GetShieldDuration() => shieldDuration;
+
+    // Teleport specific
+    public float GetTeleportRange() => teleportRange;
+
+    // SpeedBoost specific
+    public float GetSpeedBoostMultiplier() => speedBoostMultiplier;
+    public float GetSpeedBoostDuration() => speedBoostDuration;
+    #endregion
 }
 
-/// <summary>
-/// Types of throws available
-/// </summary>
+// ═══════════════════════════════════════════════════════════════
+// ENUMS
+// ═══════════════════════════════════════════════════════════════
+
 public enum ThrowType
 {
     Normal,
     JumpThrow,
-    Ultimate,
-    PowerThrow,
-    CurveThrow,
-    MultiThrow
+    Ultimate
 }
 
-/// <summary>
-/// Types of ultimate abilities
-/// </summary>
-public enum UltimateAbilityType
+public enum UltimateType
 {
-    PowerThrow,     // Massive damage single throw
-    MultiThrow,     // Throw multiple balls
-    GravitySlam,    // Ball curves downward dramatically  
-    HomingBall,     // Ball tracks target
-    ExplosiveBall,  // Ball explodes on impact
-    TimeFreeze,     // Freeze opponent briefly
-    Shield,         // Temporary invincibility
-    SpeedBoost,     // Temporary speed increase
-    Teleport,       // Instant movement
-    Curveball       // Ball curves around obstacles
+    PowerThrow,    // Heavy straight shot, high speed, knockback + screen shake
+    MultiThrow,    // 3-5 rapid-fire balls in spread pattern
+    Curveball      // Curves up/down on Y-axis unpredictably
 }
 
-/// <summary>
-/// Character abilities for capability checking
-/// </summary>
-public enum CharacterAbility
+public enum TrickType
 {
-    DoubleJump,
-    Dash,
-    WallJump,
-    AirDash,
-    QuickThrow,
-    UltimateThrow
+    SlowSpeed,     // Reduce opponent movement speed
+    Freeze,        // Temporarily immobilize opponent
+    InstantDamage  // Quick unavoidable chip damage
 }
 
-/// <summary>
-/// Audio types for character sounds
-/// </summary>
+public enum TreatType
+{
+    Shield,        // Temporary invulnerability
+    Teleport,      // Strategic repositioning
+    SpeedBoost     // Enhanced movement speed
+}
+
 public enum CharacterAudioType
 {
     Throw,
     Jump,
-    Ultimate,
     Dash
 }

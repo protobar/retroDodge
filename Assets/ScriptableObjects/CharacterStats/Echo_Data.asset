@@ -1,0 +1,87 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 416c2fc259394f3459ecf4c65ed03941, type: 3}
+  m_Name: Echo_Data
+  m_EditorClassIdentifier: 
+  characterName: Champion
+  characterDescription: Perfect balance of all abilities
+  characterIcon: {fileID: 0}
+  characterPrefab: {fileID: 0}
+  moveSpeed: 8
+  jumpHeight: 12
+  canDoubleJump: 0
+  canDash: 0
+  dashDistance: 3
+  dashCooldown: 2
+  dashDuration: 0.2
+  maxHealth: 100
+  damageResistance: 1
+  normalThrowDamage: 18
+  jumpThrowDamage: 15
+  throwSpeedMultiplier: 1
+  throwAccuracy: 1
+  characterColor: {r: 1, g: 0.84313726, b: 0, a: 1}
+  throwEffect: {fileID: 0}
+  dashEffect: {fileID: 0}
+  throwSounds: []
+  jumpSounds: []
+  dashSound: {fileID: 0}
+  ultimateType: 2
+  powerThrowDamage: 50
+  powerThrowSpeed: 30
+  powerThrowKnockback: 12
+  powerThrowScreenShake: 1.2
+  powerThrowEffect: {fileID: 0}
+  powerThrowSound: {fileID: 0}
+  multiThrowCount: 4
+  multiThrowDamagePerBall: 12
+  multiThrowSpeed: 50
+  multiThrowSpread: 0
+  multiThrowDelay: 0.15
+  multiThrowSpawnOffset: {x: 0.8, y: 0.5, z: 0}
+  multiThrowEffect: {fileID: 0}
+  multiThrowSound: {fileID: 0}
+  curveballDamage: 25
+  curveballSpeed: 20
+  curveballAmplitude: 20
+  curveballFrequency: 30
+  curveballDuration: 2
+  curveballEffect: {fileID: 0}
+  curveballSound: {fileID: 0}
+  ultimateChargeRequired: 50
+  ultimateChargeRate: 3
+  trickType: 1
+  slowSpeedMultiplier: 0.3
+  slowSpeedDuration: 4
+  slowSpeedEffect: {fileID: 0}
+  slowSpeedSound: {fileID: 0}
+  freezeDuration: 3
+  freezeEffect: {fileID: 0}
+  freezeSound: {fileID: 0}
+  instantDamageAmount: 15
+  instantDamageEffect: {fileID: 0}
+  instantDamageSound: {fileID: 0}
+  trickChargeRequired: 30
+  trickChargeRate: 3
+  treatType: 1
+  shieldDuration: 4
+  shieldEffect: {fileID: 0}
+  shieldSound: {fileID: 0}
+  teleportRange: 5
+  teleportEffect: {fileID: 0}
+  teleportSound: {fileID: 0}
+  speedBoostMultiplier: 2.5
+  speedBoostDuration: 5
+  speedBoostEffect: {fileID: 0}
+  speedBoostSound: {fileID: 0}
+  treatChargeRequired: 30
+  treatChargeRate: 3

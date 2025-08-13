@@ -1,5 +1,9 @@
 using UnityEngine;
 
+/// <summary>
+/// Enhanced PlayerInputHandler with Duck System integration and complete mobile support
+/// Includes Ultimate/Trick/Treat mobile inputs that were missing
+/// </summary>
 public class PlayerInputHandler : MonoBehaviour
 {
     [Header("Player Configuration")]
@@ -18,6 +22,15 @@ public class PlayerInputHandler : MonoBehaviour
     [SerializeField] private KeyCode customPickupKey = KeyCode.J;
     [SerializeField] private KeyCode customDashKey = KeyCode.LeftShift;
     [SerializeField] private KeyCode customUltimateKey = KeyCode.U;
+    [SerializeField] private KeyCode customTrickKey = KeyCode.I;
+    [SerializeField] private KeyCode customTreatKey = KeyCode.O;
+
+    [Header("Duck System Integration")]
+    [SerializeField] private bool useDuckSystem = true;
+
+    [Header("PUN2 Network Settings")]
+    [SerializeField] private bool isPUN2Enabled = false;
+    [SerializeField] private bool isLocalPlayer = true;
 
     [Header("Input Buffer Settings")]
     [SerializeField] private float inputBufferTime = 0.15f;
@@ -39,6 +52,8 @@ public class PlayerInputHandler : MonoBehaviour
     private bool pickupPressed = false;
     private bool dashPressed = false;
     private bool ultimatePressed = false;
+    private bool trickPressed = false;
+    private bool treatPressed = false;
 
     // Input buffering for responsive controls
     private float lastJumpInput = -1f;
@@ -47,8 +62,10 @@ public class PlayerInputHandler : MonoBehaviour
     private float lastPickupInput = -1f;
     private float lastDashInput = -1f;
     private float lastUltimateInput = -1f;
+    private float lastTrickInput = -1f;
+    private float lastTreatInput = -1f;
 
-    // FIXED: Better mobile input state management
+    // Mobile input state management
     private float mobileHorizontal = 0f;
     private bool mobileLeftPressed = false;
     private bool mobileRightPressed = false;
@@ -59,9 +76,14 @@ public class PlayerInputHandler : MonoBehaviour
     private bool mobilePickupPressedThisFrame = false;
     private bool mobileDashPressedThisFrame = false;
     private bool mobileUltimatePressedThisFrame = false;
+    private bool mobileTrickPressedThisFrame = false;
+    private bool mobileTreatPressedThisFrame = false;
 
     // Key mappings based on player type
-    private KeyCode leftKey, rightKey, jumpKey, duckKey, throwKey, catchKey, pickupKey, dashKey, ultimateKey;
+    private KeyCode leftKey, rightKey, jumpKey, duckKey, throwKey, catchKey, pickupKey, dashKey, ultimateKey, trickKey, treatKey;
+
+    // Component references
+    private DuckSystem duckSystem;
 
     public enum PlayerInputType
     {
@@ -72,6 +94,16 @@ public class PlayerInputHandler : MonoBehaviour
     void Awake()
     {
         SetupKeyMappings();
+
+        // Get duck system if using it
+        if (useDuckSystem)
+        {
+            duckSystem = GetComponent<DuckSystem>();
+            if (duckSystem == null && useDuckSystem)
+            {
+                duckSystem = gameObject.AddComponent<DuckSystem>();
+            }
+        }
 
         // Auto-detect mobile platform or force mobile mode for testing
 #if UNITY_ANDROID || UNITY_IOS
@@ -87,7 +119,6 @@ public class PlayerInputHandler : MonoBehaviour
 
     void Start()
     {
-        // For single-player testing, auto-register with MobileUIManager
         if (autoRegisterInSinglePlayer)
         {
             RegisterWithMobileUI();
@@ -111,7 +142,6 @@ public class PlayerInputHandler : MonoBehaviour
     {
         if (useCustomKeys)
         {
-            // Use custom key bindings
             leftKey = customLeftKey;
             rightKey = customRightKey;
             jumpKey = customJumpKey;
@@ -121,10 +151,11 @@ public class PlayerInputHandler : MonoBehaviour
             pickupKey = customPickupKey;
             dashKey = customDashKey;
             ultimateKey = customUltimateKey;
+            trickKey = customTrickKey;
+            treatKey = customTreatKey;
         }
         else
         {
-            // Use default mappings based on player type
             switch (playerType)
             {
                 case PlayerInputType.Player1:
@@ -136,7 +167,9 @@ public class PlayerInputHandler : MonoBehaviour
                     catchKey = KeyCode.L;
                     pickupKey = KeyCode.J;
                     dashKey = KeyCode.LeftShift;
-                    ultimateKey = KeyCode.Q;
+                    ultimateKey = KeyCode.U;
+                    trickKey = KeyCode.I;
+                    treatKey = KeyCode.O;
                     break;
 
                 case PlayerInputType.Player2:
@@ -149,6 +182,8 @@ public class PlayerInputHandler : MonoBehaviour
                     pickupKey = KeyCode.Keypad0;
                     dashKey = KeyCode.RightShift;
                     ultimateKey = KeyCode.Keypad3;
+                    trickKey = KeyCode.Keypad7;
+                    treatKey = KeyCode.Keypad8;
                     break;
             }
         }
@@ -158,37 +193,33 @@ public class PlayerInputHandler : MonoBehaviour
             Debug.Log($"{gameObject.name} - Player {playerType} keys: " +
                      $"Move: {leftKey}/{rightKey}, Jump: {jumpKey}, Duck: {duckKey}, " +
                      $"Throw: {throwKey}, Catch: {catchKey}, Pickup: {pickupKey}, " +
-                     $"Dash: {dashKey}, Ultimate: {ultimateKey}");
+                     $"Dash: {dashKey}, Ultimate: {ultimateKey}, Trick: {trickKey}, Treat: {treatKey}");
         }
     }
 
     void Update()
     {
-        // Clear previous frame input
+        if (isPUN2Enabled && !isLocalPlayer) return;
+
         ResetFrameInputs();
 
-        // Handle keyboard input first 
         if (enableKeyboardInput)
         {
             HandleKeyboardInput();
         }
 
-        // Handle mobile input (mobile inputs override keyboard)
         if (enableMobileInput)
         {
             HandleMobileInput();
         }
 
-        // Process input buffering
         HandleInputBuffering();
 
-        // Debug display
         if (showDebugInfo)
         {
             DisplayDebugInfo();
         }
 
-        // FIXED: Reset mobile frame-based inputs at end of frame
         ResetMobileFrameInputs();
     }
 
@@ -200,17 +231,20 @@ public class PlayerInputHandler : MonoBehaviour
         pickupPressed = false;
         dashPressed = false;
         ultimatePressed = false;
+        trickPressed = false;
+        treatPressed = false;
     }
 
     void ResetMobileFrameInputs()
     {
-        // Reset frame-based mobile inputs
         mobileJumpPressedThisFrame = false;
         mobileThrowPressedThisFrame = false;
         mobileCatchPressedThisFrame = false;
         mobilePickupPressedThisFrame = false;
         mobileDashPressedThisFrame = false;
         mobileUltimatePressedThisFrame = false;
+        mobileTrickPressedThisFrame = false;
+        mobileTreatPressedThisFrame = false;
     }
 
     void HandleKeyboardInput()
@@ -229,8 +263,8 @@ public class PlayerInputHandler : MonoBehaviour
             lastJumpInput = Time.time;
         }
 
-        // Duck input
-        duckHeld = Input.GetKey(duckKey);
+        // Duck input - ENHANCED with duck system integration
+        HandleDuckInput();
 
         // Throw input
         if (Input.GetKeyDown(throwKey))
@@ -254,25 +288,59 @@ public class PlayerInputHandler : MonoBehaviour
             lastPickupInput = Time.time;
         }
 
-        // FIXED: Add dash input
+        // Dash input
         if (Input.GetKeyDown(dashKey))
         {
             dashPressed = true;
             lastDashInput = Time.time;
         }
 
-        // FIXED: Add ultimate input
+        // Ultimate input
         if (Input.GetKeyDown(ultimateKey))
         {
             ultimatePressed = true;
             lastUltimateInput = Time.time;
         }
+
+        // Trick input
+        if (Input.GetKeyDown(trickKey))
+        {
+            trickPressed = true;
+            lastTrickInput = Time.time;
+        }
+
+        // Treat input
+        if (Input.GetKeyDown(treatKey))
+        {
+            treatPressed = true;
+            lastTreatInput = Time.time;
+        }
+    }
+
+    void HandleDuckInput()
+    {
+        bool duckKeyPressed = Input.GetKey(duckKey);
+
+        if (useDuckSystem && duckSystem != null)
+        {
+            // Let DuckSystem handle the logic
+            duckHeld = duckKeyPressed && duckSystem.CanDuck();
+
+            // Override duck state if system says we're ducking
+            if (duckSystem.IsDucking())
+            {
+                duckHeld = true;
+            }
+        }
+        else
+        {
+            // Original duck behavior
+            duckHeld = duckKeyPressed;
+        }
     }
 
     void HandleMobileInput()
     {
-        // FIXED: Better mobile input handling
-
         // Handle horizontal input
         if (mobileLeftPressed && !mobileRightPressed)
         {
@@ -286,9 +354,8 @@ public class PlayerInputHandler : MonoBehaviour
         {
             horizontalInput = 0f;
         }
-        // If both pressed, keep previous horizontal input
 
-        // Handle frame-based inputs (override keyboard if mobile input occurred)
+        // Handle frame-based inputs
         if (mobileJumpPressedThisFrame)
         {
             jumpPressed = true;
@@ -314,15 +381,37 @@ public class PlayerInputHandler : MonoBehaviour
             dashPressed = true;
         }
 
+        // FIXED: Add missing Ultimate/Trick/Treat mobile inputs
         if (mobileUltimatePressedThisFrame)
         {
             ultimatePressed = true;
         }
 
-        // Handle duck (mobile overrides keyboard)
-        if (mobileDuckPressed)
+        if (mobileTrickPressedThisFrame)
         {
-            duckHeld = true;
+            trickPressed = true;
+        }
+
+        if (mobileTreatPressedThisFrame)
+        {
+            treatPressed = true;
+        }
+
+        // Handle duck with duck system integration
+        if (useDuckSystem && duckSystem != null)
+        {
+            // Let DuckSystem handle mobile duck logic
+            duckHeld = mobileDuckPressed && duckSystem.CanDuck();
+
+            if (duckSystem.IsDucking())
+            {
+                duckHeld = true;
+            }
+        }
+        else
+        {
+            // Original mobile duck behavior
+            duckHeld = mobileDuckPressed;
         }
 
         if (showDebugInfo && (mobileLeftPressed || mobileRightPressed))
@@ -333,44 +422,31 @@ public class PlayerInputHandler : MonoBehaviour
 
     void HandleInputBuffering()
     {
-        // This allows for slightly delayed input processing for better responsiveness
-        // Useful for frame-perfect inputs in fighting games
+        // Input buffering implementation remains the same
     }
 
     // ===========================================
-    // PUBLIC METHODS FOR MOBILE INPUT CALLBACKS
+    // MOBILE INPUT CALLBACKS (Enhanced)
     // ===========================================
 
-    /// <summary>
-    /// Call this from mobile left/right buttons or touch controls
-    /// </summary>
     public void SetMobileHorizontal(float value)
     {
         mobileHorizontal = Mathf.Clamp(value, -1f, 1f);
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - SetMobileHorizontal({value})");
     }
 
-    /// <summary>
-    /// Call this from mobile jump button OnClick
-    /// </summary>
     public void OnMobileJump()
     {
         mobileJumpPressedThisFrame = true;
         lastJumpInput = Time.time;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Jump");
     }
 
-    /// <summary>
-    /// Call this from mobile duck button - use OnPointerDown/Up for hold behavior
-    /// </summary>
     public void OnMobileDuckDown()
     {
         mobileDuckPressed = true;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Duck Down");
     }
@@ -378,32 +454,23 @@ public class PlayerInputHandler : MonoBehaviour
     public void OnMobileDuckUp()
     {
         mobileDuckPressed = false;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Duck Up");
     }
 
-    /// <summary>
-    /// Call this from mobile throw button OnClick
-    /// </summary>
     public void OnMobileThrow()
     {
         mobileThrowPressedThisFrame = true;
         lastThrowInput = Time.time;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Throw");
     }
 
-    /// <summary>
-    /// Call this from mobile throw button OnPointerDown/Up for charging
-    /// </summary>
     public void OnMobileThrowDown()
     {
         mobileThrowPressedThisFrame = true;
         throwHeld = true;
         lastThrowInput = Time.time;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Throw Down");
     }
@@ -411,66 +478,62 @@ public class PlayerInputHandler : MonoBehaviour
     public void OnMobileThrowUp()
     {
         throwHeld = false;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Throw Up");
     }
 
-    /// <summary>
-    /// Call this from mobile catch button OnClick
-    /// </summary>
     public void OnMobileCatch()
     {
         mobileCatchPressedThisFrame = true;
         lastCatchInput = Time.time;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Catch");
     }
 
-    /// <summary>
-    /// Call this from mobile pickup button OnClick
-    /// </summary>
     public void OnMobilePickup()
     {
         mobilePickupPressedThisFrame = true;
         lastPickupInput = Time.time;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Pickup");
     }
 
-    /// <summary>
-    /// FIXED: Call this from mobile dash button OnClick
-    /// </summary>
     public void OnMobileDash()
     {
         mobileDashPressedThisFrame = true;
         lastDashInput = Time.time;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Dash");
     }
 
-    /// <summary>
-    /// FIXED: Call this from mobile ultimate button OnClick
-    /// </summary>
+    // FIXED: Add missing Ultimate/Trick/Treat mobile callbacks
     public void OnMobileUltimate()
     {
         mobileUltimatePressedThisFrame = true;
         lastUltimateInput = Time.time;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Ultimate");
     }
 
-    /// <summary>
-    /// Call this from mobile left button OnPointerDown/Up
-    /// </summary>
+    public void OnMobileTrick()
+    {
+        mobileTrickPressedThisFrame = true;
+        lastTrickInput = Time.time;
+        if (showDebugInfo)
+            Debug.Log($"{gameObject.name} - Mobile Trick");
+    }
+
+    public void OnMobileTreat()
+    {
+        mobileTreatPressedThisFrame = true;
+        lastTreatInput = Time.time;
+        if (showDebugInfo)
+            Debug.Log($"{gameObject.name} - Mobile Treat");
+    }
+
     public void OnMobileLeftDown()
     {
         mobileLeftPressed = true;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Left Down");
     }
@@ -478,18 +541,13 @@ public class PlayerInputHandler : MonoBehaviour
     public void OnMobileLeftUp()
     {
         mobileLeftPressed = false;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Left Up");
     }
 
-    /// <summary>
-    /// Call this from mobile right button OnPointerDown/Up
-    /// </summary>
     public void OnMobileRightDown()
     {
         mobileRightPressed = true;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Right Down");
     }
@@ -497,7 +555,6 @@ public class PlayerInputHandler : MonoBehaviour
     public void OnMobileRightUp()
     {
         mobileRightPressed = false;
-
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - Mobile Right Up");
     }
@@ -506,124 +563,132 @@ public class PlayerInputHandler : MonoBehaviour
     // PUBLIC GETTER METHODS FOR GAME SCRIPTS
     // ===========================================
 
-    /// <summary>
-    /// Get horizontal movement input (-1 to 1)
-    /// </summary>
     public float GetHorizontal() => horizontalInput;
 
-    /// <summary>
-    /// Check if jump was pressed this frame
-    /// </summary>
     public bool GetJumpPressed() => jumpPressed;
 
-    /// <summary>
-    /// Check if jump was pressed with input buffering
-    /// </summary>
     public bool GetJumpBuffered()
     {
         if (Time.time - lastJumpInput <= inputBufferTime)
         {
-            lastJumpInput = -1f; // Consume the input
+            lastJumpInput = -1f;
             return true;
         }
         return false;
     }
 
-    /// <summary>
-    /// Check if duck is being held
-    /// </summary>
-    public bool GetDuckHeld() => duckHeld;
+    // ENHANCED: Duck getter with system integration
+    public bool GetDuckHeld()
+    {
+        if (useDuckSystem && duckSystem != null)
+        {
+            // Return true if duck system says we're ducking, even if input released
+            return duckSystem.IsDucking() || (duckHeld && duckSystem.CanDuck());
+        }
+        return duckHeld;
+    }
 
-    /// <summary>
-    /// Check if throw was pressed this frame
-    /// </summary>
+    // NEW: Additional duck system getters
+    public bool GetDuckPressed()
+    {
+        if (useDuckSystem && duckSystem != null)
+        {
+            // Return true only if we just started ducking this frame
+            return duckSystem.IsDucking() && duckHeld;
+        }
+        return duckHeld; // Fallback for non-duck-system
+    }
+
+    public bool CanDuck()
+    {
+        if (useDuckSystem && duckSystem != null)
+        {
+            return duckSystem.CanDuck();
+        }
+        return true; // Always can duck without system
+    }
+
     public bool GetThrowPressed() => throwPressed;
-
-    /// <summary>
-    /// Check if throw is being held (for charging)
-    /// </summary>
     public bool GetThrowHeld() => throwHeld;
 
-    /// <summary>
-    /// Check if throw was pressed with input buffering
-    /// </summary>
     public bool GetThrowBuffered()
     {
         if (Time.time - lastThrowInput <= inputBufferTime)
         {
-            lastThrowInput = -1f; // Consume the input
+            lastThrowInput = -1f;
             return true;
         }
         return false;
     }
 
-    /// <summary>
-    /// Check if catch was pressed this frame
-    /// </summary>
     public bool GetCatchPressed() => catchPressed;
 
-    /// <summary>
-    /// Check if catch was pressed with input buffering
-    /// </summary>
     public bool GetCatchBuffered()
     {
         if (Time.time - lastCatchInput <= inputBufferTime)
         {
-            lastCatchInput = -1f; // Consume the input
+            lastCatchInput = -1f;
             return true;
         }
         return false;
     }
 
-    /// <summary>
-    /// Check if pickup was pressed this frame
-    /// </summary>
     public bool GetPickupPressed() => pickupPressed;
 
-    /// <summary>
-    /// Check if pickup was pressed with input buffering
-    /// </summary>
     public bool GetPickupBuffered()
     {
         if (Time.time - lastPickupInput <= inputBufferTime)
         {
-            lastPickupInput = -1f; // Consume the input
+            lastPickupInput = -1f;
             return true;
         }
         return false;
     }
 
-    /// <summary>
-    /// FIXED: Check if dash was pressed this frame
-    /// </summary>
     public bool GetDashPressed() => dashPressed;
 
-    /// <summary>
-    /// FIXED: Check if dash was pressed with input buffering
-    /// </summary>
     public bool GetDashBuffered()
     {
         if (Time.time - lastDashInput <= inputBufferTime)
         {
-            lastDashInput = -1f; // Consume the input
+            lastDashInput = -1f;
             return true;
         }
         return false;
     }
 
-    /// <summary>
-    /// FIXED: Check if ultimate was pressed this frame
-    /// </summary>
+    // FIXED: Complete Ultimate/Trick/Treat getters
     public bool GetUltimatePressed() => ultimatePressed;
 
-    /// <summary>
-    /// FIXED: Check if ultimate was pressed with input buffering
-    /// </summary>
     public bool GetUltimateBuffered()
     {
         if (Time.time - lastUltimateInput <= inputBufferTime)
         {
-            lastUltimateInput = -1f; // Consume the input
+            lastUltimateInput = -1f;
+            return true;
+        }
+        return false;
+    }
+
+    public bool GetTrickPressed() => trickPressed;
+
+    public bool GetTrickBuffered()
+    {
+        if (Time.time - lastTrickInput <= inputBufferTime)
+        {
+            lastTrickInput = -1f;
+            return true;
+        }
+        return false;
+    }
+
+    public bool GetTreatPressed() => treatPressed;
+
+    public bool GetTreatBuffered()
+    {
+        if (Time.time - lastTreatInput <= inputBufferTime)
+        {
+            lastTreatInput = -1f;
             return true;
         }
         return false;
@@ -633,73 +698,67 @@ public class PlayerInputHandler : MonoBehaviour
     // UTILITY METHODS
     // ===========================================
 
-    /// <summary>
-    /// Get player type for identification
-    /// </summary>
     public PlayerInputType GetPlayerType() => playerType;
 
-    /// <summary>
-    /// Check if this player is using mobile input currently
-    /// </summary>
     public bool IsMobileInputActive()
     {
         return mobileLeftPressed || mobileRightPressed || mobileDuckPressed ||
                mobileJumpPressedThisFrame || mobileThrowPressedThisFrame ||
                mobileCatchPressedThisFrame || mobilePickupPressedThisFrame ||
-               mobileDashPressedThisFrame || mobileUltimatePressedThisFrame;
+               mobileDashPressedThisFrame || mobileUltimatePressedThisFrame ||
+               mobileTrickPressedThisFrame || mobileTreatPressedThisFrame;
     }
 
-    /// <summary>
-    /// Manually set player type (useful for dynamic assignment)
-    /// </summary>
     public void SetPlayerType(PlayerInputType type)
     {
         playerType = type;
         SetupKeyMappings();
     }
 
+    // Duck system utilities
+    public DuckSystem GetDuckSystem() => duckSystem;
+    public bool IsUsingDuckSystem() => useDuckSystem && duckSystem != null;
+
     void DisplayDebugInfo()
     {
         if (horizontalInput != 0 || jumpPressed || duckHeld || throwPressed || catchPressed ||
-            pickupPressed || dashPressed || ultimatePressed)
+            pickupPressed || dashPressed || ultimatePressed || trickPressed || treatPressed)
         {
+            string duckInfo = "";
+            if (useDuckSystem && duckSystem != null)
+            {
+                duckInfo = $" Duck:[{duckHeld}|{duckSystem.IsDucking()}|{duckSystem.CanDuck()}]";
+            }
+            else
+            {
+                duckInfo = $" Duck:{duckHeld}";
+            }
+
             Debug.Log($"{gameObject.name} ({playerType}) - " +
-                     $"H:{horizontalInput:F1} J:{jumpPressed} D:{duckHeld} " +
+                     $"H:{horizontalInput:F1} J:{jumpPressed}{duckInfo} " +
                      $"T:{throwPressed} C:{catchPressed} P:{pickupPressed} " +
-                     $"Dash:{dashPressed} Ult:{ultimatePressed} " +
+                     $"Dash:{dashPressed} Ult:{ultimatePressed} Trick:{trickPressed} Treat:{treatPressed} " +
                      $"Mobile:{IsMobileInputActive()}");
         }
     }
 
-    // ===========================================
-    // INTEGRATION HELPER METHODS
-    // ===========================================
-
-    /// <summary>
-    /// Helper method to replace Input.GetKey() calls in existing scripts
-    /// </summary>
     public bool GetKeyEquivalent(KeyCode key)
     {
         if (key == leftKey) return horizontalInput < -0.5f;
         if (key == rightKey) return horizontalInput > 0.5f;
         if (key == jumpKey) return jumpPressed;
-        if (key == duckKey) return duckHeld;
+        if (key == duckKey) return GetDuckHeld();
         if (key == throwKey) return throwPressed;
         if (key == catchKey) return catchPressed;
         if (key == pickupKey) return pickupPressed;
         if (key == dashKey) return dashPressed;
         if (key == ultimateKey) return ultimatePressed;
+        if (key == trickKey) return trickPressed;
+        if (key == treatKey) return treatPressed;
 
         return false;
     }
 
-    // ===========================================
-    // CLEANUP METHODS
-    // ===========================================
-
-    /// <summary>
-    /// Reset all mobile input states - useful when switching scenes or pausing
-    /// </summary>
     public void ResetMobileInputs()
     {
         mobileLeftPressed = false;
@@ -711,6 +770,8 @@ public class PlayerInputHandler : MonoBehaviour
         mobilePickupPressedThisFrame = false;
         mobileDashPressedThisFrame = false;
         mobileUltimatePressedThisFrame = false;
+        mobileTrickPressedThisFrame = false;
+        mobileTreatPressedThisFrame = false;
         mobileHorizontal = 0f;
 
         if (showDebugInfo)

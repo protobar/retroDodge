@@ -2,7 +2,7 @@ using UnityEngine;
 
 /// <summary>
 /// Updated BallManager that integrates with the character system
-/// Requests damage values from character data instead of hardcoding
+/// FIXED: Updated to use new enum names from enhanced CharacterData
 /// </summary>
 public class BallManager : MonoBehaviour
 {
@@ -189,40 +189,37 @@ public class BallManager : MonoBehaviour
                 return 22f;
             case ThrowType.Ultimate:
                 return 25f;
-            case ThrowType.PowerThrow:
-                return 20f;
             default:
                 return 18f;
         }
     }
 
     /// <summary>
-    /// Handle ultimate throws with special effects
+    /// FIXED: Handle ultimate throws with new UltimateType enum
     /// </summary>
-    public void RequestUltimateThrow(PlayerCharacter thrower, UltimateAbilityType ultimateType)
+    public void RequestUltimateThrow(PlayerCharacter thrower, UltimateType ultimateType)
     {
         if (currentBall == null || currentBall.GetHolder() != thrower) return;
 
         CharacterData characterData = thrower.GetCharacterData();
         if (characterData == null) return;
 
-        int ultimateDamage = characterData.GetThrowDamage(ThrowType.Ultimate);
+        int ultimateDamage = characterData.GetUltimateDamage();
 
         switch (ultimateType)
         {
-            case UltimateAbilityType.PowerThrow:
+            case UltimateType.PowerThrow:
                 // Single powerful throw
                 RequestBallThrowWithCharacterData(thrower, characterData, ThrowType.Ultimate, ultimateDamage);
                 break;
 
-            case UltimateAbilityType.MultiThrow:
-                // Create multiple balls (implementation needed)
+            case UltimateType.MultiThrow:
+                // Create multiple balls (implementation handled by PlayerCharacter)
                 StartCoroutine(MultiThrowCoroutine(thrower, characterData));
                 break;
 
-            case UltimateAbilityType.HomingBall:
-                // Enable homing for this throw
-                currentBall.EnableHoming(true);
+            case UltimateType.Curveball:
+                // Enable curve behavior (implementation handled by PlayerCharacter)
                 RequestBallThrowWithCharacterData(thrower, characterData, ThrowType.Ultimate, ultimateDamage);
                 break;
 
@@ -239,12 +236,13 @@ public class BallManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Handle multi-throw ultimate
+    /// Handle multi-throw ultimate (called from RequestUltimateThrow)
     /// </summary>
     System.Collections.IEnumerator MultiThrowCoroutine(PlayerCharacter thrower, CharacterData characterData)
     {
-        int throwCount = 3; // Throw 3 balls in sequence
-        int damagePerBall = characterData.GetThrowDamage(ThrowType.Ultimate) / 2; // Reduced damage per ball
+        int throwCount = characterData.GetMultiThrowCount();
+        int damagePerBall = characterData.GetUltimateDamage();
+        float throwSpeed = characterData.GetUltimateSpeed();
 
         for (int i = 0; i < throwCount; i++)
         {
@@ -254,14 +252,18 @@ public class BallManager : MonoBehaviour
 
             if (tempBall != null)
             {
-                tempBall.SetThrowData(ThrowType.Ultimate, damagePerBall, GetBaseThrowSpeed(ThrowType.Ultimate));
+                tempBall.SetThrowData(ThrowType.Ultimate, damagePerBall, throwSpeed);
 
-                // Throw in slightly different directions
-                Vector3 throwDir = Vector3.right + Vector3.up * (i * 0.1f - 0.1f);
+                // Throw in spread pattern
+                float spreadAngle = characterData.GetMultiThrowSpread();
+                float angleOffset = (i - (throwCount - 1) * 0.5f) * (spreadAngle / throwCount);
+                Vector3 throwDir = Quaternion.Euler(0, angleOffset, 0) * Vector3.right;
+                throwDir.y = 0.1f;
+
                 tempBall.ThrowBall(throwDir.normalized, 1f);
             }
 
-            yield return new WaitForSeconds(0.2f); // Small delay between throws
+            yield return new WaitForSeconds(characterData.GetMultiThrowDelay());
         }
     }
 
@@ -349,7 +351,7 @@ public class BallManager : MonoBehaviour
             if (data != null)
             {
                 Debug.Log($"{data.characterName}: HP={data.maxHealth}, Speed={data.moveSpeed}, " +
-                         $"Damage={data.normalThrowDamage}/{data.jumpThrowDamage}/{data.ultimateThrowDamage}");
+                         $"Ultimate={data.ultimateType}, Trick={data.trickType}, Treat={data.treatType}");
             }
         }
     }

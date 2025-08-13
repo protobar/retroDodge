@@ -305,7 +305,6 @@ public class BallController : MonoBehaviour
         return currentThrowType switch
         {
             ThrowType.Ultimate => Color.red,
-            ThrowType.PowerThrow => new Color(1f, 0.5f, 0f), // Orange
             ThrowType.JumpThrow => Color.green,
             _ => Color.red
         };

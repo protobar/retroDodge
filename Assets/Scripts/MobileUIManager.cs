@@ -2,6 +2,10 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 
+/// <summary>
+/// Enhanced MobileUIManager with complete button support including Ultimate/Trick/Treat
+/// Plus Duck System integration for visual feedback
+/// </summary>
 public class MobileUIManager : MonoBehaviour
 {
     #region Singleton
@@ -48,20 +52,47 @@ public class MobileUIManager : MonoBehaviour
     [SerializeField] private Button leftButton;
     [SerializeField] private Button rightButton;
 
-    [Header("Action Buttons")]
+    [Header("Basic Action Buttons")]
     [SerializeField] private Button jumpButton;
     [SerializeField] private Button throwButton;
     [SerializeField] private Button catchButton;
     [SerializeField] private Button pickupButton;
     [SerializeField] private Button duckButton;
 
+    [Header("Special Ability Buttons (NEW)")]
+    [SerializeField] private Button dashButton;
+    [SerializeField] private Button ultimateButton;
+    [SerializeField] private Button trickButton;
+    [SerializeField] private Button treatButton;
+
+    [Header("Duck System Visual Feedback (Optional)")]
+    [SerializeField] private Image duckButtonImage;
+    [SerializeField] private Image duckCooldownOverlay;
+    [SerializeField] private Text duckTimerText;
+    [SerializeField] private Color duckNormalColor = Color.white;
+    [SerializeField] private Color duckActiveColor = Color.green;
+    [SerializeField] private Color duckCooldownColor = Color.red;
+    [SerializeField] private Color duckBlockedColor = Color.gray;
+
+    [Header("Ability Button Visual Feedback (Optional)")]
+    [SerializeField] private Image ultimateButtonImage;
+    [SerializeField] private Image trickButtonImage;
+    [SerializeField] private Image treatButtonImage;
+    [SerializeField] private Color abilityReadyColor = Color.cyan;
+    [SerializeField] private Color abilityNotReadyColor = Color.gray;
+    [SerializeField] private Color abilityCooldownColor = Color.red;
+
     [Header("Settings")]
     [SerializeField] private bool autoShowOnMobile = true;
     [SerializeField] private bool debugMode = false;
-    [SerializeField] private bool autoSetupButtons = true; // NEW: Control automatic setup
+    [SerializeField] private bool autoSetupButtons = true;
+    [SerializeField] private bool enableDuckSystemFeedback = false; // Optional feature
+    [SerializeField] private bool enableAbilityFeedback = false; // Optional feature
 
     // Runtime assignment
     private PlayerInputHandler assignedInputHandler;
+    private DuckSystem assignedDuckSystem;
+    private PlayerCharacter assignedPlayerCharacter;
     private bool isInputHandlerAssigned = false;
 
     // Button states for hold detection
@@ -74,7 +105,6 @@ public class MobileUIManager : MonoBehaviour
     {
         SetupMobileUI();
 
-        // Auto-show on mobile platforms or when forced
         if (autoShowOnMobile)
         {
             bool shouldShowMobile = false;
@@ -82,10 +112,8 @@ public class MobileUIManager : MonoBehaviour
 #if UNITY_ANDROID || UNITY_IOS
             shouldShowMobile = true;
 #else
-            // Check if any assigned input handler has force mobile mode
             if (assignedInputHandler != null)
             {
-                // Check if the assigned handler is forcing mobile mode
                 shouldShowMobile = CheckIfMobileModeForced();
             }
 #endif
@@ -99,9 +127,22 @@ public class MobileUIManager : MonoBehaviour
         }
     }
 
+    void Update()
+    {
+        // Update visual feedback systems (only if enabled and references exist)
+        if (enableDuckSystemFeedback && assignedDuckSystem != null && duckButtonImage != null)
+        {
+            UpdateDuckButtonFeedback();
+        }
+
+        if (enableAbilityFeedback && assignedPlayerCharacter != null)
+        {
+            UpdateAbilityButtonFeedback();
+        }
+    }
+
     bool CheckIfMobileModeForced()
     {
-        // Use reflection to check the forceMobileMode field
         var field = assignedInputHandler.GetType().GetField("forceMobileMode",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
@@ -115,13 +156,11 @@ public class MobileUIManager : MonoBehaviour
 
     void InitializeUI()
     {
-        // Create mobile canvas if not assigned
         if (mobileCanvas == null)
         {
             CreateMobileCanvas();
         }
 
-        // Ensure canvas persists across scenes
         if (mobileCanvas != null)
         {
             DontDestroyOnLoad(mobileCanvas.gameObject);
@@ -135,16 +174,13 @@ public class MobileUIManager : MonoBehaviour
         mobileCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
         mobileCanvas.sortingOrder = 1000;
 
-        // Add CanvasScaler for responsive design
         CanvasScaler scaler = canvasGO.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920, 1080);
         scaler.matchWidthOrHeight = 0.5f;
 
-        // Add GraphicRaycaster
         canvasGO.AddComponent<GraphicRaycaster>();
 
-        // Create controls panel
         CreateMobileControlsPanel();
 
         if (debugMode)
@@ -168,7 +204,6 @@ public class MobileUIManager : MonoBehaviour
 
         mobileControlsPanel = panelGO;
 
-        // Create buttons programmatically or assign them in inspector
         if (debugMode)
         {
             Debug.Log("MobileUIManager: Created mobile controls panel");
@@ -180,21 +215,27 @@ public class MobileUIManager : MonoBehaviour
         if (mobileControlsPanel == null || !autoSetupButtons) return;
 
         // Setup movement buttons
-        SetupMovementButton(leftButton, true);  // true = left
-        SetupMovementButton(rightButton, false); // false = right
+        SetupMovementButton(leftButton, true);
+        SetupMovementButton(rightButton, false);
 
-        // Setup action buttons - FIXED: Only setup if no manual events exist
+        // Setup action buttons
         SetupActionButton(jumpButton, ActionType.Jump);
         SetupActionButton(pickupButton, ActionType.Pickup);
         SetupActionButton(catchButton, ActionType.Catch);
+        SetupActionButton(dashButton, ActionType.Dash);
 
-        // Setup hold buttons (throw and duck)
+        // Setup hold buttons
         SetupHoldButton(throwButton, ActionType.Throw);
         SetupHoldButton(duckButton, ActionType.Duck);
 
+        // ENHANCED: Setup ability buttons (Ultimate/Trick/Treat)
+        SetupActionButton(ultimateButton, ActionType.Ultimate);
+        SetupActionButton(trickButton, ActionType.Trick);
+        SetupActionButton(treatButton, ActionType.Treat);
+
         if (debugMode)
         {
-            Debug.Log("MobileUIManager: Mobile UI setup complete");
+            Debug.Log("MobileUIManager: Mobile UI setup complete with all buttons");
         }
     }
 
@@ -202,12 +243,9 @@ public class MobileUIManager : MonoBehaviour
     {
         if (button == null) return;
 
-        // Add EventTrigger for pointer down/up events
         EventTrigger trigger = button.GetComponent<EventTrigger>();
         if (trigger == null) trigger = button.gameObject.AddComponent<EventTrigger>();
 
-        // Only clear if we're managing this automatically
-        // If user has manually assigned events, preserve them
         if (trigger.triggers.Count == 0)
         {
             // Pointer Down
@@ -222,7 +260,7 @@ public class MobileUIManager : MonoBehaviour
             upEntry.callback.AddListener((data) => OnMovementUp(isLeft));
             trigger.triggers.Add(upEntry);
 
-            // Pointer Exit (in case finger drags off button)
+            // Pointer Exit
             EventTrigger.Entry exitEntry = new EventTrigger.Entry();
             exitEntry.eventID = EventTriggerType.PointerExit;
             exitEntry.callback.AddListener((data) => OnMovementUp(isLeft));
@@ -243,12 +281,10 @@ public class MobileUIManager : MonoBehaviour
     {
         if (button == null) return;
 
-        // FIXED: Check if button already has manual listeners before removing them
         bool hasExistingListeners = button.onClick.GetPersistentEventCount() > 0;
 
         if (!hasExistingListeners)
         {
-            // Use OnClick for instant actions
             button.onClick.RemoveAllListeners();
             button.onClick.AddListener(() => OnActionPressed(actionType));
 
@@ -267,14 +303,11 @@ public class MobileUIManager : MonoBehaviour
     {
         if (button == null) return;
 
-        // Add EventTrigger for hold behavior
         EventTrigger trigger = button.GetComponent<EventTrigger>();
         if (trigger == null) trigger = button.gameObject.AddComponent<EventTrigger>();
 
-        // Check if button has manual onClick listeners
         bool hasManualOnClick = button.onClick.GetPersistentEventCount() > 0;
 
-        // Only setup if not already configured AND no manual onClick events
         if (trigger.triggers.Count == 0 && !hasManualOnClick)
         {
             // Pointer Down
@@ -306,81 +339,107 @@ public class MobileUIManager : MonoBehaviour
         }
     }
 
-    #region Public Manual Input Methods (for manual UI setup)
-
-    /// <summary>
-    /// Public method for manual UI event assignment
-    /// </summary>
-    public void OnMovementDownPublic(bool isLeft)
+    void UpdateDuckButtonFeedback()
     {
-        OnMovementDown(isLeft);
+        if (duckButtonImage == null || assignedDuckSystem == null) return;
+
+        if (assignedDuckSystem.IsDucking())
+        {
+            duckButtonImage.color = duckActiveColor;
+
+            if (duckTimerText != null)
+            {
+                float timeRemaining = assignedDuckSystem.GetDuckTimeRemaining();
+                duckTimerText.text = $"{timeRemaining:F1}s";
+                duckTimerText.gameObject.SetActive(true);
+            }
+
+            if (duckCooldownOverlay != null)
+            {
+                float progress = assignedDuckSystem.GetDuckProgress();
+                duckCooldownOverlay.fillAmount = progress;
+                duckCooldownOverlay.color = Color.Lerp(Color.clear, duckActiveColor, progress);
+            }
+        }
+        else if (assignedDuckSystem.IsInCooldown())
+        {
+            duckButtonImage.color = duckCooldownColor;
+
+            if (duckTimerText != null)
+            {
+                float cooldownRemaining = assignedDuckSystem.GetCooldownTimeRemaining();
+                duckTimerText.text = $"{cooldownRemaining:F1}s";
+                duckTimerText.gameObject.SetActive(true);
+            }
+
+            if (duckCooldownOverlay != null)
+            {
+                float progress = assignedDuckSystem.GetCooldownProgress();
+                duckCooldownOverlay.fillAmount = 1f - progress;
+                duckCooldownOverlay.color = Color.Lerp(duckCooldownColor, Color.clear, progress);
+            }
+        }
+        else if (!assignedDuckSystem.CanDuck())
+        {
+            duckButtonImage.color = duckBlockedColor;
+
+            if (duckTimerText != null)
+            {
+                duckTimerText.gameObject.SetActive(false);
+            }
+        }
+        else
+        {
+            duckButtonImage.color = duckNormalColor;
+
+            if (duckTimerText != null)
+            {
+                duckTimerText.gameObject.SetActive(false);
+            }
+
+            if (duckCooldownOverlay != null)
+            {
+                duckCooldownOverlay.fillAmount = 0f;
+            }
+        }
     }
 
-    /// <summary>
-    /// Public method for manual UI event assignment
-    /// </summary>
-    public void OnMovementUpPublic(bool isLeft)
+    void UpdateAbilityButtonFeedback()
     {
-        OnMovementUp(isLeft);
+        if (assignedPlayerCharacter == null) return;
+
+        // Update Ultimate button
+        if (ultimateButtonImage != null)
+        {
+            float ultimateCharge = assignedPlayerCharacter.GetUltimateChargePercentage();
+            bool ultimateReady = ultimateCharge >= 1f;
+
+            ultimateButtonImage.color = ultimateReady ? abilityReadyColor :
+                Color.Lerp(abilityNotReadyColor, abilityReadyColor, ultimateCharge);
+        }
+
+        // Update Trick button
+        if (trickButtonImage != null)
+        {
+            float trickCharge = assignedPlayerCharacter.GetTrickChargePercentage();
+            bool trickReady = trickCharge >= 1f;
+
+            trickButtonImage.color = trickReady ? abilityReadyColor :
+                Color.Lerp(abilityNotReadyColor, abilityReadyColor, trickCharge);
+        }
+
+        // Update Treat button
+        if (treatButtonImage != null)
+        {
+            float treatCharge = assignedPlayerCharacter.GetTreatChargePercentage();
+            bool treatReady = treatCharge >= 1f;
+
+            treatButtonImage.color = treatReady ? abilityReadyColor :
+                Color.Lerp(abilityNotReadyColor, abilityReadyColor, treatCharge);
+        }
     }
 
-    /// <summary>
-    /// Public method for manual UI event assignment - Jump
-    /// </summary>
-    public void OnJumpPressed()
-    {
-        OnActionPressed(ActionType.Jump);
-    }
-
-    /// <summary>
-    /// Public method for manual UI event assignment - Catch
-    /// </summary>
-    public void OnCatchPressed()
-    {
-        OnActionPressed(ActionType.Catch);
-    }
-
-    /// <summary>
-    /// Public method for manual UI event assignment - Pickup
-    /// </summary>
-    public void OnPickupPressed()
-    {
-        OnActionPressed(ActionType.Pickup);
-    }
-
-    /// <summary>
-    /// Public method for manual UI event assignment - Throw Down
-    /// </summary>
-    public void OnThrowDown()
-    {
-        OnHoldDown(ActionType.Throw);
-    }
-
-    /// <summary>
-    /// Public method for manual UI event assignment - Throw Up
-    /// </summary>
-    public void OnThrowUp()
-    {
-        OnHoldUp(ActionType.Throw);
-    }
-
-    /// <summary>
-    /// Public method for manual UI event assignment - Duck Down
-    /// </summary>
-    public void OnDuckDown()
-    {
-        OnHoldDown(ActionType.Duck);
-    }
-
-    /// <summary>
-    /// Public method for manual UI event assignment - Duck Up
-    /// </summary>
-    public void OnDuckUp()
-    {
-        OnHoldUp(ActionType.Duck);
-    }
-
-    #endregion
+    #region Input Event Handlers
 
     void OnMovementDown(bool isLeft)
     {
@@ -449,6 +508,19 @@ public class MobileUIManager : MonoBehaviour
             case ActionType.Catch:
                 assignedInputHandler.OnMobileCatch();
                 break;
+            case ActionType.Dash:
+                assignedInputHandler.OnMobileDash();
+                break;
+            // ENHANCED: Add Ultimate/Trick/Treat cases
+            case ActionType.Ultimate:
+                assignedInputHandler.OnMobileUltimate();
+                break;
+            case ActionType.Trick:
+                assignedInputHandler.OnMobileTrick();
+                break;
+            case ActionType.Treat:
+                assignedInputHandler.OnMobileTreat();
+                break;
         }
 
         if (debugMode)
@@ -472,8 +544,16 @@ public class MobileUIManager : MonoBehaviour
                 assignedInputHandler.OnMobileThrowDown();
                 break;
             case ActionType.Duck:
-                isDuckHeld = true;
-                assignedInputHandler.OnMobileDuckDown();
+                // ENHANCED: Check duck system before allowing duck
+                if (assignedDuckSystem == null || assignedDuckSystem.CanDuck())
+                {
+                    isDuckHeld = true;
+                    assignedInputHandler.OnMobileDuckDown();
+                }
+                else if (debugMode)
+                {
+                    Debug.Log("Duck blocked by duck system");
+                }
                 break;
         }
 
@@ -505,20 +585,156 @@ public class MobileUIManager : MonoBehaviour
         }
     }
 
+    #endregion
+
+    #region Public Manual Input Methods
+
+    /// <summary>
+    /// Public method for manual UI event assignment
+    /// </summary>
+    public void OnMovementDownPublic(bool isLeft)
+    {
+        OnMovementDown(isLeft);
+    }
+
+    /// <summary>
+    /// Public method for manual UI event assignment
+    /// </summary>
+    public void OnMovementUpPublic(bool isLeft)
+    {
+        OnMovementUp(isLeft);
+    }
+
+    /// <summary>
+    /// Public method for manual UI event assignment - Jump
+    /// </summary>
+    public void OnJumpPressed()
+    {
+        OnActionPressed(ActionType.Jump);
+    }
+
+    /// <summary>
+    /// Public method for manual UI event assignment - Catch
+    /// </summary>
+    public void OnCatchPressed()
+    {
+        OnActionPressed(ActionType.Catch);
+    }
+
+    /// <summary>
+    /// Public method for manual UI event assignment - Pickup
+    /// </summary>
+    public void OnPickupPressed()
+    {
+        OnActionPressed(ActionType.Pickup);
+    }
+
+    /// <summary>
+    /// Public method for manual UI event assignment - Dash
+    /// </summary>
+    public void OnDashPressed()
+    {
+        OnActionPressed(ActionType.Dash);
+    }
+
+    // ENHANCED: Add missing public methods for Ultimate/Trick/Treat
+    /// <summary>
+    /// Public method for manual UI event assignment - Ultimate
+    /// </summary>
+    public void OnUltimatePressed()
+    {
+        OnActionPressed(ActionType.Ultimate);
+    }
+
+    /// <summary>
+    /// Public method for manual UI event assignment - Trick
+    /// </summary>
+    public void OnTrickPressed()
+    {
+        OnActionPressed(ActionType.Trick);
+    }
+
+    /// <summary>
+    /// Public method for manual UI event assignment - Treat
+    /// </summary>
+    public void OnTreatPressed()
+    {
+        OnActionPressed(ActionType.Treat);
+    }
+
+    /// <summary>
+    /// Public method for manual UI event assignment - Throw Down
+    /// </summary>
+    public void OnThrowDown()
+    {
+        OnHoldDown(ActionType.Throw);
+    }
+
+    /// <summary>
+    /// Public method for manual UI event assignment - Throw Up
+    /// </summary>
+    public void OnThrowUp()
+    {
+        OnHoldUp(ActionType.Throw);
+    }
+
+    /// <summary>
+    /// Public method for manual UI event assignment - Duck Down
+    /// </summary>
+    public void OnDuckDown()
+    {
+        OnHoldDown(ActionType.Duck);
+    }
+
+    /// <summary>
+    /// Public method for manual UI event assignment - Duck Up
+    /// </summary>
+    public void OnDuckUp()
+    {
+        OnHoldUp(ActionType.Duck);
+    }
+
+    #endregion
+
     #region Public API
 
     /// <summary>
-    /// Assign a PlayerInputHandler to receive mobile input events
-    /// Call this when the local player spawns
+    /// Enhanced assignment with duck system and player character integration
     /// </summary>
     public void AssignInputHandler(PlayerInputHandler inputHandler)
     {
         assignedInputHandler = inputHandler;
         isInputHandlerAssigned = (inputHandler != null);
 
+        // ENHANCED: Also get duck system and player character references (only if feedback enabled)
+        if (inputHandler != null)
+        {
+            if (enableDuckSystemFeedback)
+            {
+                assignedDuckSystem = inputHandler.GetComponent<DuckSystem>();
+                if (assignedDuckSystem == null)
+                {
+                    Debug.LogWarning("MobileUIManager: Duck system feedback enabled but no DuckSystem found on player!");
+                }
+            }
+
+            if (enableAbilityFeedback)
+            {
+                assignedPlayerCharacter = inputHandler.GetComponent<PlayerCharacter>();
+                if (assignedPlayerCharacter == null)
+                {
+                    Debug.LogWarning("MobileUIManager: Ability feedback enabled but no PlayerCharacter found on player!");
+                }
+            }
+        }
+
         if (debugMode)
         {
             Debug.Log($"MobileUIManager: Input handler assigned - {(isInputHandlerAssigned ? "SUCCESS" : "NULL")}");
+            if (enableDuckSystemFeedback)
+                Debug.Log($"MobileUIManager: Duck System: {(assignedDuckSystem != null ? "Found" : "None")}");
+            if (enableAbilityFeedback)
+                Debug.Log($"MobileUIManager: Player Character: {(assignedPlayerCharacter != null ? "Found" : "None")}");
         }
 
         // Auto-show controls when local player is assigned
@@ -529,7 +745,6 @@ public class MobileUIManager : MonoBehaviour
 #if UNITY_ANDROID || UNITY_IOS
             shouldShowMobile = true;
 #else
-            // On desktop, check if mobile input is enabled on the assigned handler
             shouldShowMobile = inputHandler.enableMobileInput;
 #endif
 
@@ -552,9 +767,10 @@ public class MobileUIManager : MonoBehaviour
     public void ClearInputHandler()
     {
         assignedInputHandler = null;
+        assignedDuckSystem = null;
+        assignedPlayerCharacter = null;
         isInputHandlerAssigned = false;
 
-        // Release all held inputs
         ReleaseAllInputs();
 
         if (debugMode)
@@ -611,6 +827,27 @@ public class MobileUIManager : MonoBehaviour
         autoSetupButtons = enable;
     }
 
+    // ENHANCED: Duck system specific methods
+    public void SetDuckSystemFeedbackEnabled(bool enabled)
+    {
+        enableDuckSystemFeedback = enabled;
+    }
+
+    public void SetAbilityFeedbackEnabled(bool enabled)
+    {
+        enableAbilityFeedback = enabled;
+    }
+
+    public DuckSystem GetAssignedDuckSystem()
+    {
+        return assignedDuckSystem;
+    }
+
+    public PlayerCharacter GetAssignedPlayerCharacter()
+    {
+        return assignedPlayerCharacter;
+    }
+
     #endregion
 
     #region Utility Methods
@@ -658,7 +895,6 @@ public class MobileUIManager : MonoBehaviour
 
     void OnApplicationPause(bool pauseStatus)
     {
-        // Release all inputs when app is paused
         if (pauseStatus)
         {
             ReleaseAllInputs();
@@ -667,13 +903,17 @@ public class MobileUIManager : MonoBehaviour
 
     #endregion
 
-    // Enum for action types
+    // ENHANCED: Complete ActionType enum with all abilities
     private enum ActionType
     {
         Jump,
         Throw,
         Catch,
         Pickup,
-        Duck
+        Duck,
+        Dash,      // Added
+        Ultimate,  // Added
+        Trick,     // Added
+        Treat      // Added
     }
 }

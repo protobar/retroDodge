@@ -1,10 +1,9 @@
-using UnityEngine;
+﻿using UnityEngine;
 using System.Collections;
-using System.Collections.Generic;
 
 /// <summary>
-/// Main character controller that applies CharacterData stats to gameplay
-/// Integrates with existing PlayerInputHandler and BallController systems
+/// Clean PlayerCharacter with streamlined ability system
+/// Focuses on core movement + 9 clean abilities (3 Ultimate, 3 Trick, 3 Treat)
 /// </summary>
 public class PlayerCharacter : MonoBehaviour
 {
@@ -16,7 +15,7 @@ public class PlayerCharacter : MonoBehaviour
     [SerializeField] private bool debugMode = true;
     [SerializeField] private bool showCharacterInfo = true;
 
-    // Core Components (existing systems)
+    // Core Components
     private PlayerInputHandler inputHandler;
     private CapsuleCollider characterCollider;
     private CatchSystem catchSystem;
@@ -36,7 +35,21 @@ public class PlayerCharacter : MonoBehaviour
     private bool canDash = true;
     private float lastDashTime = 0f;
     private bool isDashing = false;
+    private bool inputEnabled = true;
+    private bool isTeleporting = false; // FIXED: Add teleporting state
+
+    // Ability charge system
     private float currentUltimateCharge = 0f;
+    private float currentTrickCharge = 0f;
+    private float currentTreatCharge = 0f;
+
+    // Ability cooldown system
+    private bool ultimateOnCooldown = false;
+    private bool trickOnCooldown = false;
+    private bool treatOnCooldown = false;
+    private float ultimateCooldownTime = 3f;
+    private float trickCooldownTime = 8f;
+    private float treatCooldownTime = 10f;
 
     // Original collider dimensions for ducking
     private float originalColliderHeight;
@@ -47,10 +60,17 @@ public class PlayerCharacter : MonoBehaviour
     [SerializeField] private LayerMask groundLayer = 1;
     [SerializeField] private float groundCheckDistance = 0.1f;
 
+    [Header("Movement Restriction")]
+    private ArenaMovementRestrictor movementRestrictor;
+
+    [Header("Duck System Integration")]
+    private DuckSystem duckSystem;
+
     // Events for other systems
     public System.Action<CharacterData> OnCharacterLoaded;
     public System.Action<float> OnUltimateChargeChanged;
-    public System.Action OnUltimateActivated;
+    public System.Action<float> OnTrickChargeChanged;
+    public System.Action<float> OnTreatChargeChanged;
 
     void Awake()
     {
@@ -59,6 +79,19 @@ public class PlayerCharacter : MonoBehaviour
         if (autoLoadCharacterOnStart && characterData != null)
         {
             LoadCharacter(characterData);
+        }
+
+        // Get or add movement restrictor
+        movementRestrictor = GetComponent<ArenaMovementRestrictor>();
+        if (movementRestrictor == null)
+        {
+            movementRestrictor = gameObject.AddComponent<ArenaMovementRestrictor>();
+        }
+
+        duckSystem = GetComponent<DuckSystem>();
+        if (duckSystem == null)
+        {
+            duckSystem = gameObject.AddComponent<DuckSystem>();
         }
     }
 
@@ -102,12 +135,9 @@ public class PlayerCharacter : MonoBehaviour
         HandleMovement();
         HandleDucking();
         HandleBallInteraction();
-        UpdateUltimateCharge();
+        UpdateAbilityCharges();
     }
 
-    /// <summary>
-    /// Load a new character and apply all stats
-    /// </summary>
     public void LoadCharacter(CharacterData newCharacterData)
     {
         characterData = newCharacterData;
@@ -120,9 +150,6 @@ public class PlayerCharacter : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Apply character stats to all systems
-    /// </summary>
     void ApplyCharacterStats()
     {
         if (characterData == null) return;
@@ -136,6 +163,8 @@ public class PlayerCharacter : MonoBehaviour
 
         // Reset character-specific state
         currentUltimateCharge = 0f;
+        currentTrickCharge = 0f;
+        currentTreatCharge = 0f;
         hasDoubleJumped = false;
         canDash = true;
 
@@ -146,7 +175,7 @@ public class PlayerCharacter : MonoBehaviour
         {
             Debug.Log($"Applied stats for {characterData.characterName}: " +
                      $"Speed={characterData.moveSpeed}, Health={characterData.maxHealth}, " +
-                     $"Jump={characterData.jumpHeight}");
+                     $"Ultimate={characterData.ultimateType}, Trick={characterData.trickType}, Treat={characterData.treatType}");
         }
     }
 
@@ -158,14 +187,11 @@ public class PlayerCharacter : MonoBehaviour
         {
             characterRenderer.material.color = characterData.characterColor;
         }
-
-        // TODO: Instantiate character prefab if provided
-        // This would replace the basic capsule with the actual character model
     }
 
     void HandleInput()
     {
-        if (inputHandler == null || characterData == null) return;
+        if (inputHandler == null || characterData == null || !inputEnabled) return;
 
         // Jump input (support double jump if character has it)
         if (inputHandler.GetJumpPressed())
@@ -186,20 +212,60 @@ public class PlayerCharacter : MonoBehaviour
             PerformDash();
         }
 
-        // Ultimate input
+        // Ability inputs
         if (inputHandler.GetUltimatePressed() && CanUseUltimate())
         {
             ActivateUltimate();
         }
 
-        // Duck input - state-based crouching
-        bool duckInput = inputHandler.GetDuckHeld() && isGrounded;
-
-        // Check if ducking state changed
-        if (duckInput != isDucking)
+        if (inputHandler.GetTrickPressed() && CanUseTrick())
         {
-            isDucking = duckInput;
-            duckingStateChanged = true;
+            ActivateTrick();
+        }
+
+        if (inputHandler.GetTreatPressed() && CanUseTreat())
+        {
+            ActivateTreat();
+        }
+
+        // ENHANCED: Duck input with duck system integration
+        HandleDuckingInput();
+    }
+
+    void HandleDuckingInput()
+    {
+        if (duckSystem != null)
+        {
+            // Duck system handles all the logic - we just read the state
+            bool newDuckState = duckSystem.IsDucking();
+
+            // Check if ducking state changed
+            if (newDuckState != isDucking)
+            {
+                isDucking = newDuckState;
+                duckingStateChanged = true;
+
+                if (debugMode)
+                {
+                    Debug.Log($"{characterData?.characterName} ducking state changed: {isDucking} (System managed)");
+                }
+            }
+        }
+        else
+        {
+            // Fallback to original duck handling
+            bool duckInput = inputHandler.GetDuckHeld() && isGrounded;
+
+            if (duckInput != isDucking)
+            {
+                isDucking = duckInput;
+                duckingStateChanged = true;
+
+                if (debugMode)
+                {
+                    Debug.Log($"{characterData?.characterName} ducking state changed: {isDucking} (Manual)");
+                }
+            }
         }
     }
 
@@ -213,30 +279,42 @@ public class PlayerCharacter : MonoBehaviour
         // Don't move while dashing or ducking
         if (isDashing || isDucking) return;
 
-        // Apply character's move speed
+        // CALCULATE movement (existing code)
+        Vector3 newPosition = characterTransform.position;
+
         if (horizontalInput != 0)
         {
             Vector3 moveDirection = Vector3.right * horizontalInput * characterData.moveSpeed;
-            characterTransform.Translate(moveDirection * Time.deltaTime, Space.World);
+            newPosition += moveDirection * Time.deltaTime;
         }
 
         // Apply gravity when not grounded
         if (!isGrounded)
         {
-            velocity.y -= 25f * Time.deltaTime; // Custom gravity
+            velocity.y -= 25f * Time.deltaTime;
         }
         else
         {
-            // Reset vertical velocity when grounded
             if (velocity.y < 0)
             {
                 velocity.y = 0f;
-                hasDoubleJumped = false; // Reset double jump when landing
+                hasDoubleJumped = false;
             }
         }
 
         // Apply vertical movement
-        characterTransform.Translate(Vector3.up * velocity.y * Time.deltaTime, Space.World);
+        newPosition += Vector3.up * velocity.y * Time.deltaTime;
+
+        // *** APPLY MOVEMENT RESTRICTION WITH TELEPORT OVERRIDE SUPPORT ***
+        if (movementRestrictor != null)
+        {
+            Vector3 restrictedPosition = movementRestrictor.ApplyMovementRestriction(newPosition);
+            characterTransform.position = restrictedPosition;
+        }
+        else
+        {
+            characterTransform.position = newPosition;
+        }
     }
 
     void Jump()
@@ -259,7 +337,7 @@ public class PlayerCharacter : MonoBehaviour
     {
         if (characterData == null || hasDoubleJumped) return;
 
-        velocity.y = characterData.jumpHeight * 0.8f; // Double jump is slightly weaker
+        velocity.y = characterData.jumpHeight * 0.8f;
         hasDoubleJumped = true;
 
         // Play jump sound
@@ -321,11 +399,6 @@ public class PlayerCharacter : MonoBehaviour
         // Reset dash availability after cooldown
         yield return new WaitForSeconds(characterData.GetDashCooldown());
         canDash = true;
-
-        if (debugMode)
-        {
-            Debug.Log($"{characterData.characterName} Dash completed!");
-        }
     }
 
     void HandleDucking()
@@ -341,71 +414,109 @@ public class PlayerCharacter : MonoBehaviour
                 originalColliderCenter.y - (originalColliderHeight * 0.25f),
                 originalColliderCenter.z
             );
+
+            if (debugMode)
+            {
+                Debug.Log($"{characterData?.characterName} Ducked! (Collider height: {characterCollider.height})");
+            }
         }
         else
         {
             // Stand up - restore original collider dimensions
             characterCollider.height = originalColliderHeight;
             characterCollider.center = originalColliderCenter;
+
+            if (debugMode)
+            {
+                Debug.Log($"{characterData?.characterName} Stood up! (Collider height: {characterCollider.height})");
+            }
         }
 
         duckingStateChanged = false;
     }
 
+    // Enhanced public getters that work with duck system
+    public bool IsDucking()
+    {
+        if (duckSystem != null)
+        {
+            return duckSystem.IsDucking();
+        }
+        return isDucking;
+    }
+
+    public bool CanDuck()
+    {
+        if (duckSystem != null)
+        {
+            return duckSystem.CanDuck() && isGrounded;
+        }
+        return isGrounded;
+    }
+
+    // Additional duck system getters for UI/feedback
+    public float GetDuckTimeRemaining()
+    {
+        return duckSystem?.GetDuckTimeRemaining() ?? 0f;
+    }
+
+    public float GetDuckProgress()
+    {
+        return duckSystem?.GetDuckProgress() ?? 0f;
+    }
+
+    public bool IsInDuckCooldown()
+    {
+        return duckSystem?.IsInCooldown() ?? false;
+    }
+
+    public float GetDuckCooldownRemaining()
+    {
+        return duckSystem?.GetCooldownTimeRemaining() ?? 0f;
+    }
+
+    public DuckSystem GetDuckSystem()
+    {
+        return duckSystem;
+    }
+
     void HandleBallInteraction()
     {
-        if (BallManager.Instance == null || inputHandler == null || characterData == null) return;
+        if (BallManager.Instance == null || inputHandler == null || characterData == null || !inputEnabled) return; // FIXED: Check inputEnabled
 
-        // Pickup ball
+        // Pickup ball (only if input enabled)
         if (inputHandler.GetPickupPressed() && !hasBall)
         {
             BallManager.Instance.RequestBallPickup(this);
         }
 
-        // Throw ball with character-specific damage
+        // Throw ball (only if input enabled)
         if (inputHandler.GetThrowPressed() && hasBall)
         {
             ThrowBall();
         }
     }
 
-    #region Special Throw Types
-
-    ThrowType DetermineThrowType()
-    {
-        // Check if this is a jump throw
-        if (!isGrounded)
-        {
-            return ThrowType.JumpThrow;
-        }
-
-        // Check for special throw based on character's specialThrowType
-        if (characterData.specialThrowType != ThrowType.Normal)
-        {
-            return characterData.specialThrowType;
-        }
-
-        return ThrowType.Normal;
-    }
-
     void ThrowBall()
     {
         if (!hasBall || BallManager.Instance == null || characterData == null) return;
 
-        // Determine throw type based on character state and special abilities
-        ThrowType throwType = DetermineThrowType();
+        // Determine throw type
+        ThrowType throwType = isGrounded ? ThrowType.Normal : ThrowType.JumpThrow;
 
-        // Get damage directly from character data
+        // Get damage from character data
         int throwDamage = characterData.GetThrowDamage(throwType);
 
-        // Apply special throw modifications
-        ApplySpecialThrowBehavior(throwType, throwDamage);
+        // Execute throw
+        BallManager.Instance.RequestBallThrowWithCharacterData(this, characterData, throwType, throwDamage);
 
         // Play throw sound
         PlayCharacterSound(CharacterAudioType.Throw);
 
-        // Add ultimate charge for throwing
+        // Add ability charges for throwing
         AddUltimateCharge(15f);
+        AddTrickCharge(10f);
+        AddTreatCharge(10f);
 
         if (debugMode)
         {
@@ -413,933 +524,13 @@ public class PlayerCharacter : MonoBehaviour
         }
     }
 
-    void ApplySpecialThrowBehavior(ThrowType throwType, int damage)
+    void UpdateAbilityCharges()
     {
-        BallController currentBall = BallManager.Instance.GetCurrentBall();
-        if (currentBall == null) return;
-
-        switch (throwType)
-        {
-            case ThrowType.Normal:
-                ExecuteNormalThrow(damage);
-                break;
-
-            case ThrowType.JumpThrow:
-                ExecuteJumpThrow(damage);
-                break;
-
-            case ThrowType.PowerThrow:
-                ExecutePowerThrow(damage);
-                break;
-
-            case ThrowType.CurveThrow:
-                ExecuteCurveThrow(damage);
-                break;
-
-            case ThrowType.MultiThrow:
-                StartCoroutine(ExecuteMultiThrowSpecial(damage));
-                break;
-
-            default:
-                ExecuteNormalThrow(damage);
-                break;
-        }
-    }
-
-    void ExecuteNormalThrow(int damage)
-    {
-        BallManager.Instance.RequestBallThrowWithCharacterData(this, characterData, ThrowType.Normal, damage);
-    }
-
-    void ExecuteJumpThrow(int damage)
-    {
-        BallManager.Instance.RequestBallThrowWithCharacterData(this, characterData, ThrowType.JumpThrow, damage);
-
-        // Add extra visual effect for jump throws
-        if (characterData.throwEffect != null)
-        {
-            GameObject effect = Instantiate(characterData.throwEffect, transform.position, Quaternion.identity);
-            Destroy(effect, 1f);
-        }
-    }
-
-    void ExecutePowerThrow(int damage)
-    {
-        // Power throw: Extra damage and speed
-        int powerDamage = Mathf.RoundToInt(damage * 1.3f);
-
-        BallController currentBall = BallManager.Instance.GetCurrentBall();
-        if (currentBall != null)
-        {
-            currentBall.SetThrowData(ThrowType.PowerThrow, powerDamage, characterData.GetThrowSpeed(25f));
-
-            Vector3 direction = Vector3.right; // BallController will handle targeting
-            currentBall.ThrowBall(direction, 1.2f); // Extra power
-
-            // Screen shake for power
-            CameraController camera = FindObjectOfType<CameraController>();
-            if (camera != null)
-            {
-                camera.ShakeCamera(0.4f, 0.3f);
-            }
-
-            if (debugMode)
-            {
-                Debug.Log($"?? POWER THROW: {powerDamage} damage at high speed!");
-            }
-        }
-    }
-
-    void ExecuteCurveThrow(int damage)
-    {
-        BallController currentBall = BallManager.Instance.GetCurrentBall();
-        if (currentBall != null)
-        {
-            currentBall.SetThrowData(ThrowType.CurveThrow, damage, characterData.GetThrowSpeed(20f));
-
-            Vector3 direction = Vector3.right;
-            currentBall.ThrowBall(direction, 1f);
-
-            // Apply curve behavior after throw
-            StartCoroutine(ApplyCurveBehavior(currentBall));
-
-            if (debugMode)
-            {
-                Debug.Log($"??? CURVE THROW: Ball will curve mid-flight!");
-            }
-        }
-    }
-
-    IEnumerator ExecuteMultiThrowSpecial(int damage)
-    {
-        // Special multi-throw (different from ultimate version)
-        int ballCount = 3;
-        int damagePerBall = damage / 2; // Spread damage
-
-        for (int i = 0; i < ballCount; i++)
-        {
-            GameObject ballObj = Instantiate(BallManager.Instance.ballPrefab,
-                transform.position + Vector3.up * 1.5f + Vector3.right * (i * 0.3f - 0.3f),
-                Quaternion.identity);
-
-            BallController ballController = ballObj.GetComponent<BallController>();
-            if (ballController != null)
-            {
-                ballController.SetThrowData(ThrowType.MultiThrow, damagePerBall, 20f);
-
-                // Slight spread
-                float angle = (i - 1) * 10f; // -10, 0, 10 degrees
-                Vector3 throwDir = Quaternion.Euler(0, angle, 0) * Vector3.right;
-                throwDir.y = 0.05f;
-
-                ballController.ThrowBall(throwDir.normalized, 1f);
-            }
-
-            yield return new WaitForSeconds(0.2f);
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"?? MULTI THROW SPECIAL: {ballCount} balls x {damagePerBall} damage!");
-        }
-    }
-
-    IEnumerator ApplyCurveBehavior(BallController ball)
-    {
-        yield return new WaitForSeconds(0.3f); // Let ball travel straight first
-
-        float curveDuration = 1f;
-        float elapsed = 0f;
-        float curveIntensity = 8f;
-        bool curveLeft = Random.Range(0f, 1f) > 0.5f; // Random curve direction
-
-        while (elapsed < curveDuration && ball != null && ball.GetBallState() == BallController.BallState.Thrown)
-        {
-            Vector3 velocity = ball.GetVelocity();
-
-            // Apply curve force
-            float curveForce = Mathf.Sin(elapsed * 4f) * curveIntensity * (curveLeft ? -1f : 1f);
-            velocity.z += curveForce * Time.deltaTime;
-
-            ball.SetVelocity(velocity);
-
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-    }
-
-    #endregion
-
-    void UpdateUltimateCharge()
-    {
-        // Only update UI if charge changed
+        // Update UI events
         OnUltimateChargeChanged?.Invoke(currentUltimateCharge / characterData.ultimateChargeRequired);
-
-        if (debugMode && currentUltimateCharge >= characterData.ultimateChargeRequired)
-        {
-            // Flash ready indicator every 2 seconds
-            if (Time.time % 2f < 0.1f)
-            {
-                Debug.Log($"{characterData.characterName} Ultimate Ready! Press U to activate!");
-            }
-        }
+        OnTrickChargeChanged?.Invoke(currentTrickCharge / characterData.trickChargeRequired);
+        OnTreatChargeChanged?.Invoke(currentTreatCharge / characterData.treatChargeRequired);
     }
-
-    public void AddUltimateCharge(float amount)
-    {
-        if (characterData == null) return;
-
-        // Don't add charge if already at max
-        if (currentUltimateCharge >= characterData.ultimateChargeRequired) return;
-
-        float chargeToAdd = amount * characterData.ultimateChargeRate;
-        float previousCharge = currentUltimateCharge;
-        currentUltimateCharge = Mathf.Min(currentUltimateCharge + chargeToAdd, characterData.ultimateChargeRequired);
-
-        OnUltimateChargeChanged?.Invoke(currentUltimateCharge / characterData.ultimateChargeRequired);
-
-        if (debugMode)
-        {
-            Debug.Log($"{characterData.characterName} Ultimate Charge: {previousCharge:F1} + {chargeToAdd:F1} = {currentUltimateCharge:F1}/{characterData.ultimateChargeRequired}");
-
-            if (currentUltimateCharge >= characterData.ultimateChargeRequired)
-            {
-                Debug.Log($"?? {characterData.characterName} ULTIMATE READY! ??");
-            }
-        }
-    }
-
-    bool CanUseUltimate()
-    {
-        return characterData != null && currentUltimateCharge >= characterData.ultimateChargeRequired;
-    }
-
-    // FIXED: Add more ways to gain ultimate charge
-    public void OnDamageTaken(int damage)
-    {
-        AddUltimateCharge(damage * 0.5f); // Gain charge when taking damage
-    }
-
-    public void OnSuccessfulCatch()
-    {
-        AddUltimateCharge(25f); // Good reward for catching
-    }
-
-    public void OnSuccessfulDodge()
-    {
-        AddUltimateCharge(20f); // Reward for dodging
-    }
-
-    #region Ultimate System
-
-    void ActivateUltimate()
-    {
-        if (!CanUseUltimate())
-        {
-            if (debugMode)
-            {
-                Debug.Log($"{characterData.characterName} ultimate not ready! Charge: {currentUltimateCharge:F1}/{characterData.ultimateChargeRequired}");
-            }
-            return;
-        }
-
-        // Check if ultimate requires ball
-        bool requiresBall = UltimateRequiresBall(characterData.ultimateType);
-
-        if (requiresBall && !hasBall)
-        {
-            if (debugMode)
-            {
-                Debug.Log($"{characterData.characterName} ultimate requires ball but player doesn't have one!");
-            }
-            return;
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"?? {characterData.characterName} activated {characterData.ultimateType}!");
-        }
-
-        // Execute ultimate based on type
-        ExecuteUltimateAbility();
-
-        // CONSUME ultimate charge AFTER successful activation
-        currentUltimateCharge = 0f;
-        OnUltimateChargeChanged?.Invoke(0f);
-
-        OnUltimateActivated?.Invoke();
-    }
-
-    bool UltimateRequiresBall(UltimateAbilityType ultimateType)
-    {
-        switch (ultimateType)
-        {
-            case UltimateAbilityType.PowerThrow:
-            case UltimateAbilityType.MultiThrow:
-            case UltimateAbilityType.HomingBall:
-            case UltimateAbilityType.GravitySlam:
-            case UltimateAbilityType.ExplosiveBall:
-            case UltimateAbilityType.Curveball:
-                return true;
-
-            case UltimateAbilityType.SpeedBoost:
-            case UltimateAbilityType.Shield:
-            case UltimateAbilityType.TimeFreeze:
-            case UltimateAbilityType.Teleport:
-                return false;
-
-            default:
-                return false;
-        }
-    }
-
-    void ExecuteUltimateAbility()
-    {
-        // Play ultimate sound and effects
-        PlayCharacterSound(CharacterAudioType.Ultimate);
-        if (characterData.ultimateEffect != null)
-        {
-            Instantiate(characterData.ultimateEffect, characterTransform.position, Quaternion.identity);
-        }
-
-        switch (characterData.ultimateType)
-        {
-            case UltimateAbilityType.PowerThrow:
-                ExecutePowerThrowUltimate();
-                break;
-
-            case UltimateAbilityType.MultiThrow:
-                StartCoroutine(ExecuteMultiThrowUltimate());
-                break;
-
-            case UltimateAbilityType.GravitySlam:
-                ExecuteGravitySlamUltimate();
-                break;
-
-            case UltimateAbilityType.HomingBall:
-                ExecuteHomingBallUltimate();
-                break;
-
-            case UltimateAbilityType.ExplosiveBall:
-                ExecuteExplosiveBallUltimate();
-                break;
-
-            case UltimateAbilityType.TimeFreeze:
-                StartCoroutine(ExecuteTimeFreezeUltimate());
-                break;
-
-            case UltimateAbilityType.Shield:
-                StartCoroutine(ExecuteShieldUltimate());
-                break;
-
-            case UltimateAbilityType.SpeedBoost:
-                StartCoroutine(ExecuteSpeedBoostUltimate());
-                break;
-
-            case UltimateAbilityType.Teleport:
-                ExecuteTeleportUltimate();
-                break;
-
-            case UltimateAbilityType.Curveball:
-                ExecuteCurveballUltimate();
-                break;
-
-            default:
-                Debug.LogWarning($"Ultimate type {characterData.ultimateType} not implemented yet");
-                break;
-        }
-    }
-
-    #region Ball-Based Ultimates
-
-    void ExecutePowerThrowUltimate()
-    {
-        if (!hasBall) return;
-
-        // Massive damage throw with screen effects
-        int ultimateDamage = characterData.GetThrowDamage(ThrowType.Ultimate);
-        BallManager.Instance.RequestBallThrowWithCharacterData(this, characterData, ThrowType.Ultimate, ultimateDamage);
-
-        // Screen effects
-        CameraController camera = FindObjectOfType<CameraController>();
-        if (camera != null)
-        {
-            camera.ShakeCamera(1.2f, 1.5f);
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"?? POWER THROW: {ultimateDamage} damage!");
-        }
-    }
-
-    IEnumerator ExecuteMultiThrowUltimate()
-    {
-        if (!hasBall) yield break;
-
-        int ballCount = 5;
-        int damagePerBall = characterData.GetThrowDamage(ThrowType.Ultimate) / 3; // Spread damage
-        float throwSpeed = 22f;
-
-        for (int i = 0; i < ballCount; i++)
-        {
-            // Create temporary ball
-            GameObject ballObj = Instantiate(BallManager.Instance.ballPrefab,
-                transform.position + Vector3.up * 2f + Vector3.right * (i * 0.2f - 0.4f),
-                Quaternion.identity);
-
-            BallController ballController = ballObj.GetComponent<BallController>();
-            if (ballController != null)
-            {
-                ballController.SetThrowData(ThrowType.Ultimate, damagePerBall, throwSpeed);
-
-                // Spread pattern
-                float angle = (i - 2) * 15f; // -30, -15, 0, 15, 30 degrees
-                Vector3 throwDir = Quaternion.Euler(0, angle, 0) * Vector3.right;
-                throwDir.y = 0.1f; // Slight upward angle
-
-                ballController.ThrowBall(throwDir.normalized, 1f);
-
-                // Add visual trail effect
-                TrailRenderer trail = ballController.GetComponent<TrailRenderer>();
-                if (trail != null)
-                {
-                    trail.enabled = true;
-                    trail.startColor = characterData.characterColor;
-                    trail.endColor = Color.clear;
-                }
-            }
-
-            yield return new WaitForSeconds(0.15f); // Rapid fire
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"?? MULTI THROW: {ballCount} balls x {damagePerBall} damage!");
-        }
-    }
-
-    void ExecuteGravitySlamUltimate()
-    {
-        if (!hasBall) return;
-
-        StartCoroutine(GravitySlamCoroutine());
-    }
-
-    IEnumerator GravitySlamCoroutine()
-    {
-        // Phase 1: Launch ball high
-        BallController currentBall = BallManager.Instance.GetCurrentBall();
-        if (currentBall != null)
-        {
-            Vector3 highArcDirection = new Vector3(0.6f, 1.4f, 0f).normalized; // High arc
-            int ultimateDamage = characterData.GetThrowDamage(ThrowType.Ultimate);
-
-            currentBall.SetThrowData(ThrowType.Ultimate, ultimateDamage, 18f);
-            currentBall.ThrowBall(highArcDirection, 1.2f);
-
-            if (debugMode)
-            {
-                Debug.Log("?? GRAVITY SLAM: Phase 1 - Ball launched high!");
-            }
-
-            // Phase 2: Wait for peak, then apply massive downward force
-            yield return new WaitForSeconds(0.8f);
-
-            if (currentBall != null && currentBall.GetBallState() == BallController.BallState.Thrown)
-            {
-                Vector3 velocity = currentBall.GetVelocity();
-                velocity.y = -35f; // Massive downward slam
-                velocity.x = velocity.x > 0 ? 15f : -15f; // Maintain horizontal direction
-                currentBall.SetVelocity(velocity);
-
-                // Create slam effect at predicted impact point
-                Vector3 impactPoint = new Vector3(currentBall.transform.position.x + (velocity.x * 0.5f), 0f, 0f);
-                if (characterData.ultimateEffect != null)
-                {
-                    Instantiate(characterData.ultimateEffect, impactPoint, Quaternion.identity);
-                }
-
-                if (debugMode)
-                {
-                    Debug.Log("?? GRAVITY SLAM: Phase 2 - Massive downward force applied!");
-                }
-            }
-        }
-    }
-
-    void ExecuteHomingBallUltimate()
-    {
-        if (!hasBall) return;
-
-        BallController currentBall = BallManager.Instance.GetCurrentBall();
-        if (currentBall != null)
-        {
-            // Enable aggressive homing
-            currentBall.EnableHoming(true);
-
-            // Throw with ultimate damage and special homing speed
-            int ultimateDamage = characterData.GetThrowDamage(ThrowType.Ultimate);
-            currentBall.SetThrowData(ThrowType.Ultimate, ultimateDamage, 25f);
-
-            // Start with normal direction, homing will take over
-            Vector3 direction = Vector3.right;
-            currentBall.ThrowBall(direction, 1f);
-
-            // Add homing visual effect
-            StartCoroutine(HomingEffectCoroutine(currentBall));
-
-            if (debugMode)
-            {
-                Debug.Log("?? HOMING BALL: Locked on target!");
-            }
-        }
-    }
-
-    IEnumerator HomingEffectCoroutine(BallController ball)
-    {
-        float duration = 3f;
-        float elapsed = 0f;
-
-        while (elapsed < duration && ball != null && ball.GetBallState() == BallController.BallState.Thrown)
-        {
-            // Create homing trail particles
-            if (characterData.ultimateEffect != null && Random.Range(0f, 1f) < 0.3f)
-            {
-                GameObject effect = Instantiate(characterData.ultimateEffect, ball.transform.position, Quaternion.identity);
-                Destroy(effect, 0.5f);
-            }
-
-            elapsed += Time.deltaTime;
-            yield return new WaitForSeconds(0.1f);
-        }
-    }
-
-    void ExecuteExplosiveBallUltimate()
-    {
-        if (!hasBall) return;
-
-        BallController currentBall = BallManager.Instance.GetCurrentBall();
-        if (currentBall != null)
-        {
-            int ultimateDamage = characterData.GetThrowDamage(ThrowType.Ultimate);
-            currentBall.SetThrowData(ThrowType.Ultimate, ultimateDamage, 20f);
-
-            // Normal throw, but add explosion behavior
-            Vector3 direction = Vector3.right;
-            currentBall.ThrowBall(direction, 1f);
-
-            // Start explosion timer
-            StartCoroutine(ExplosionTimerCoroutine(currentBall));
-
-            if (debugMode)
-            {
-                Debug.Log("?? EXPLOSIVE BALL: Armed and dangerous!");
-            }
-        }
-    }
-
-    IEnumerator ExplosionTimerCoroutine(BallController ball)
-    {
-        float explosionTime = 2f;
-        float elapsed = 0f;
-
-        while (elapsed < explosionTime && ball != null)
-        {
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        if (ball != null)
-        {
-            // Create explosion effect
-            Vector3 explosionPoint = ball.transform.position;
-
-            if (characterData.ultimateEffect != null)
-            {
-                GameObject explosion = Instantiate(characterData.ultimateEffect, explosionPoint, Quaternion.identity);
-                Destroy(explosion, 2f);
-            }
-
-            // Damage all players in explosion radius
-            float explosionRadius = 4f;
-            PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
-
-            foreach (PlayerCharacter player in allPlayers)
-            {
-                if (player != this)
-                {
-                    float distance = Vector3.Distance(player.transform.position, explosionPoint);
-                    if (distance <= explosionRadius)
-                    {
-                        int explosionDamage = characterData.GetThrowDamage(ThrowType.Ultimate) / 2;
-                        PlayerHealth playerHealth = player.GetComponent<PlayerHealth>();
-                        if (playerHealth != null)
-                        {
-                            playerHealth.TakeDamage(explosionDamage, null);
-                        }
-
-                        if (debugMode)
-                        {
-                            Debug.Log($"?? EXPLOSION hit {player.name} for {explosionDamage} damage!");
-                        }
-                    }
-                }
-            }
-
-            // Screen shake
-            CameraController camera = FindObjectOfType<CameraController>();
-            if (camera != null)
-            {
-                camera.ShakeCamera(0.8f, 1f);
-            }
-
-            // Remove the ball
-            ball.ResetBall();
-        }
-    }
-
-    void ExecuteCurveballUltimate()
-    {
-        if (!hasBall) return;
-
-        BallController currentBall = BallManager.Instance.GetCurrentBall();
-        if (currentBall != null)
-        {
-            int ultimateDamage = characterData.GetThrowDamage(ThrowType.Ultimate);
-            currentBall.SetThrowData(ThrowType.Ultimate, ultimateDamage, 22f);
-
-            // Throw normally, then apply curve
-            Vector3 direction = Vector3.right;
-            currentBall.ThrowBall(direction, 1f);
-
-            // Start curve behavior
-            StartCoroutine(CurveballCoroutine(currentBall));
-
-            if (debugMode)
-            {
-                Debug.Log("??? CURVEBALL: Ball will curve mid-flight!");
-            }
-        }
-    }
-
-    IEnumerator CurveballCoroutine(BallController ball)
-    {
-        yield return new WaitForSeconds(0.5f); // Let ball travel normally first
-
-        float curveDuration = 1.5f;
-        float elapsed = 0f;
-        float curveIntensity = 15f;
-
-        while (elapsed < curveDuration && ball != null && ball.GetBallState() == BallController.BallState.Thrown)
-        {
-            Vector3 velocity = ball.GetVelocity();
-
-            // Apply sinusoidal curve
-            float curveForce = Mathf.Sin(elapsed * 6f) * curveIntensity;
-            velocity.z += curveForce * Time.deltaTime;
-
-            ball.SetVelocity(velocity);
-
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-    }
-
-    #endregion
-
-    #region Non-Ball Ultimates
-
-    IEnumerator ExecuteSpeedBoostUltimate()
-    {
-        float originalSpeed = characterData.moveSpeed;
-        float boostMultiplier = 2.5f;
-        float duration = 6f;
-
-        // Apply speed boost
-        characterData.moveSpeed *= boostMultiplier;
-
-        // Visual effect
-        GameObject speedEffect = null;
-        if (characterData.ultimateEffect != null)
-        {
-            speedEffect = Instantiate(characterData.ultimateEffect, transform.position, Quaternion.identity);
-            speedEffect.transform.SetParent(transform);
-        }
-
-        // Change character color temporarily
-        Renderer characterRenderer = GetComponentInChildren<Renderer>();
-        Color originalColor = characterRenderer?.material.color ?? Color.white;
-        if (characterRenderer != null)
-        {
-            characterRenderer.material.color = Color.cyan;
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"? SPEED BOOST: {characterData.characterName} speed x{boostMultiplier} for {duration}s!");
-        }
-
-        yield return new WaitForSeconds(duration);
-
-        // Restore original speed and appearance
-        characterData.moveSpeed = originalSpeed;
-
-        if (speedEffect != null)
-        {
-            Destroy(speedEffect);
-        }
-
-        if (characterRenderer != null)
-        {
-            characterRenderer.material.color = originalColor;
-        }
-
-        if (debugMode)
-        {
-            Debug.Log("? Speed boost ended");
-        }
-    }
-
-    IEnumerator ExecuteShieldUltimate()
-    {
-        float duration = 4f;
-
-        // Make player temporarily invulnerable
-        PlayerHealth playerHealth = GetComponent<PlayerHealth>();
-        if (playerHealth != null)
-        {
-            playerHealth.SetTemporaryInvulnerability(duration);
-        }
-
-        // Visual shield effect
-        GameObject shieldEffect = null;
-        if (characterData.ultimateEffect != null)
-        {
-            shieldEffect = Instantiate(characterData.ultimateEffect, transform.position, Quaternion.identity);
-            shieldEffect.transform.SetParent(transform);
-        }
-
-        // Shield visual feedback
-        Renderer characterRenderer = GetComponentInChildren<Renderer>();
-        Color originalColor = characterRenderer?.material.color ?? Color.white;
-
-        // Pulsing shield effect
-        float elapsed = 0f;
-        while (elapsed < duration)
-        {
-            if (characterRenderer != null)
-            {
-                float pulse = Mathf.Sin(elapsed * 8f) * 0.3f + 0.7f;
-                characterRenderer.material.color = Color.Lerp(originalColor, Color.blue, pulse);
-            }
-
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        // Restore appearance
-        if (characterRenderer != null)
-        {
-            characterRenderer.material.color = originalColor;
-        }
-
-        if (shieldEffect != null)
-        {
-            Destroy(shieldEffect);
-        }
-
-        if (debugMode)
-        {
-            Debug.Log("??? Shield expired");
-        }
-    }
-
-    IEnumerator ExecuteTimeFreezeUltimate()
-    {
-        float freezeDuration = 3f;
-
-        // Find all other characters and freeze them
-        PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
-        CharacterController[] allLegacyPlayers = FindObjectsOfType<CharacterController>();
-
-        List<PlayerCharacter> frozenPlayers = new List<PlayerCharacter>();
-        List<CharacterController> frozenLegacyPlayers = new List<CharacterController>();
-
-        // Freeze PlayerCharacters
-        foreach (PlayerCharacter player in allPlayers)
-        {
-            if (player != this)
-            {
-                player.SetMovementEnabled(false);
-                frozenPlayers.Add(player);
-
-                // Visual freeze effect
-                Renderer renderer = player.GetComponentInChildren<Renderer>();
-                if (renderer != null)
-                {
-                    renderer.material.color = Color.cyan;
-                }
-            }
-        }
-
-        // Freeze legacy CharacterControllers
-        foreach (CharacterController player in allLegacyPlayers)
-        {
-            if (player != null)
-            {
-                // Disable their input handler
-                PlayerInputHandler inputHandler = player.GetComponent<PlayerInputHandler>();
-                if (inputHandler != null)
-                {
-                    inputHandler.enabled = false;
-                    frozenLegacyPlayers.Add(player);
-
-                    // Visual freeze effect
-                    Renderer renderer = player.GetComponentInChildren<Renderer>();
-                    if (renderer != null)
-                    {
-                        renderer.material.color = Color.cyan;
-                    }
-                }
-            }
-        }
-
-        // Freeze any thrown balls
-        BallController[] allBalls = FindObjectsOfType<BallController>();
-        Dictionary<BallController, Vector3> frozenBallVelocities = new Dictionary<BallController, Vector3>();
-
-        foreach (BallController ball in allBalls)
-        {
-            if (ball.GetBallState() == BallController.BallState.Thrown)
-            {
-                frozenBallVelocities[ball] = ball.GetVelocity();
-                ball.SetVelocity(Vector3.zero);
-            }
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"? TIME FREEZE: {frozenPlayers.Count + frozenLegacyPlayers.Count} players frozen for {freezeDuration}s!");
-        }
-
-        yield return new WaitForSeconds(freezeDuration);
-
-        // Unfreeze all players
-        foreach (PlayerCharacter player in frozenPlayers)
-        {
-            if (player != null)
-            {
-                player.SetMovementEnabled(true);
-
-                // Restore original color
-                Renderer renderer = player.GetComponentInChildren<Renderer>();
-                if (renderer != null)
-                {
-                    renderer.material.color = player.GetCharacterData().characterColor;
-                }
-            }
-        }
-
-        foreach (CharacterController player in frozenLegacyPlayers)
-        {
-            if (player != null)
-            {
-                PlayerInputHandler inputHandler = player.GetComponent<PlayerInputHandler>();
-                if (inputHandler != null)
-                {
-                    inputHandler.enabled = true;
-                }
-
-                // Restore original color
-                Renderer renderer = player.GetComponentInChildren<Renderer>();
-                if (renderer != null)
-                {
-                    renderer.material.color = Color.white; // Default color
-                }
-            }
-        }
-
-        // Unfreeze balls
-        foreach (var kvp in frozenBallVelocities)
-        {
-            if (kvp.Key != null)
-            {
-                kvp.Key.SetVelocity(kvp.Value);
-            }
-        }
-
-        if (debugMode)
-        {
-            Debug.Log("? Time freeze ended");
-        }
-    }
-
-    void ExecuteTeleportUltimate()
-    {
-        // Find safe teleport positions around the arena
-        Vector3[] teleportPositions = {
-            new Vector3(-10f, 0f, 0f),   // Far left
-            new Vector3(10f, 0f, 0f),    // Far right
-            new Vector3(-5f, 0f, 3f),    // Left back
-            new Vector3(5f, 0f, 3f),     // Right back
-            new Vector3(-5f, 0f, -3f),   // Left front
-            new Vector3(5f, 0f, -3f),    // Right front
-            new Vector3(0f, 0f, 5f),     // Center back
-            new Vector3(0f, 0f, -5f)     // Center front
-        };
-
-        // Choose position farthest from current position
-        Vector3 bestPosition = transform.position;
-        float maxDistance = 0f;
-
-        foreach (Vector3 pos in teleportPositions)
-        {
-            float distance = Vector3.Distance(transform.position, pos);
-            if (distance > maxDistance)
-            {
-                maxDistance = distance;
-                bestPosition = pos;
-            }
-        }
-
-        // Teleport with effects
-        if (characterData.ultimateEffect != null)
-        {
-            // Exit effect
-            Instantiate(characterData.ultimateEffect, transform.position, Quaternion.identity);
-        }
-
-        transform.position = bestPosition;
-
-        if (characterData.ultimateEffect != null)
-        {
-            // Entry effect
-            Instantiate(characterData.ultimateEffect, transform.position, Quaternion.identity);
-        }
-
-        // Brief invulnerability after teleport
-        PlayerHealth playerHealth = GetComponent<PlayerHealth>();
-        if (playerHealth != null)
-        {
-            playerHealth.SetTemporaryInvulnerability(1f);
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"?? TELEPORT: {characterData.characterName} teleported {maxDistance:F1} units!");
-        }
-    }
-
-    #endregion
-
-    // Helper method for movement disabling during time freeze
-    public void SetMovementEnabled(bool enabled)
-    {
-        movementEnabled = enabled;
-    }
-
-    #endregion
 
     void CheckGrounded()
     {
@@ -1370,15 +561,937 @@ public class PlayerCharacter : MonoBehaviour
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // ABILITY CHARGE SYSTEM
+    // ═══════════════════════════════════════════════════════════════
+
+    public void AddUltimateCharge(float amount)
+    {
+        if (characterData == null) return;
+
+        if (currentUltimateCharge >= characterData.ultimateChargeRequired) return;
+
+        float chargeToAdd = amount * characterData.ultimateChargeRate;
+        currentUltimateCharge = Mathf.Min(currentUltimateCharge + chargeToAdd, characterData.ultimateChargeRequired);
+
+        if (debugMode && currentUltimateCharge >= characterData.ultimateChargeRequired)
+        {
+            Debug.Log($"💥 {characterData.characterName} ULTIMATE READY! ({characterData.ultimateType})");
+        }
+    }
+
+    public void AddTrickCharge(float amount)
+    {
+        if (characterData == null) return;
+
+        if (currentTrickCharge >= characterData.trickChargeRequired) return;
+
+        float chargeToAdd = amount * characterData.trickChargeRate;
+        currentTrickCharge = Mathf.Min(currentTrickCharge + chargeToAdd, characterData.trickChargeRequired);
+
+        if (debugMode && currentTrickCharge >= characterData.trickChargeRequired)
+        {
+            Debug.Log($"🎯 {characterData.characterName} TRICK READY! ({characterData.trickType})");
+        }
+    }
+
+    public void AddTreatCharge(float amount)
+    {
+        if (characterData == null) return;
+
+        if (currentTreatCharge >= characterData.treatChargeRequired) return;
+
+        float chargeToAdd = amount * characterData.treatChargeRate;
+        currentTreatCharge = Mathf.Min(currentTreatCharge + chargeToAdd, characterData.treatChargeRequired);
+
+        if (debugMode && currentTreatCharge >= characterData.treatChargeRequired)
+        {
+            Debug.Log($"✨ {characterData.characterName} TREAT READY! ({characterData.treatType})");
+        }
+    }
+
+    // Helper methods for gaining charge
+    public void OnDamageTaken(int damage)
+    {
+        AddUltimateCharge(damage * 0.5f);
+        AddTrickCharge(damage * 0.3f);
+        AddTreatCharge(damage * 0.4f);
+    }
+
+    public void OnSuccessfulCatch()
+    {
+        AddUltimateCharge(25f);
+        AddTrickCharge(15f);
+        AddTreatCharge(15f);
+    }
+
+    public void OnSuccessfulDodge()
+    {
+        AddUltimateCharge(20f);
+        AddTrickCharge(12f);
+        AddTreatCharge(12f);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ULTIMATE ABILITIES
+    // ═══════════════════════════════════════════════════════════════
+
+    bool CanUseUltimate()
+    {
+        return characterData != null &&
+               currentUltimateCharge >= characterData.ultimateChargeRequired &&
+               !ultimateOnCooldown;
+    }
+
+    void ActivateUltimate()
+    {
+        if (!CanUseUltimate()) return;
+
+        // Consume charge and start cooldown
+        currentUltimateCharge = 0f;
+        StartCoroutine(UltimateCooldown());
+
+        // Play ultimate sound and effects
+        AudioClip ultimateSound = characterData.GetUltimateSound();
+        if (ultimateSound != null)
+        {
+            audioSource.PlayOneShot(ultimateSound);
+        }
+
+        GameObject ultimateEffect = characterData.GetUltimateEffect();
+        if (ultimateEffect != null)
+        {
+            Instantiate(ultimateEffect, characterTransform.position, Quaternion.identity);
+        }
+
+        // Execute specific ultimate based on character data
+        switch (characterData.ultimateType)
+        {
+            case UltimateType.PowerThrow:
+                ExecutePowerThrow();
+                break;
+            case UltimateType.MultiThrow:
+                StartCoroutine(ExecuteMultiThrow());
+                break;
+            case UltimateType.Curveball:
+                ExecuteCurveball();
+                break;
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"💥 {characterData.characterName} activated {characterData.ultimateType}!");
+        }
+    }
+
+    void ExecutePowerThrow()
+    {
+        if (!hasBall) return;
+
+        BallController currentBall = BallManager.Instance.GetCurrentBall();
+        if (currentBall == null) return;
+
+        // Set ultra-powerful throw data
+        int damage = characterData.GetUltimateDamage();
+        float speed = characterData.GetUltimateSpeed();
+
+        currentBall.SetThrowData(ThrowType.Ultimate, damage, speed);
+
+        // Throw with extra power
+        Vector3 direction = Vector3.right; // BallController handles targeting
+        currentBall.ThrowBall(direction, 1.5f);
+
+        // Screen shake for power
+        CameraController camera = FindObjectOfType<CameraController>();
+        if (camera != null)
+        {
+            camera.ShakeCamera(characterData.GetPowerThrowScreenShake(), 0.8f);
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"💥 POWER THROW: {damage} damage at {speed} speed with {characterData.GetPowerThrowKnockback()} knockback!");
+        }
+    }
+
+    IEnumerator ExecuteMultiThrow()
+    {
+        if (!hasBall) yield break;
+
+        int ballCount = characterData.GetMultiThrowCount();
+        int damagePerBall = characterData.GetUltimateDamage();
+        float throwSpeed = characterData.GetUltimateSpeed();
+        float spreadAngle = characterData.GetMultiThrowSpread();
+        float delay = characterData.GetMultiThrowDelay();
+        Vector3 spawnOffset = characterData.GetMultiThrowSpawnOffset();
+
+        // FIXED: Determine throw direction based on opponent position
+        PlayerCharacter opponent = FindOpponent();
+        Vector3 throwDirection = Vector3.right; // Default
+
+        if (opponent != null)
+        {
+            // Calculate direction towards opponent
+            Vector3 toOpponent = (opponent.transform.position - transform.position).normalized;
+            throwDirection = new Vector3(toOpponent.x, 0f, 0f).normalized; // Only horizontal component
+
+            if (debugMode)
+            {
+                Debug.Log($"MultiThrow direction: {throwDirection} (towards {opponent.name})");
+            }
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"🔥 MULTI THROW: {ballCount} balls x {damagePerBall} damage towards opponent!");
+        }
+
+        for (int i = 0; i < ballCount; i++)
+        {
+            // Apply spawn offset relative to throw direction
+            Vector3 spawnPos = transform.position;
+            spawnPos += throwDirection * spawnOffset.x; // Forward towards opponent
+            spawnPos += Vector3.up * spawnOffset.y;     // Height
+            spawnPos += Vector3.forward * spawnOffset.z; // Z offset (if needed)
+
+            GameObject ballObj = Instantiate(BallManager.Instance.ballPrefab, spawnPos, Quaternion.identity);
+            ballObj.transform.localScale = Vector3.one;
+
+            BallController ballController = ballObj.GetComponent<BallController>();
+            if (ballController != null)
+            {
+                // FIXED: Calculate spread based on throw direction (not always right)
+                float angleOffset = (i - (ballCount - 1) * 0.5f) * (spreadAngle / ballCount);
+
+                // Create rotation around Y-axis from the throw direction
+                Vector3 spreadDir = Quaternion.Euler(0, angleOffset, 0) * throwDirection;
+                spreadDir.y = 0f; // Keep horizontal
+                spreadDir = spreadDir.normalized;
+
+                // Setup ball
+                ballController.SetBallState(BallController.BallState.Thrown);
+                ballController.SetThrowData(ThrowType.Ultimate, damagePerBall, throwSpeed);
+
+                // Set velocity towards opponent with spread
+                ballController.velocity = spreadDir * throwSpeed;
+
+                // Setup collision system
+                CollisionDamageSystem collisionSystem = ballController.GetComponent<CollisionDamageSystem>();
+                if (collisionSystem != null)
+                {
+                    collisionSystem.OnBallThrown(this);
+                }
+
+                // Add visual trail effect
+                TrailRenderer trail = ballController.GetComponent<TrailRenderer>();
+                if (trail != null)
+                {
+                    trail.enabled = true;
+                    trail.startColor = characterData.characterColor;
+                    trail.endColor = Color.clear;
+                }
+
+                // FIXED: Auto-destroy MultiThrow balls after 4 seconds (network-efficient)
+                Destroy(ballObj, 4f);
+
+                if (debugMode)
+                {
+                    Debug.Log($"MultiThrow ball {i + 1}: Direction {spreadDir}, Velocity {ballController.velocity} (Auto-destroy in 4s)");
+                }
+            }
+
+            yield return new WaitForSeconds(delay);
+        }
+    }
+
+    void ExecuteCurveball()
+    {
+        if (!hasBall) return;
+
+        BallController currentBall = BallManager.Instance.GetCurrentBall();
+        if (currentBall == null) return;
+
+        // Find opponent direction
+        PlayerCharacter opponent = FindOpponent();
+        Vector3 throwDirection = Vector3.right; // Default
+
+        if (opponent != null)
+        {
+            Vector3 toOpponent = (opponent.transform.position - transform.position).normalized;
+            throwDirection = new Vector3(toOpponent.x, 0f, 0f).normalized;
+        }
+
+        // Set curveball data
+        int damage = characterData.GetUltimateDamage();
+        float speed = characterData.GetUltimateSpeed();
+
+        currentBall.SetThrowData(ThrowType.Ultimate, damage, speed);
+
+        // Throw towards opponent
+        currentBall.ThrowBall(throwDirection, 1f);
+
+        // Start curveball Y-axis oscillation
+        StartCoroutine(CurveballBehavior(currentBall));
+
+        if (debugMode)
+        {
+            Debug.Log($"🌊 CURVEBALL: Single ball with Y-axis oscillation towards opponent, {damage} damage!");
+        }
+    }
+
+    IEnumerator CurveballBehavior(BallController ball)
+    {
+        float amplitude = characterData.GetCurveballAmplitude();
+        float frequency = characterData.GetCurveballFrequency();
+        float duration = characterData.GetCurveballDuration();
+
+        float elapsed = 0f;
+
+        while (elapsed < duration && ball != null && ball.GetBallState() == BallController.BallState.Thrown)
+        {
+            Vector3 velocity = ball.GetVelocity();
+
+            // Apply Y-axis oscillation (up and down movement)
+            float curveOffset = Mathf.Sin(elapsed * frequency) * amplitude;
+            velocity.y = curveOffset;
+
+            ball.SetVelocity(velocity);
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        if (debugMode)
+        {
+            Debug.Log("🌊 Curveball oscillation complete");
+        }
+    }
+
+    IEnumerator UltimateCooldown()
+    {
+        ultimateOnCooldown = true;
+        yield return new WaitForSeconds(ultimateCooldownTime);
+        ultimateOnCooldown = false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TRICK ABILITIES (Opponent-Focused)
+    // ═══════════════════════════════════════════════════════════════
+
+    bool CanUseTrick()
+    {
+        return characterData != null &&
+               currentTrickCharge >= characterData.trickChargeRequired &&
+               !trickOnCooldown;
+    }
+
+    void ActivateTrick()
+    {
+        if (!CanUseTrick()) return;
+
+        // Consume charge and start cooldown
+        currentTrickCharge = 0f;
+        StartCoroutine(TrickCooldown());
+
+        // Play trick sound and effects
+        AudioClip trickSound = characterData.GetTrickSound();
+        if (trickSound != null)
+        {
+            audioSource.PlayOneShot(trickSound);
+        }
+
+        GameObject trickEffect = characterData.GetTrickEffect();
+        if (trickEffect != null)
+        {
+            Instantiate(trickEffect, characterTransform.position, Quaternion.identity);
+        }
+
+        // Execute specific trick based on character data
+        switch (characterData.trickType)
+        {
+            case TrickType.SlowSpeed:
+                ExecuteSlowSpeed();
+                break;
+            case TrickType.Freeze:
+                ExecuteFreeze();
+                break;
+            case TrickType.InstantDamage:
+                ExecuteInstantDamage();
+                break;
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"🎯 {characterData.characterName} activated {characterData.trickType}!");
+        }
+    }
+
+    void ExecuteSlowSpeed()
+    {
+        // Find opponent and apply slow effect
+        PlayerCharacter opponent = FindOpponent();
+        if (opponent != null)
+        {
+            StartCoroutine(ApplySlowSpeedToOpponent(opponent));
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"🐌 SLOW SPEED: Opponent slowed to {characterData.GetSlowSpeedMultiplier() * 100}% speed for {characterData.GetSlowSpeedDuration()}s");
+        }
+    }
+
+    IEnumerator ApplySlowSpeedToOpponent(PlayerCharacter opponent)
+    {
+        if (opponent.characterData == null) yield break;
+
+        float originalSpeed = opponent.characterData.moveSpeed;
+        float slowedSpeed = originalSpeed * characterData.GetSlowSpeedMultiplier();
+        float duration = characterData.GetSlowSpeedDuration();
+
+        // Apply slow effect
+        opponent.characterData.moveSpeed = slowedSpeed;
+
+        // Visual effect on opponent
+        Renderer opponentRenderer = opponent.GetComponentInChildren<Renderer>();
+        Color originalColor = opponentRenderer?.material.color ?? Color.white;
+        if (opponentRenderer != null)
+        {
+            opponentRenderer.material.color = Color.blue; // Blue tint for slow
+        }
+
+        yield return new WaitForSeconds(duration);
+
+        // Restore original speed and color
+        if (opponent != null && opponent.characterData != null)
+        {
+            opponent.characterData.moveSpeed = originalSpeed;
+        }
+
+        if (opponentRenderer != null)
+        {
+            opponentRenderer.material.color = originalColor;
+        }
+    }
+
+    void ExecuteFreeze()
+    {
+        // Find opponent and apply freeze effect
+        PlayerCharacter opponent = FindOpponent();
+        if (opponent != null)
+        {
+            StartCoroutine(ApplyFreezeToOpponent(opponent));
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"🧊 FREEZE: Opponent frozen for {characterData.GetFreezeDuration()}s");
+        }
+    }
+
+    IEnumerator ApplyFreezeToOpponent(PlayerCharacter opponent)
+    {
+        float duration = characterData.GetFreezeDuration();
+
+        // Disable opponent movement AND input
+        opponent.SetMovementEnabled(false);
+        opponent.SetInputEnabled(false); // FIXED: Disable all input including catching
+
+        // Visual freeze effect
+        Renderer opponentRenderer = opponent.GetComponentInChildren<Renderer>();
+        Color originalColor = opponentRenderer?.material.color ?? Color.white;
+        if (opponentRenderer != null)
+        {
+            opponentRenderer.material.color = Color.cyan; // Cyan tint for freeze
+        }
+
+        yield return new WaitForSeconds(duration);
+
+        // Restore movement, input, and color
+        if (opponent != null)
+        {
+            opponent.SetMovementEnabled(true);
+            opponent.SetInputEnabled(true); // FIXED: Re-enable input
+        }
+
+        if (opponentRenderer != null)
+        {
+            opponentRenderer.material.color = originalColor;
+        }
+    }
+
+    void ExecuteInstantDamage()
+    {
+        // Find opponent and apply instant damage
+        PlayerCharacter opponent = FindOpponent();
+        if (opponent != null)
+        {
+            PlayerHealth opponentHealth = opponent.GetComponent<PlayerHealth>();
+            if (opponentHealth != null)
+            {
+                int damage = characterData.GetInstantDamageAmount();
+                opponentHealth.TakeDamage(damage, null);
+
+                // Create damage effect at opponent position
+                GameObject damageEffect = characterData.GetTrickEffect();
+                if (damageEffect != null)
+                {
+                    Instantiate(damageEffect, opponent.transform.position, Quaternion.identity);
+                }
+
+                if (debugMode)
+                {
+                    Debug.Log($"⚡ INSTANT DAMAGE: {damage} damage dealt to {opponent.name}!");
+                }
+            }
+        }
+    }
+
+    IEnumerator TrickCooldown()
+    {
+        trickOnCooldown = true;
+        yield return new WaitForSeconds(trickCooldownTime);
+        trickOnCooldown = false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TREAT ABILITIES (Self-Focused)
+    // ═══════════════════════════════════════════════════════════════
+
+    bool CanUseTreat()
+    {
+        return characterData != null &&
+               currentTreatCharge >= characterData.treatChargeRequired &&
+               !treatOnCooldown &&
+               !isTeleporting; // FIXED: Don't allow treat while teleporting
+    }
+
+    void ActivateTreat()
+    {
+        if (!CanUseTreat()) return;
+
+        // Consume charge and start cooldown
+        currentTreatCharge = 0f;
+        StartCoroutine(TreatCooldown());
+
+        // Play treat sound and effects
+        AudioClip treatSound = characterData.GetTreatSound();
+        if (treatSound != null)
+        {
+            audioSource.PlayOneShot(treatSound);
+        }
+
+        GameObject treatEffect = characterData.GetTreatEffect();
+        if (treatEffect != null)
+        {
+            Instantiate(treatEffect, characterTransform.position, Quaternion.identity);
+        }
+
+        // Execute specific treat based on character data
+        switch (characterData.treatType)
+        {
+            case TreatType.Shield:
+                ExecuteShield();
+                break;
+            case TreatType.Teleport:
+                ExecuteTeleport();
+                break;
+            case TreatType.SpeedBoost:
+                ExecuteSpeedBoost();
+                break;
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"✨ {characterData.characterName} activated {characterData.treatType}!");
+        }
+    }
+
+    void ExecuteShield()
+    {
+        float duration = characterData.GetShieldDuration();
+
+        // Make player temporarily invulnerable
+        if (playerHealth != null)
+        {
+            playerHealth.SetTemporaryInvulnerability(duration);
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"🛡️ SHIELD: Invulnerable for {duration}s");
+        }
+    }
+
+    void ExecuteTeleport()
+    {
+        // Don't teleport if already teleporting
+        if (isTeleporting) return;
+
+        float range = characterData.GetTeleportRange();
+
+        // Start bounds override before teleporting
+        if (movementRestrictor != null)
+        {
+            movementRestrictor.StartTeleportOverride();
+        }
+
+        // Enhanced teleport with strategic positioning
+        StartCoroutine(EnhancedTeleport(range));
+
+        if (debugMode)
+        {
+            Debug.Log($"🌀 ENHANCED TELEPORT: Started!");
+        }
+    }
+
+    IEnumerator EnhancedTeleport(float range)
+    {
+        isTeleporting = true;
+
+        // Store original position
+        Vector3 originalPosition = transform.position;
+
+        if (debugMode)
+        {
+            Debug.Log($"🌀 TELEPORT START: Original position {originalPosition}");
+        }
+
+        // Calculate strategic teleport position
+        Vector3 teleportPosition = CalculateStrategicTeleportPosition(range);
+
+        // Create teleport effect at old position
+        GameObject teleportEffect = characterData.GetTreatEffect();
+        if (teleportEffect != null)
+        {
+            Instantiate(teleportEffect, transform.position, Quaternion.identity);
+        }
+
+        // Teleport TO new position (can cross bounds now!)
+        transform.position = teleportPosition;
+
+        // Create teleport effect at new position
+        if (teleportEffect != null)
+        {
+            Instantiate(teleportEffect, transform.position, Quaternion.identity);
+        }
+
+        // Begin grace period (allows movement in opponent's side)
+        if (movementRestrictor != null)
+        {
+            movementRestrictor.BeginTeleportGracePeriod();
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"🌀 TELEPORTED TO: {teleportPosition} - Grace period active");
+        }
+
+        // Wait for strategic positioning time
+        yield return new WaitForSeconds(1.2f);
+
+        if (debugMode)
+        {
+            Debug.Log($"🌀 TELEPORT RETURN: Going back to home side");
+        }
+
+        // Create teleport effect before returning
+        if (teleportEffect != null)
+        {
+            Instantiate(teleportEffect, transform.position, Quaternion.identity);
+        }
+
+        // Teleport BACK to safe position in home side
+        Vector3 returnPosition = CalculateReturnPosition(originalPosition);
+        transform.position = returnPosition;
+
+        // Create teleport effect at return position
+        if (teleportEffect != null)
+        {
+            Instantiate(teleportEffect, transform.position, Quaternion.identity);
+        }
+
+        // End teleport override - restore normal bounds
+        if (movementRestrictor != null)
+        {
+            movementRestrictor.EndTeleportOverride();
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"🌀 TELEPORT COMPLETE: Returned to home side at {returnPosition}");
+        }
+
+        isTeleporting = false;
+    }
+
+    Vector3 CalculateStrategicTeleportPosition(float range)
+    {
+        Vector3 currentPos = transform.position;
+        PlayerCharacter opponent = FindOpponent();
+
+        // Check for incoming ball - dodge mode
+        BallController incomingBall = FindIncomingBall();
+
+        if (incomingBall != null)
+        {
+            // DODGE MODE: Smart evasion
+            return CalculateDodgePosition(currentPos, incomingBall, range);
+        }
+        else if (opponent != null)
+        {
+            // ATTACK MODE: Flank behind opponent for surprise attack
+            return CalculateFlankPosition(currentPos, opponent, range);
+        }
+        else
+        {
+            // REPOSITIONING MODE: Move to tactical position
+            return CalculateRepositionPosition(currentPos, range);
+        }
+    }
+
+    Vector3 CalculateDodgePosition(Vector3 currentPos, BallController incomingBall, float range)
+    {
+        Vector3 ballPos = incomingBall.transform.position;
+        Vector3 ballVel = incomingBall.GetVelocity().normalized;
+
+        // Calculate perpendicular dodge positions
+        Vector3 dodgeLeft = currentPos + Vector3.left * range;
+        Vector3 dodgeRight = currentPos + Vector3.right * range;
+
+        // Choose position that maximizes distance from ball path
+        float leftSafety = CalculateSafetyScore(dodgeLeft, ballPos, ballVel);
+        float rightSafety = CalculateSafetyScore(dodgeRight, ballPos, ballVel);
+
+        Vector3 bestDodge = leftSafety > rightSafety ? dodgeLeft : dodgeRight;
+        bestDodge.y = currentPos.y;
+        bestDodge.z = currentPos.z;
+
+        if (debugMode)
+        {
+            Debug.Log($"🌀 DODGE TELEPORT: Ball incoming, dodging {(leftSafety > rightSafety ? "LEFT" : "RIGHT")} (Safety: {Mathf.Max(leftSafety, rightSafety):F1})");
+        }
+
+        return ClampToArena(bestDodge);
+    }
+
+    Vector3 CalculateFlankPosition(Vector3 currentPos, PlayerCharacter opponent, float range)
+    {
+        Vector3 opponentPos = opponent.transform.position;
+
+        // Determine optimal flank position
+        Vector3 teleportPos;
+
+        // Always try to get behind opponent (surprise attack)
+        if (movementRestrictor != null)
+        {
+            var playerSide = movementRestrictor.GetPlayerSide();
+
+            if (playerSide == ArenaMovementRestrictor.PlayerSide.Left)
+            {
+                // Left player teleports to right side behind opponent
+                teleportPos = new Vector3(opponentPos.x + range * 0.7f, currentPos.y, currentPos.z);
+                if (debugMode) Debug.Log("🌀 FLANK ATTACK: Left player flanking right");
+            }
+            else
+            {
+                // Right player teleports to left side behind opponent
+                teleportPos = new Vector3(opponentPos.x - range * 0.7f, currentPos.y, currentPos.z);
+                if (debugMode) Debug.Log("🌀 FLANK ATTACK: Right player flanking left");
+            }
+        }
+        else
+        {
+            // Fallback: flank based on current position
+            float direction = (currentPos.x < opponentPos.x) ? 1f : -1f;
+            teleportPos = new Vector3(opponentPos.x + direction * range * 0.7f, currentPos.y, currentPos.z);
+        }
+
+        return ClampToArena(teleportPos);
+    }
+
+    Vector3 CalculateRepositionPosition(Vector3 currentPos, float range)
+    {
+        // Move toward center for better court coverage
+        Vector3 centerPos = new Vector3(0f, currentPos.y, currentPos.z);
+        Vector3 directionToCenter = (centerPos - currentPos).normalized;
+
+        Vector3 teleportPos = currentPos + directionToCenter * range * 0.5f;
+
+        if (debugMode)
+        {
+            Debug.Log("🌀 REPOSITION TELEPORT: Moving toward center");
+        }
+
+        return ClampToArena(teleportPos);
+    }
+
+    Vector3 CalculateReturnPosition(Vector3 originalPosition)
+    {
+        // Return to a safe position in home side
+        if (movementRestrictor != null)
+        {
+            movementRestrictor.GetPlayerBounds(out float minX, out float maxX);
+
+            // Position at 75% toward center of home side
+            float homeCenterX = (minX + maxX) * 0.5f;
+            float returnX = Mathf.Lerp(originalPosition.x, homeCenterX, 0.75f);
+
+            return new Vector3(returnX, originalPosition.y, originalPosition.z);
+        }
+
+        // Fallback
+        return originalPosition;
+    }
+
+    float CalculateSafetyScore(Vector3 position, Vector3 ballPos, Vector3 ballVel)
+    {
+        // Calculate how safe a position is from ball trajectory
+        Vector3 ballToBall = position - ballPos;
+        float distanceFromBall = ballToBall.magnitude;
+
+        // Check if position is in ball's path
+        float pathAlignment = Vector3.Dot(ballToBall.normalized, ballVel);
+
+        // Higher score = safer position
+        float safetyScore = distanceFromBall;
+        if (pathAlignment > 0.5f) // In ball's path
+        {
+            safetyScore *= 0.3f; // Much less safe
+        }
+
+        return safetyScore;
+    }
+
+    Vector3 ClampToArena(Vector3 position)
+    {
+        // Use arena bounds (can be wider than player bounds during teleport)
+        position.x = Mathf.Clamp(position.x, -12f, 12f);
+        position.y = Mathf.Max(position.y, 0f);
+        return position;
+    }
+
+    void ExecuteSpeedBoost()
+    {
+        StartCoroutine(ApplySpeedBoost());
+
+        if (debugMode)
+        {
+            Debug.Log($"💨 SPEED BOOST: {characterData.GetSpeedBoostMultiplier()}x speed for {characterData.GetSpeedBoostDuration()}s");
+        }
+    }
+
+    IEnumerator ApplySpeedBoost()
+    {
+        if (characterData == null) yield break;
+
+        float originalSpeed = characterData.moveSpeed;
+        float boostedSpeed = originalSpeed * characterData.GetSpeedBoostMultiplier();
+        float duration = characterData.GetSpeedBoostDuration();
+
+        // Apply speed boost
+        characterData.moveSpeed = boostedSpeed;
+
+        // Visual effect
+        Renderer characterRenderer = GetComponentInChildren<Renderer>();
+        Color originalColor = characterRenderer?.material.color ?? Color.white;
+        if (characterRenderer != null)
+        {
+            characterRenderer.material.color = Color.yellow; // Yellow tint for speed
+        }
+
+        yield return new WaitForSeconds(duration);
+
+        // Restore original speed and color
+        if (characterData != null)
+        {
+            characterData.moveSpeed = originalSpeed;
+        }
+
+        if (characterRenderer != null)
+        {
+            characterRenderer.material.color = originalColor;
+        }
+    }
+
+    IEnumerator TreatCooldown()
+    {
+        treatOnCooldown = true;
+        yield return new WaitForSeconds(treatCooldownTime);
+        treatOnCooldown = false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // UTILITY METHODS
+    // ═══════════════════════════════════════════════════════════════
+
+    PlayerCharacter FindOpponent()
+    {
+        PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
+        foreach (PlayerCharacter player in allPlayers)
+        {
+            if (player != this)
+            {
+                return player;
+            }
+        }
+        return null;
+    }
+
+    // FIXED: Add back the missing FindIncomingBall method
+    BallController FindIncomingBall()
+    {
+        BallController[] allBalls = FindObjectsOfType<BallController>();
+
+        foreach (BallController ball in allBalls)
+        {
+            if (ball.GetBallState() == BallController.BallState.Thrown)
+            {
+                // Check if ball is coming toward this player
+                Vector3 ballPos = ball.transform.position;
+                Vector3 ballVel = ball.GetVelocity();
+                Vector3 playerPos = transform.position;
+
+                // Simple check: ball is moving toward player and is within reasonable range
+                Vector3 ballToPlayer = (playerPos - ballPos).normalized;
+                float dot = Vector3.Dot(ballVel.normalized, ballToPlayer);
+
+                if (dot > 0.5f && Vector3.Distance(ballPos, playerPos) < 10f)
+                {
+                    return ball;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    public void SetMovementEnabled(bool enabled)
+    {
+        movementEnabled = enabled;
+    }
+
+    // FIXED: Add input control method
+    public void SetInputEnabled(bool enabled)
+    {
+        inputEnabled = enabled;
+    }
+
     // Public interface methods for other systems
     public CharacterData GetCharacterData() => characterData;
     public bool IsGrounded() => isGrounded;
-    public bool IsDucking() => isDucking;
+    //public bool IsDucking() => isDucking;
     public bool HasBall() => hasBall;
     public void SetHasBall(bool value) => hasBall = value;
     public PlayerInputHandler GetInputHandler() => inputHandler;
+
+    // Charge getters for UI
     public float GetUltimateChargePercentage() => characterData != null ?
         currentUltimateCharge / characterData.ultimateChargeRequired : 0f;
+    public float GetTrickChargePercentage() => characterData != null ?
+        currentTrickCharge / characterData.trickChargeRequired : 0f;
+    public float GetTreatChargePercentage() => characterData != null ?
+        currentTreatCharge / characterData.treatChargeRequired : 0f;
 
     // Methods for damage system integration
     public int GetThrowDamage(ThrowType throwType)
@@ -1408,24 +1521,74 @@ public class PlayerCharacter : MonoBehaviour
         {
             Gizmos.color = characterData.characterColor;
             Gizmos.DrawWireSphere(transform.position + Vector3.up * 2f, 0.5f);
+
+            // Show ability charge status
+            if (currentUltimateCharge >= characterData.ultimateChargeRequired)
+            {
+                Gizmos.color = Color.red;
+                Gizmos.DrawWireCube(transform.position + Vector3.up * 2.5f, Vector3.one * 0.3f);
+            }
         }
     }
 
+    // Enhanced debug GUI with duck system info
     void OnGUI()
     {
         if (!debugMode || characterData == null) return;
 
-        // Show character debug info
-        float yOffset = gameObject.name.Contains("2") ? 150f : 50f;
+        float yOffset = gameObject.name.Contains("2") ? 200f : 50f;
 
-        GUILayout.BeginArea(new Rect(10, yOffset, 300, 150));
+        GUILayout.BeginArea(new Rect(10, yOffset, 450, 250));
         GUILayout.BeginVertical("box");
 
         GUILayout.Label($"Character: {characterData.characterName}");
         GUILayout.Label($"Health: {playerHealth?.GetCurrentHealth()}/{characterData.maxHealth}");
-        GUILayout.Label($"Ultimate: {currentUltimateCharge:F1}/{characterData.ultimateChargeRequired}");
-        GUILayout.Label($"Grounded: {isGrounded} | Ducking: {isDucking}");
-        GUILayout.Label($"Can Dash: {canDash} | Has Ball: {hasBall}");
+        GUILayout.Label($"Ultimate ({characterData.ultimateType}): {currentUltimateCharge:F1}/{characterData.ultimateChargeRequired}");
+        GUILayout.Label($"Trick ({characterData.trickType}): {currentTrickCharge:F1}/{characterData.trickChargeRequired}");
+        GUILayout.Label($"Treat ({characterData.treatType}): {currentTreatCharge:F1}/{characterData.treatChargeRequired}");
+        GUILayout.Label($"State: Ground={isGrounded} Duck={isDucking} Ball={hasBall} Input={inputEnabled}");
+
+        // ENHANCED: Duck system info
+        if (duckSystem != null)
+        {
+            GUILayout.Label($"Duck System: Can={duckSystem.CanDuck()} Cooldown={duckSystem.IsInCooldown()}");
+
+            if (duckSystem.IsDucking())
+            {
+                float timeRemaining = duckSystem.GetDuckTimeRemaining();
+                GUILayout.Label($"Duck Time Remaining: {timeRemaining:F1}s");
+
+                // Duck progress bar
+                Rect duckRect = GUILayoutUtility.GetRect(400, 15);
+                GUI.Box(duckRect, "");
+
+                Rect duckFill = new Rect(duckRect.x, duckRect.y,
+                    duckRect.width * duckSystem.GetDuckProgress(), duckRect.height);
+
+                Color duckColor = timeRemaining < 0.3f ? Color.red :
+                                timeRemaining < 0.7f ? Color.yellow : Color.green;
+                GUI.color = duckColor;
+                GUI.Box(duckFill, "");
+                GUI.color = Color.white;
+            }
+
+            if (duckSystem.IsInCooldown())
+            {
+                float cooldownRemaining = duckSystem.GetCooldownTimeRemaining();
+                GUILayout.Label($"Duck Cooldown: {cooldownRemaining:F1}s");
+
+                // Cooldown progress bar
+                Rect cooldownRect = GUILayoutUtility.GetRect(400, 15);
+                GUI.Box(cooldownRect, "");
+
+                Rect cooldownFill = new Rect(cooldownRect.x, cooldownRect.y,
+                    cooldownRect.width * (1f - (cooldownRemaining / 1.2f)), cooldownRect.height);
+
+                GUI.color = Color.cyan;
+                GUI.Box(cooldownFill, "");
+                GUI.color = Color.white;
+            }
+        }
 
         GUILayout.EndVertical();
         GUILayout.EndArea();

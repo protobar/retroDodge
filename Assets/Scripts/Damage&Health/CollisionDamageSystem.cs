@@ -1,16 +1,16 @@
-using UnityEngine;
+﻿using UnityEngine;
 using System.Collections;
 
 /// <summary>
 /// Handles ball collision, damage, and post-impact physics
-/// Updated to work with new character system and ThrowType enum
+/// FIXED: Updated to use correct ThrowType enum values
 /// </summary>
 public class CollisionDamageSystem : MonoBehaviour
 {
     [Header("Collision Settings")]
     [SerializeField] private float collisionRange = 1.0f;
-    [SerializeField] private float duckingHeightThreshold = 1.0f; // Ball must be below this to hit ducking player
-    [SerializeField] private float playerCollisionHeight = 1.0f; // Height offset for player collision center
+    [SerializeField] private float duckingHeightThreshold = 1.0f;
+    [SerializeField] private float playerCollisionHeight = 1.0f;
     [SerializeField] private float hitStopDuration = 0.1f;
     [SerializeField] private bool enablePredictiveCollision = true;
     [SerializeField] private float predictionDistance = 1.5f;
@@ -49,8 +49,8 @@ public class CollisionDamageSystem : MonoBehaviour
 
     // Collision state
     private bool hasHitThisThrow = false;
-    private PlayerCharacter lastThrower; // Updated to use PlayerCharacter
-    private CharacterController lastLegacyThrower; // Keep legacy support
+    private PlayerCharacter lastThrower;
+    private CharacterController lastLegacyThrower;
     private float lastCollisionTime = 0f;
     private float collisionCooldown = 0.2f;
 
@@ -66,7 +66,6 @@ public class CollisionDamageSystem : MonoBehaviour
     public enum HitType
     {
         Basic,
-        Charged,
         JumpThrow,
         Ultimate,
         Deflected
@@ -241,7 +240,7 @@ public class CollisionDamageSystem : MonoBehaviour
     {
         if (ballController == null) return HitType.Basic;
 
-        // Use the new ThrowType from CharacterData instead of BallController.ThrowType
+        // FIXED: Use the correct ThrowType enum values
         ThrowType throwType = ballController.GetThrowType();
 
         switch (throwType)
@@ -250,8 +249,6 @@ public class CollisionDamageSystem : MonoBehaviour
                 return HitType.JumpThrow;
             case ThrowType.Ultimate:
                 return HitType.Ultimate;
-            case ThrowType.PowerThrow:
-                return HitType.Ultimate; // Treat power throw as ultimate
             default:
                 return HitType.Basic;
         }
@@ -387,8 +384,6 @@ public class CollisionDamageSystem : MonoBehaviour
                 return 0.8f; // 80% chance for normal throws
             case HitType.JumpThrow:
                 return 0.6f; // 60% chance for jump throws
-            case HitType.Charged:
-                return 0.4f; // 40% chance for charged throws
             case HitType.Ultimate:
                 return 0.1f; // 10% chance for ultimate throws
             default:
@@ -829,7 +824,7 @@ public class CollisionDamageSystem : MonoBehaviour
         }
     }
 
-    // Debug visualization
+    // Debug visualization - truncated for space but includes all the gizmo drawing logic
     void OnDrawGizmosSelected()
     {
         if (!showCollisionGizmos) return;

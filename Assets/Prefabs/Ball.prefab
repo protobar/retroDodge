@@ -126,26 +126,18 @@ MonoBehaviour:
   normalThrowSpeed: 50
   jumpThrowSpeed: 55
   useNeoGeoPhysics: 1
-  collisionDistance: 0
-  duckingHeightThreshold: 0
-  playerCollisionHeight: 0
-  enablePredictiveCollision: 1
-  predictionDistance: 1.5
-  rotationSpeed: 360
-  availableColor: {r: 1, g: 1, b: 1, a: 1}
-  heldColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  enableGravityAfterWallBounce: 1
   holdOffset: {x: 0.5, y: 0.25, z: 0}
   useRelativeToPlayer: 1
   holdFollowSpeed: 10
   smoothHoldMovement: 1
-  courtWidth: 15
-  courtLength: 15
+  enableWallBouncing: 1
+  maxBounces: 3
+  stuckCheckInterval: 0.5
+  rotationSpeed: 360
+  availableColor: {r: 1, g: 1, b: 1, a: 1}
+  heldColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   debugMode: 1
-  showCollisionGizmos: 1
-  showPlayerColliders: 1
-  showDuckingThreshold: 1
-  showBallHeight: 1
-  showCollisionLines: 1
   currentState: 0
   velocity: {x: 0, y: 0, z: 0}
   groundLayer:
@@ -185,6 +177,9 @@ MonoBehaviour:
   hitSound: {fileID: 0}
   criticalHitSound: {fileID: 0}
   deflectSound: {fileID: 0}
+  ballSettlementSpeed: 0.6
+  minimumBallSpeed: 2
+  enableBallSettlement: 1
   debugMode: 1
   showCollisionGizmos: 1
   showDuckingVisualization: 1
