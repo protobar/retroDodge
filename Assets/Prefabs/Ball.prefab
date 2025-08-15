@@ -123,17 +123,41 @@ MonoBehaviour:
   gravity: 20
   pickupRange: 1.84
   bounceMultiplier: 0.6
+  maxHoldTime: 5
+  warningStartTime: 3
+  dangerStartTime: 4
+  holdPenaltyDamage: 10
+  enableHoldTimer: 1
+  resetBallOnPenalty: 1
+  ballDropDelay: 0.5
+  warningEffect: {fileID: 0}
+  dangerEffect: {fileID: 0}
+  corruptionEffect: {fileID: 0}
+  warningColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  dangerColor: {r: 1, g: 0, b: 0, a: 1}
+  corruptionColor: {r: 1, g: 0, b: 1, a: 1}
+  warningSound: {fileID: 0}
+  dangerSound: {fileID: 0}
+  corruptionSound: {fileID: 0}
+  tickSound: {fileID: 0}
   normalThrowSpeed: 50
   jumpThrowSpeed: 55
   useNeoGeoPhysics: 1
-  enableGravityAfterWallBounce: 1
   holdOffset: {x: 0.5, y: 0.25, z: 0}
   useRelativeToPlayer: 1
   holdFollowSpeed: 10
   smoothHoldMovement: 1
-  enableWallBouncing: 1
-  maxBounces: 3
-  stuckCheckInterval: 0.5
+  enableWallCollision: 1
+  arenaLeftBound: -15
+  arenaRightBound: 15
+  arenaTopBound: 8
+  arenaBottomBound: -2
+  wallBounceMultiplier: 0.25
+  energyLossOnBounce: 0.1
+  maxWallBounces: 1
+  wallBounceEffect: {fileID: 0}
+  wallBounceSound: {fileID: 0}
+  enableWallShake: 0
   rotationSpeed: 360
   availableColor: {r: 1, g: 1, b: 1, a: 1}
   heldColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
@@ -177,9 +201,6 @@ MonoBehaviour:
   hitSound: {fileID: 0}
   criticalHitSound: {fileID: 0}
   deflectSound: {fileID: 0}
-  ballSettlementSpeed: 0.6
-  minimumBallSpeed: 2
-  enableBallSettlement: 1
   debugMode: 1
   showCollisionGizmos: 1
   showDuckingVisualization: 1

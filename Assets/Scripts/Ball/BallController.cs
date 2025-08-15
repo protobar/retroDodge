@@ -48,6 +48,25 @@ public class BallController : MonoBehaviour
     [SerializeField] private float holdFollowSpeed = 10f;
     [SerializeField] private bool smoothHoldMovement = true;
 
+    [Header("Wall & Bounds Collision")]
+    [SerializeField] private bool enableWallCollision = true;
+    [SerializeField] private float arenaLeftBound = -12f;
+    [SerializeField] private float arenaRightBound = 12f;
+    [SerializeField] private float arenaTopBound = 8f;
+    [SerializeField] private float arenaBottomBound = -2f;
+    [SerializeField] private float wallBounceMultiplier = 0.75f;
+    [SerializeField] private float energyLossOnBounce = 0.1f;
+    [SerializeField] private int maxWallBounces = 3;
+
+    [Header("Wall Collision Effects")]
+    [SerializeField] private GameObject wallBounceEffect;
+    [SerializeField] private AudioClip wallBounceSound;
+    [SerializeField] private bool enableWallShake = true;
+
+    // Wall collision state
+    private int currentWallBounces = 0;
+    private bool hasHitWallThisFrame = false;
+
     [Header("Visual Settings")]
     [SerializeField] private float rotationSpeed = 360f;
     [SerializeField] private Color availableColor = Color.white;
@@ -249,22 +268,25 @@ public class BallController : MonoBehaviour
 
     void HandleThrownBall()
     {
-        // NO GRAVITY during thrown state - ball maintains exact trajectory
+        // Existing Neo Geo physics
         if (useNeoGeoPhysics)
         {
             HandleNeoGeoPhysics();
         }
 
-        // Apply homing if enabled
+        // Existing homing behavior
         if (homingEnabled)
         {
             ApplyHomingBehavior();
         }
 
-        // Move the ball (no gravity applied here)
+        // NEW: Check for wall collisions
+        CheckWallCollisions();
+
+        // Move the ball (existing logic)
         ballTransform.Translate(velocity * Time.deltaTime, Space.World);
 
-        // Check for ground collision
+        // Existing ground collision
         CheckGrounded();
         if (isGrounded && velocity.y <= 0)
         {
@@ -275,10 +297,115 @@ public class BallController : MonoBehaviour
             }
         }
 
-        // Check if ball went out of bounds
-        if (ballTransform.position.y < -5f)
+        // Enhanced out-of-bounds check
+        if (ballTransform.position.y < arenaBottomBound - 3f)
         {
             ResetBall();
+        }
+    }
+
+    void CheckWallCollisions()
+    {
+        if (!enableWallCollision || currentState != BallState.Thrown) return;
+        if (velocity.magnitude < 0.1f || hasHitWallThisFrame) return;
+
+        Vector3 currentPos = ballTransform.position;
+        Vector3 nextPos = currentPos + velocity * Time.deltaTime;
+
+        // Left wall
+        if (currentPos.x > arenaLeftBound && nextPos.x <= arenaLeftBound)
+        {
+            HandleWallBounce("Left");
+        }
+        // Right wall
+        else if (currentPos.x < arenaRightBound && nextPos.x >= arenaRightBound)
+        {
+            HandleWallBounce("Right");
+        }
+        // Top wall
+        else if (currentPos.y < arenaTopBound && nextPos.y >= arenaTopBound)
+        {
+            HandleWallBounce("Top");
+        }
+        // Bottom wall
+        else if (currentPos.y > arenaBottomBound && nextPos.y <= arenaBottomBound)
+        {
+            HandleWallBounce("Bottom");
+        }
+
+        hasHitWallThisFrame = false;
+    }
+
+    void HandleWallBounce(string wallType)
+    {
+        hasHitWallThisFrame = true;
+        currentWallBounces++;
+
+        switch (wallType)
+        {
+            case "Left":
+                ballTransform.position = new Vector3(arenaLeftBound, ballTransform.position.y, ballTransform.position.z);
+                velocity.x = -velocity.x * wallBounceMultiplier;
+                break;
+            case "Right":
+                ballTransform.position = new Vector3(arenaRightBound, ballTransform.position.y, ballTransform.position.z);
+                velocity.x = -velocity.x * wallBounceMultiplier;
+                break;
+            case "Top":
+                ballTransform.position = new Vector3(ballTransform.position.x, arenaTopBound, ballTransform.position.z);
+                velocity.y = -velocity.y * wallBounceMultiplier;
+                break;
+            case "Bottom":
+                ballTransform.position = new Vector3(ballTransform.position.x, arenaBottomBound, ballTransform.position.z);
+                velocity.y = -velocity.y * wallBounceMultiplier * 0.8f;
+                break;
+        }
+
+        // Apply energy loss
+        velocity *= (1f - energyLossOnBounce);
+
+        // Add slight randomness
+        velocity += new Vector3(Random.Range(-0.5f, 0.5f), Random.Range(-0.5f, 0.5f), 0);
+
+        // Effects
+        PlayWallBounceEffects(wallType);
+
+        // Stop bouncing if too many bounces or too slow
+        if (currentWallBounces >= maxWallBounces || velocity.magnitude < 2f)
+        {
+            SetBallState(BallState.Free);
+            currentWallBounces = 0;
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"⚡ Wall Bounce: {wallType} | Velocity: {velocity.magnitude:F1} | Bounces: {currentWallBounces}");
+        }
+    }
+
+    void PlayWallBounceEffects(string wallType)
+    {
+        // Play sound
+        if (wallBounceSound != null && audioSource != null)
+        {
+            audioSource.PlayOneShot(wallBounceSound, 0.5f);
+        }
+
+        // Screen shake
+        if (enableWallShake)
+        {
+            CameraController camera = FindObjectOfType<CameraController>();
+            if (camera != null)
+            {
+                camera.ShakeCamera(0.2f, 0.15f);
+            }
+        }
+
+        // Spawn effect
+        if (wallBounceEffect != null)
+        {
+            GameObject effect = Instantiate(wallBounceEffect, ballTransform.position, Quaternion.identity);
+            Destroy(effect, 2f);
         }
     }
 
@@ -933,6 +1060,10 @@ public class BallController : MonoBehaviour
         velocity = Vector3.zero;
         hasHitTarget = false;
 
+        // NEW: Reset wall collision state
+        currentWallBounces = 0;
+        hasHitWallThisFrame = false;
+
         // FIXED: RESET HOLD TIMER completely
         StopHoldTimer();
 
@@ -1279,6 +1410,25 @@ public class BallController : MonoBehaviour
             Gizmos.color = data.characterColor;
             Gizmos.DrawWireSphere(transform.position + Vector3.up * 2f, 0.4f);
         }
+
+        // NEW: Draw arena bounds
+        Gizmos.color = Color.cyan;
+
+        // Left wall
+        Vector3 leftTop = new Vector3(arenaLeftBound, arenaTopBound, 0);
+        Vector3 leftBottom = new Vector3(arenaLeftBound, arenaBottomBound, 0);
+        Gizmos.DrawLine(leftTop, leftBottom);
+
+        // Right wall
+        Vector3 rightTop = new Vector3(arenaRightBound, arenaTopBound, 0);
+        Vector3 rightBottom = new Vector3(arenaRightBound, arenaBottomBound, 0);
+        Gizmos.DrawLine(rightTop, rightBottom);
+
+        // Top wall
+        Gizmos.DrawLine(leftTop, rightTop);
+
+        // Bottom wall
+        Gizmos.DrawLine(leftBottom, rightBottom);
     }
 
     void OnGUI()
