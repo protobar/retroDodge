@@ -14,8 +14,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   characterName: Grudge
   characterDescription: Slow but devastating
-  characterIcon: {fileID: 0}
-  characterPrefab: {fileID: 0}
+  characterIcon: {fileID: 1368295261, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
+  characterPrefab: {fileID: 990030946171809883, guid: f3a20aa0d33475d48b2e4de88dd3ccb8,
+    type: 3}
   moveSpeed: 10
   jumpHeight: 12
   canDoubleJump: 0
@@ -40,7 +41,8 @@ MonoBehaviour:
   powerThrowSpeed: 30
   powerThrowKnockback: 12
   powerThrowScreenShake: 1.2
-  powerThrowEffect: {fileID: 0}
+  powerThrowEffect: {fileID: 872356367442927102, guid: e42de5ad5f76a1b44ad156e10defd9a1,
+    type: 3}
   powerThrowSound: {fileID: 0}
   multiThrowCount: 4
   multiThrowDamagePerBall: 12
@@ -68,16 +70,18 @@ MonoBehaviour:
   freezeEffect: {fileID: 0}
   freezeSound: {fileID: 0}
   instantDamageAmount: 15
-  instantDamageEffect: {fileID: 0}
+  instantDamageEffect: {fileID: 7405067963741363938, guid: d8535000769928346b882839dd597ac3,
+    type: 3}
   instantDamageSound: {fileID: 0}
   trickChargeRequired: 30
   trickChargeRate: 3
-  treatType: 1
+  treatType: 2
   shieldDuration: 4
   shieldEffect: {fileID: 0}
   shieldSound: {fileID: 0}
   teleportRange: 8
-  teleportEffect: {fileID: 0}
+  teleportEffect: {fileID: 4922399389387401662, guid: 971f1c84dbb10f1418c5f6da0881686e,
+    type: 3}
   teleportSound: {fileID: 0}
   speedBoostMultiplier: 2.5
   speedBoostDuration: 3

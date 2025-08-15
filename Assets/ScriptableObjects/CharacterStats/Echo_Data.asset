@@ -12,10 +12,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 416c2fc259394f3459ecf4c65ed03941, type: 3}
   m_Name: Echo_Data
   m_EditorClassIdentifier: 
-  characterName: Champion
-  characterDescription: Perfect balance of all abilities
-  characterIcon: {fileID: 0}
-  characterPrefab: {fileID: 0}
+  characterName: Echo
+  characterDescription: Trickster
+  characterIcon: {fileID: -1525437889, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
+  characterPrefab: {fileID: 3775798883431776970, guid: 936d3a2bc075a8649bb2cfd3aa1c78e0,
+    type: 3}
   moveSpeed: 8
   jumpHeight: 12
   canDoubleJump: 0

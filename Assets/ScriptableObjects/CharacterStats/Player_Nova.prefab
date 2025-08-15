@@ -1,0 +1,280 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &45927926235480509
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6636259846242725526}
+  - component: {fileID: 7899051678374113537}
+  - component: {fileID: 2209300629262096042}
+  - component: {fileID: 2067702032336598949}
+  - component: {fileID: 4909132988448289753}
+  - component: {fileID: 7502435188069300276}
+  - component: {fileID: 1067358175726693603}
+  - component: {fileID: 595057405840706538}
+  - component: {fileID: 6837583187912932837}
+  - component: {fileID: -3910053151060509909}
+  m_Layer: 8
+  m_Name: Player_Nova
+  m_TagString: Player
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6636259846242725526
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -8.55, y: 6.32, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!33 &7899051678374113537
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  m_Mesh: {fileID: 10208, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!23 &2209300629262096042
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!136 &2067702032336598949
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Radius: 0.5
+  m_Height: 2
+  m_Direction: 1
+  m_Center: {x: 0, y: 0, z: 0}
+--- !u!114 &4909132988448289753
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d89f09a39ea917c4cb6e31240d6eda3c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  catchRange: 2
+  perfectCatchWindow: 0.3
+  goodCatchWindow: 0.5
+  catchCooldown: 0.5
+  debugMode: 1
+  catchKey: 108
+  catchIndicator: {fileID: 0}
+  alwaysShowCatchRange: 0
+  perfectZoneColor: {r: 0, g: 1, b: 0, a: 1}
+  goodZoneColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  missZoneColor: {r: 1, g: 0, b: 0, a: 1}
+  idleZoneColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+  idleIndicatorAlpha: 0.3
+  audioSource: {fileID: 0}
+  catchSuccessSound: {fileID: 0}
+  catchFailSound: {fileID: 0}
+  ballIncomingSound: {fileID: 0}
+--- !u!114 &7502435188069300276
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a3548b78008e774199d29396ca79901, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  playerType: 0
+  enableKeyboardInput: 1
+  enableMobileInput: 0
+  useCustomKeys: 0
+  customLeftKey: 276
+  customRightKey: 275
+  customJumpKey: 273
+  customDuckKey: 274
+  customThrowKey: 97
+  customCatchKey: 115
+  customPickupKey: 100
+  customDashKey: 304
+  customUltimateKey: 113
+  customTrickKey: 119
+  customTreatKey: 101
+  useDuckSystem: 1
+  isPUN2Enabled: 0
+  isLocalPlayer: 1
+  inputBufferTime: 0.15
+  showDebugInfo: 0
+  forceMobileMode: 0
+  autoRegisterInSinglePlayer: 0
+--- !u!114 &1067358175726693603
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5cf9ad1d10a86ce4eb1a1c8bb2b064f0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  maxHealth: 100
+  currentHealth: 100
+  invulnerableOnSpawn: 1
+  invulnerabilityDuration: 1
+  healthBarSlider: {fileID: 0}
+  healthText: {fileID: 0}
+  healthBarFill: {fileID: 0}
+  healthyColor: {r: 0, g: 1, b: 0, a: 1}
+  lowHealthColor: {r: 1, g: 0, b: 0, a: 1}
+  invulnerableColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  lowHealthThreshold: 0.3
+  deathEffectPrefab: {fileID: 0}
+  respawnDelay: 3
+  enableHealthRegeneration: 0
+  regenRate: 5
+  regenDelay: 5
+  hurtSound: {fileID: 0}
+  deathSound: {fileID: 0}
+  healSound: {fileID: 0}
+  invulnerabilitySound: {fileID: 0}
+  debugMode: 0
+--- !u!114 &595057405840706538
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f9be914ea63b9d3428d6274eeb6066fc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  characterData: {fileID: 11400000, guid: a46a381a78a312340977021a60875735, type: 2}
+  autoLoadCharacterOnStart: 1
+  debugMode: 0
+  showCharacterInfo: 0
+  groundLayer:
+    serializedVersion: 2
+    m_Bits: 1024
+  groundCheckDistance: 0.3
+--- !u!114 &6837583187912932837
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 837c22d78c5158e4ca52d0974584928f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  arenaLeftBound: -15
+  arenaRightBound: 15
+  centerLine: 0
+  enableRestriction: 1
+  teleportGracePeriod: 0.8
+  teleportPushbackSpeed: 3
+  smoothTeleportReturn: 1
+  useSmoothClamping: 0
+  clampSmoothness: 0.1
+  debugMode: 0
+  showBounds: 1
+  playerSide: 2
+  autoDetectSide: 1
+--- !u!114 &-3910053151060509909
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f103ca8e390bf0546bef912ae91ff2c8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  maxDuckDuration: 1.5
+  duckCooldown: 1.2
+  enableDurationLimit: 1
+  showDuckWarning: 1
+  warningStartTime: 1
+  warningColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  exhaustedColor: {r: 1, g: 0, b: 0, a: 1}
+  duckStartSound: {fileID: 0}
+  duckEndSound: {fileID: 0}
+  duckExhaustedSound: {fileID: 0}
+  cooldownEndSound: {fileID: 0}
+  debugMode: 0

@@ -159,33 +159,34 @@ public class PlayerInputHandler : MonoBehaviour
             switch (playerType)
             {
                 case PlayerInputType.Player1:
-                    leftKey = KeyCode.A;
-                    rightKey = KeyCode.D;
-                    jumpKey = KeyCode.W;
-                    duckKey = KeyCode.S;
-                    throwKey = KeyCode.K;
-                    catchKey = KeyCode.L;
-                    pickupKey = KeyCode.J;
-                    dashKey = KeyCode.LeftShift;
-                    ultimateKey = KeyCode.U;
-                    trickKey = KeyCode.I;
-                    treatKey = KeyCode.O;
-                    break;
-
-                case PlayerInputType.Player2:
                     leftKey = KeyCode.LeftArrow;
                     rightKey = KeyCode.RightArrow;
                     jumpKey = KeyCode.UpArrow;
                     duckKey = KeyCode.DownArrow;
-                    throwKey = KeyCode.Keypad1;
-                    catchKey = KeyCode.Keypad2;
-                    pickupKey = KeyCode.Keypad0;
-                    dashKey = KeyCode.RightShift;
-                    ultimateKey = KeyCode.Keypad3;
-                    trickKey = KeyCode.Keypad7;
-                    treatKey = KeyCode.Keypad8;
+                    throwKey = KeyCode.A;
+                    pickupKey = KeyCode.D;
+                    catchKey = KeyCode.S;
+                    trickKey = KeyCode.W;
+                    treatKey = KeyCode.E;
+                    ultimateKey = KeyCode.Q;
+                    dashKey = KeyCode.LeftShift; // unchanged unless you want a new key
+                    break;
+
+                case PlayerInputType.Player2:
+                    leftKey = KeyCode.Keypad1;
+                    rightKey = KeyCode.Keypad3;
+                    jumpKey = KeyCode.Keypad5;
+                    duckKey = KeyCode.Keypad2;
+                    throwKey = KeyCode.J;
+                    pickupKey = KeyCode.L;
+                    catchKey = KeyCode.K;
+                    trickKey = KeyCode.I;
+                    treatKey = KeyCode.O;
+                    ultimateKey = KeyCode.U;
+                    dashKey = KeyCode.RightShift; // unchanged unless you want a new key
                     break;
             }
+
         }
 
         if (showDebugInfo)
