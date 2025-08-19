@@ -66,6 +66,10 @@ public class PlayerCharacter : MonoBehaviour
     [Header("Duck System Integration")]
     private DuckSystem duckSystem;
 
+    [Header("Simplified VFX Integration")]
+    [SerializeField] private bool useVFXManager = true;
+    [SerializeField] private float vfxSpawnHeight = 1.5f;
+
     // Events for other systems
     public System.Action<CharacterData> OnCharacterLoaded;
     public System.Action<float> OnUltimateChargeChanged;
@@ -507,10 +511,17 @@ public class PlayerCharacter : MonoBehaviour
         // Get damage from character data
         int throwDamage = characterData.GetThrowDamage(throwType);
 
+        // SIMPLIFIED VFX: Spawn character-specific throw VFX
+        if (useVFXManager && VFXManager.Instance != null)
+        {
+            Vector3 throwVFXPosition = transform.position + Vector3.up * vfxSpawnHeight;
+            VFXManager.Instance.SpawnThrowVFX(throwVFXPosition, this, throwType);
+        }
+
         // Execute throw
         BallManager.Instance.RequestBallThrowWithCharacterData(this, characterData, throwType, throwDamage);
 
-        // Play throw sound
+        // Play throw sound (keep existing)
         PlayCharacterSound(CharacterAudioType.Throw);
 
         // Add ability charges for throwing
@@ -651,17 +662,11 @@ public class PlayerCharacter : MonoBehaviour
         currentUltimateCharge = 0f;
         StartCoroutine(UltimateCooldown());
 
-        // Play ultimate sound and effects
-        AudioClip ultimateSound = characterData.GetUltimateSound();
-        if (ultimateSound != null)
+        // SIMPLIFIED VFX: Stage 1 - Player activation (sound + aura VFX)
+        if (useVFXManager && VFXManager.Instance != null)
         {
-            audioSource.PlayOneShot(ultimateSound);
-        }
-
-        GameObject ultimateEffect = characterData.GetUltimateEffect();
-        if (ultimateEffect != null)
-        {
-            Instantiate(ultimateEffect, characterTransform.position, Quaternion.identity);
+            Vector3 activationPosition = transform.position + Vector3.up * vfxSpawnHeight;
+            VFXManager.Instance.SpawnUltimateActivationVFX(activationPosition, this);
         }
 
         // Execute specific ultimate based on character data
@@ -725,34 +730,33 @@ public class PlayerCharacter : MonoBehaviour
         float delay = characterData.GetMultiThrowDelay();
         Vector3 spawnOffset = characterData.GetMultiThrowSpawnOffset();
 
-        // FIXED: Determine throw direction based on opponent position
+        // Determine throw direction based on opponent position
         PlayerCharacter opponent = FindOpponent();
         Vector3 throwDirection = Vector3.right; // Default
 
         if (opponent != null)
         {
-            // Calculate direction towards opponent
             Vector3 toOpponent = (opponent.transform.position - transform.position).normalized;
-            throwDirection = new Vector3(toOpponent.x, 0f, 0f).normalized; // Only horizontal component
+            throwDirection = new Vector3(toOpponent.x, 0f, 0f).normalized;
 
             if (debugMode)
             {
-                Debug.Log($"MultiThrow direction: {throwDirection} (towards {opponent.name})");
+                Debug.Log($"Enhanced MultiThrow direction: {throwDirection} (towards {opponent.name})");
             }
         }
 
         if (debugMode)
         {
-            Debug.Log($"🔥 MULTI THROW: {ballCount} balls x {damagePerBall} damage towards opponent!");
+            Debug.Log($"🔥 ENHANCED MULTI THROW: {ballCount} balls x {damagePerBall} damage towards opponent with VFX!");
         }
 
         for (int i = 0; i < ballCount; i++)
         {
             // Apply spawn offset relative to throw direction
             Vector3 spawnPos = transform.position;
-            spawnPos += throwDirection * spawnOffset.x; // Forward towards opponent
-            spawnPos += Vector3.up * spawnOffset.y;     // Height
-            spawnPos += Vector3.forward * spawnOffset.z; // Z offset (if needed)
+            spawnPos += throwDirection * spawnOffset.x;
+            spawnPos += Vector3.up * spawnOffset.y;
+            spawnPos += Vector3.forward * spawnOffset.z;
 
             GameObject ballObj = Instantiate(BallManager.Instance.ballPrefab, spawnPos, Quaternion.identity);
             ballObj.transform.localScale = Vector3.one;
@@ -760,20 +764,22 @@ public class PlayerCharacter : MonoBehaviour
             BallController ballController = ballObj.GetComponent<BallController>();
             if (ballController != null)
             {
-                // FIXED: Calculate spread based on throw direction (not always right)
+                // Calculate spread based on throw direction
                 float angleOffset = (i - (ballCount - 1) * 0.5f) * (spreadAngle / ballCount);
-
-                // Create rotation around Y-axis from the throw direction
                 Vector3 spreadDir = Quaternion.Euler(0, angleOffset, 0) * throwDirection;
-                spreadDir.y = 0f; // Keep horizontal
+                spreadDir.y = 0f;
                 spreadDir = spreadDir.normalized;
 
                 // Setup ball
                 ballController.SetBallState(BallController.BallState.Thrown);
                 ballController.SetThrowData(ThrowType.Ultimate, damagePerBall, throwSpeed);
 
-                // Set velocity towards opponent with spread
+                // FIXED: Set thrower reference for multithrow balls
+                ballController.SetThrower(this);
+
                 ballController.velocity = spreadDir * throwSpeed;
+
+                ballController.ApplyUltimateBallVFX();
 
                 // Setup collision system
                 CollisionDamageSystem collisionSystem = ballController.GetComponent<CollisionDamageSystem>();
@@ -791,12 +797,12 @@ public class PlayerCharacter : MonoBehaviour
                     trail.endColor = Color.clear;
                 }
 
-                // FIXED: Auto-destroy MultiThrow balls after 4 seconds (network-efficient)
+                // Auto-destroy MultiThrow balls after 4 seconds
                 Destroy(ballObj, 4f);
 
                 if (debugMode)
                 {
-                    Debug.Log($"MultiThrow ball {i + 1}: Direction {spreadDir}, Velocity {ballController.velocity} (Auto-destroy in 4s)");
+                    Debug.Log($"Enhanced MultiThrow ball {i + 1}: Direction {spreadDir}, Velocity {ballController.velocity}");
                 }
             }
 
@@ -893,31 +899,30 @@ public class PlayerCharacter : MonoBehaviour
         currentTrickCharge = 0f;
         StartCoroutine(TrickCooldown());
 
-        // Play trick sound and effects
-        AudioClip trickSound = characterData.GetTrickSound();
-        if (trickSound != null)
+        // Find opponent for trick target
+        PlayerCharacter opponent = FindOpponent();
+        if (opponent != null)
         {
-            audioSource.PlayOneShot(trickSound);
-        }
+            // SIMPLIFIED VFX: Sound + effect on opponent only
+            if (useVFXManager && VFXManager.Instance != null)
+            {
+                Vector3 opponentPosition = opponent.transform.position + Vector3.up * vfxSpawnHeight;
+                VFXManager.Instance.SpawnTrickVFX(opponentPosition, this, opponent);
+            }
 
-        GameObject trickEffect = characterData.GetTrickEffect();
-        if (trickEffect != null)
-        {
-            Instantiate(trickEffect, characterTransform.position, Quaternion.identity);
-        }
-
-        // Execute specific trick based on character data
-        switch (characterData.trickType)
-        {
-            case TrickType.SlowSpeed:
-                ExecuteSlowSpeed();
-                break;
-            case TrickType.Freeze:
-                ExecuteFreeze();
-                break;
-            case TrickType.InstantDamage:
-                ExecuteInstantDamage();
-                break;
+            // Execute specific trick based on character data
+            switch (characterData.trickType)
+            {
+                case TrickType.SlowSpeed:
+                    ExecuteSlowSpeed(opponent);
+                    break;
+                case TrickType.Freeze:
+                    ExecuteFreeze(opponent);
+                    break;
+                case TrickType.InstantDamage:
+                    ExecuteInstantDamage(opponent);
+                    break;
+            }
         }
 
         if (debugMode)
@@ -926,20 +931,16 @@ public class PlayerCharacter : MonoBehaviour
         }
     }
 
-    void ExecuteSlowSpeed()
+    void ExecuteSlowSpeed(PlayerCharacter opponent)
     {
-        // Find opponent and apply slow effect
-        PlayerCharacter opponent = FindOpponent();
-        if (opponent != null)
-        {
-            StartCoroutine(ApplySlowSpeedToOpponent(opponent));
-        }
+        StartCoroutine(ApplySlowSpeedToOpponent(opponent));
 
         if (debugMode)
         {
-            Debug.Log($"🐌 SLOW SPEED: Opponent slowed to {characterData.GetSlowSpeedMultiplier() * 100}% speed for {characterData.GetSlowSpeedDuration()}s");
+            Debug.Log($"🐌 SLOW SPEED: Opponent slowed for {characterData.GetSlowSpeedDuration()}s");
         }
     }
+
 
     IEnumerator ApplySlowSpeedToOpponent(PlayerCharacter opponent)
     {
@@ -974,14 +975,9 @@ public class PlayerCharacter : MonoBehaviour
         }
     }
 
-    void ExecuteFreeze()
+    void ExecuteFreeze(PlayerCharacter opponent)
     {
-        // Find opponent and apply freeze effect
-        PlayerCharacter opponent = FindOpponent();
-        if (opponent != null)
-        {
-            StartCoroutine(ApplyFreezeToOpponent(opponent));
-        }
+        StartCoroutine(ApplyFreezeToOpponent(opponent));
 
         if (debugMode)
         {
@@ -1020,29 +1016,17 @@ public class PlayerCharacter : MonoBehaviour
         }
     }
 
-    void ExecuteInstantDamage()
+    void ExecuteInstantDamage(PlayerCharacter opponent)
     {
-        // Find opponent and apply instant damage
-        PlayerCharacter opponent = FindOpponent();
-        if (opponent != null)
+        PlayerHealth opponentHealth = opponent.GetComponent<PlayerHealth>();
+        if (opponentHealth != null)
         {
-            PlayerHealth opponentHealth = opponent.GetComponent<PlayerHealth>();
-            if (opponentHealth != null)
+            int damage = characterData.GetInstantDamageAmount();
+            opponentHealth.TakeDamage(damage, null);
+
+            if (debugMode)
             {
-                int damage = characterData.GetInstantDamageAmount();
-                opponentHealth.TakeDamage(damage, null);
-
-                // Create damage effect at opponent position
-                GameObject damageEffect = characterData.GetTrickEffect();
-                if (damageEffect != null)
-                {
-                    Instantiate(damageEffect, opponent.transform.position, Quaternion.identity);
-                }
-
-                if (debugMode)
-                {
-                    Debug.Log($"⚡ INSTANT DAMAGE: {damage} damage dealt to {opponent.name}!");
-                }
+                Debug.Log($"⚡ INSTANT DAMAGE: {damage} damage dealt to {opponent.name}!");
             }
         }
     }
@@ -1074,17 +1058,11 @@ public class PlayerCharacter : MonoBehaviour
         currentTreatCharge = 0f;
         StartCoroutine(TreatCooldown());
 
-        // Play treat sound and effects
-        AudioClip treatSound = characterData.GetTreatSound();
-        if (treatSound != null)
+        // SIMPLIFIED VFX: Sound + effect on self only
+        if (useVFXManager && VFXManager.Instance != null)
         {
-            audioSource.PlayOneShot(treatSound);
-        }
-
-        GameObject treatEffect = characterData.GetTreatEffect();
-        if (treatEffect != null)
-        {
-            Instantiate(treatEffect, characterTransform.position, Quaternion.identity);
+            Vector3 selfPosition = transform.position + Vector3.up * vfxSpawnHeight;
+            VFXManager.Instance.SpawnTreatVFX(selfPosition, this);
         }
 
         // Execute specific treat based on character data
@@ -1136,90 +1114,61 @@ public class PlayerCharacter : MonoBehaviour
             movementRestrictor.StartTeleportOverride();
         }
 
-        // Enhanced teleport with strategic positioning
-        StartCoroutine(EnhancedTeleport(range));
+        // Simplified teleport with VFX
+        StartCoroutine(SimplifiedTeleport(range));
 
         if (debugMode)
         {
-            Debug.Log($"🌀 ENHANCED TELEPORT: Started!");
+            Debug.Log($"🌀 TELEPORT: Started!");
         }
     }
 
-    IEnumerator EnhancedTeleport(float range)
+
+
+    IEnumerator SimplifiedTeleport(float range)
     {
         isTeleporting = true;
 
         // Store original position
         Vector3 originalPosition = transform.position;
-
-        if (debugMode)
-        {
-            Debug.Log($"🌀 TELEPORT START: Original position {originalPosition}");
-        }
+        Vector3 departurePosition = originalPosition;
 
         // Calculate strategic teleport position
         Vector3 teleportPosition = CalculateStrategicTeleportPosition(range);
 
-        // Create teleport effect at old position
-        GameObject teleportEffect = characterData.GetTreatEffect();
-        if (teleportEffect != null)
+        // SIMPLIFIED VFX: Departure and arrival effects
+        if (useVFXManager && VFXManager.Instance != null)
         {
-            Instantiate(teleportEffect, transform.position, Quaternion.identity);
+            VFXManager.Instance.SpawnTeleportVFX(departurePosition, teleportPosition, this);
         }
 
-        // Teleport TO new position (can cross bounds now!)
+        // Small delay for VFX
+        yield return new WaitForSeconds(0.1f);
+
+        // Teleport TO new position
         transform.position = teleportPosition;
 
-        // Create teleport effect at new position
-        if (teleportEffect != null)
-        {
-            Instantiate(teleportEffect, transform.position, Quaternion.identity);
-        }
-
-        // Begin grace period (allows movement in opponent's side)
+        // Begin grace period
         if (movementRestrictor != null)
         {
             movementRestrictor.BeginTeleportGracePeriod();
         }
 
-        if (debugMode)
-        {
-            Debug.Log($"🌀 TELEPORTED TO: {teleportPosition} - Grace period active");
-        }
-
         // Wait for strategic positioning time
         yield return new WaitForSeconds(1.2f);
 
-        if (debugMode)
-        {
-            Debug.Log($"🌀 TELEPORT RETURN: Going back to home side");
-        }
-
-        // Create teleport effect before returning
-        if (teleportEffect != null)
-        {
-            Instantiate(teleportEffect, transform.position, Quaternion.identity);
-        }
-
-        // Teleport BACK to safe position in home side
+        // Teleport BACK to safe position
         Vector3 returnPosition = CalculateReturnPosition(originalPosition);
+
+        // Small delay for return VFX
+        yield return new WaitForSeconds(0.1f);
+
         transform.position = returnPosition;
 
-        // Create teleport effect at return position
-        if (teleportEffect != null)
-        {
-            Instantiate(teleportEffect, transform.position, Quaternion.identity);
-        }
-
-        // End teleport override - restore normal bounds
+        // End teleport override
         if (movementRestrictor != null)
         {
             movementRestrictor.EndTeleportOverride();
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"🌀 TELEPORT COMPLETE: Returned to home side at {returnPosition}");
         }
 
         isTeleporting = false;
@@ -1504,6 +1453,27 @@ public class PlayerCharacter : MonoBehaviour
         return characterData?.damageResistance ?? 1f;
     }
 
+    /// <summary>
+    /// Set VFX Manager usage (useful for testing/performance)
+    /// </summary>
+    public void SetUseVFXManager(bool useVFX)
+    {
+        useVFXManager = useVFX;
+
+        if (debugMode)
+        {
+            Debug.Log($"{characterData?.characterName} VFX Manager usage: {useVFX}");
+        }
+    }
+
+    /// <summary>
+    /// Get VFX spawn position with offset
+    /// </summary>
+    public Vector3 GetVFXSpawnPosition()
+    {
+        return transform.position + Vector3.up * vfxSpawnHeight;
+    }
+
     void OnDrawGizmosSelected()
     {
         // Visualize ground check
@@ -1587,6 +1557,19 @@ public class PlayerCharacter : MonoBehaviour
                 GUI.color = Color.cyan;
                 GUI.Box(cooldownFill, "");
                 GUI.color = Color.white;
+            }
+        }
+        // SIMPLIFIED VFX: System Info
+        GUILayout.Label($"VFX Manager: {(useVFXManager ? "ENABLED" : "DISABLED")}");
+        if (useVFXManager)
+        {
+            bool vfxManagerExists = VFXManager.Instance != null;
+            GUILayout.Label($"VFX Status: {(vfxManagerExists ? "ACTIVE" : "MISSING")}");
+
+            if (vfxManagerExists)
+            {
+                VFXManager.Instance.GetVFXStats(out int total, out int hit, out int ultimate, out int ability);
+                GUILayout.Label($"VFX: {total} (H:{hit} U:{ultimate} A:{ability})");
             }
         }
 

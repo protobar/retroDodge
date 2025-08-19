@@ -133,7 +133,8 @@ MonoBehaviour:
   ballDropDelay: 0.5
   warningEffect: {fileID: 0}
   dangerEffect: {fileID: 0}
-  corruptionEffect: {fileID: 0}
+  corruptionEffect: {fileID: 8203727655755411693, guid: 74b4dac13ced38549911284a9e5fce91,
+    type: 3}
   warningColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   dangerColor: {r: 1, g: 0, b: 0, a: 1}
   corruptionColor: {r: 1, g: 0, b: 1, a: 1}
@@ -156,7 +157,8 @@ MonoBehaviour:
   wallBounceMultiplier: 0.25
   energyLossOnBounce: 0.1
   maxWallBounces: 1
-  wallBounceEffect: {fileID: 0}
+  wallBounceEffect: {fileID: 2755417596474721463, guid: 133b20c48d371d94bb543a6b1fe5ed83,
+    type: 3}
   wallBounceSound: {fileID: 0}
   enableWallShake: 0
   rotationSpeed: 360
@@ -183,7 +185,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   collisionRange: 0.9
   duckingHeightThreshold: 0.82
-  playerCollisionHeight: 0
+  playerCollisionHeight: 0.5
   hitStopDuration: 1
   enablePredictiveCollision: 0
   predictionDistance: 5
@@ -199,9 +201,13 @@ MonoBehaviour:
   screenShakeIntensity: 0.3
   screenShakeDuration: 0.2
   damageColor: {r: 1, g: 0, b: 0, a: 1}
+  useVFXManager: 1
+  enableHitVFXVariety: 1
+  vfxSpawnOffset: 0.2
   hitSound: {fileID: 0}
   criticalHitSound: {fileID: 0}
   deflectSound: {fileID: 0}
+  catchFailSound: {fileID: 0}
   debugMode: 1
   showCollisionGizmos: 1
   showDuckingVisualization: 1
@@ -217,6 +223,11 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Name
       value: CFXR Fire Trail
+      objectReference: {fileID: 0}
+    - target: {fileID: 272560731451656103, guid: f0cde2142be79744fa4e00f96b68d83b,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 2563945790963487023, guid: f0cde2142be79744fa4e00f96b68d83b,
         type: 3}

@@ -17,7 +17,7 @@ MonoBehaviour:
   characterIcon: {fileID: -1525437889, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
   characterPrefab: {fileID: 3775798883431776970, guid: 936d3a2bc075a8649bb2cfd3aa1c78e0,
     type: 3}
-  moveSpeed: 8
+  moveSpeed: 10
   jumpHeight: 12
   canDoubleJump: 0
   canDash: 0
@@ -31,58 +31,77 @@ MonoBehaviour:
   throwSpeedMultiplier: 1
   throwAccuracy: 1
   characterColor: {r: 1, g: 0.84313726, b: 0, a: 1}
-  throwEffect: {fileID: 0}
   dashEffect: {fileID: 0}
-  throwSounds: []
-  jumpSounds: []
-  dashSound: {fileID: 0}
+  ultimateActivationOffset: {x: 0, y: -1.5, z: 0}
+  trickEffectOffset: {x: 0, y: 1.5, z: 0}
+  treatEffectOffset: {x: 0, y: 1.5, z: 0}
+  normalThrowVFX: []
+  jumpThrowVFX: []
+  normalHitVFX:
+  - {fileID: 1930644504616354, guid: 694d272e830b129499e847a12cc7cdda, type: 3}
+  - {fileID: 1092234087039896, guid: dd8ead365212adc47a572120ba7d87ae, type: 3}
+  - {fileID: 1198724786340194, guid: 108fe9f32df31b94992cedf01c610c29, type: 3}
+  - {fileID: 1544299566578556, guid: 015dee042450f2f4ba9758df2f18363b, type: 3}
+  - {fileID: 1883610838541854, guid: d10d8d928afceca4da74cbd9b7cb08c7, type: 3}
+  - {fileID: 1269060166065924, guid: 162307d3a1afcb84189208d18b30a1e3, type: 3}
+  - {fileID: 189656, guid: 7dcb9f73eee0c214fb7c2d5cef6a5ba1, type: 3}
+  - {fileID: 1399272208883120, guid: 2058fc045ea70c9438a65de8f900701c, type: 3}
+  jumpThrowHitVFX:
+  - {fileID: 1930644504616354, guid: 694d272e830b129499e847a12cc7cdda, type: 3}
+  - {fileID: 1092234087039896, guid: dd8ead365212adc47a572120ba7d87ae, type: 3}
+  - {fileID: 1198724786340194, guid: 108fe9f32df31b94992cedf01c610c29, type: 3}
+  - {fileID: 1544299566578556, guid: 015dee042450f2f4ba9758df2f18363b, type: 3}
+  - {fileID: 1883610838541854, guid: d10d8d928afceca4da74cbd9b7cb08c7, type: 3}
+  - {fileID: 1269060166065924, guid: 162307d3a1afcb84189208d18b30a1e3, type: 3}
+  - {fileID: 189656, guid: 7dcb9f73eee0c214fb7c2d5cef6a5ba1, type: 3}
+  - {fileID: 1399272208883120, guid: 2058fc045ea70c9438a65de8f900701c, type: 3}
+  ultimateHitVFX: []
   ultimateType: 2
+  ultimateActivationVFX: {fileID: 6937623135534890167, guid: 102481e573caa944d9964cd9ad7269a0,
+    type: 3}
+  ultimateBallVFX: {fileID: 99586122844656264, guid: 9dd89b6fec5a7c84c88426d4303394ac,
+    type: 3}
+  ultimateImpactVFX: {fileID: 1756330187224092835, guid: 3c4973ef1ac2dd84f82d411ae74fc9ad,
+    type: 3}
+  ultimateActivationSound: {fileID: 0}
+  ultimateImpactSound: {fileID: 0}
   powerThrowDamage: 50
   powerThrowSpeed: 30
   powerThrowKnockback: 12
   powerThrowScreenShake: 1.2
-  powerThrowEffect: {fileID: 0}
-  powerThrowSound: {fileID: 0}
   multiThrowCount: 4
   multiThrowDamagePerBall: 12
   multiThrowSpeed: 50
   multiThrowSpread: 0
   multiThrowDelay: 0.15
   multiThrowSpawnOffset: {x: 0.8, y: 0.5, z: 0}
-  multiThrowEffect: {fileID: 0}
-  multiThrowSound: {fileID: 0}
   curveballDamage: 25
   curveballSpeed: 20
   curveballAmplitude: 20
   curveballFrequency: 30
   curveballDuration: 2
-  curveballEffect: {fileID: 0}
-  curveballSound: {fileID: 0}
   ultimateChargeRequired: 50
   ultimateChargeRate: 3
   trickType: 1
+  trickEffectVFX: {fileID: 7980599541491969784, guid: ddbc779ed0c2149428a536de6ee267da,
+    type: 3}
+  trickActivationSound: {fileID: 0}
   slowSpeedMultiplier: 0.3
   slowSpeedDuration: 4
-  slowSpeedEffect: {fileID: 0}
-  slowSpeedSound: {fileID: 0}
   freezeDuration: 3
-  freezeEffect: {fileID: 0}
-  freezeSound: {fileID: 0}
   instantDamageAmount: 15
-  instantDamageEffect: {fileID: 0}
-  instantDamageSound: {fileID: 0}
   trickChargeRequired: 30
   trickChargeRate: 3
   treatType: 1
+  treatEffectVFX: {fileID: 5059734141994152730, guid: f6f59fb1229f8334c9663951ccb48969,
+    type: 3}
+  treatActivationSound: {fileID: 0}
   shieldDuration: 4
-  shieldEffect: {fileID: 0}
-  shieldSound: {fileID: 0}
   teleportRange: 5
-  teleportEffect: {fileID: 0}
-  teleportSound: {fileID: 0}
   speedBoostMultiplier: 2.5
   speedBoostDuration: 5
-  speedBoostEffect: {fileID: 0}
-  speedBoostSound: {fileID: 0}
   treatChargeRequired: 30
   treatChargeRate: 3
+  throwSounds: []
+  jumpSounds: []
+  dashSound: {fileID: 0}

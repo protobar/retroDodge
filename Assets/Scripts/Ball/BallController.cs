@@ -63,6 +63,10 @@ public class BallController : MonoBehaviour
     [SerializeField] private AudioClip wallBounceSound;
     [SerializeField] private bool enableWallShake = true;
 
+    [Header("Ultimate Ball VFX")]
+    private GameObject ultimateBallVFXInstance; // Track the VFX instance
+    private bool hasUltimateBallVFX = false;
+
     // Wall collision state
     private int currentWallBounces = 0;
     private bool hasHitWallThisFrame = false;
@@ -887,6 +891,9 @@ public class BallController : MonoBehaviour
             return;
         }
 
+        // REMOVE ULTIMATE BALL VFX WHEN CAUGHT
+        RemoveUltimateBallVFX();
+
         holder = catcher;
         legacyHolder = null;
         SetBallState(BallState.Held);
@@ -898,9 +905,9 @@ public class BallController : MonoBehaviour
         hasHitTarget = false;
         homingEnabled = false;
 
-        // FIXED: START HOLD TIMER FOR CAUGHT BALL
+        // START HOLD TIMER FOR CAUGHT BALL
         ballHoldStartTime = Time.time;
-        ResetHoldTimer(); // This now only resets flags, not the timer
+        ResetHoldTimer();
 
         if (debugMode)
         {
@@ -917,6 +924,9 @@ public class BallController : MonoBehaviour
             return;
         }
 
+        // REMOVE ULTIMATE BALL VFX WHEN CAUGHT
+        RemoveUltimateBallVFX();
+
         legacyHolder = catcher;
         holder = null;
         SetBallState(BallState.Held);
@@ -928,9 +938,9 @@ public class BallController : MonoBehaviour
         hasHitTarget = false;
         homingEnabled = false;
 
-        // FIXED: START HOLD TIMER FOR CAUGHT BALL
+        // START HOLD TIMER FOR CAUGHT BALL
         ballHoldStartTime = Time.time;
-        ResetHoldTimer(); // This now only resets flags, not the timer
+        ResetHoldTimer();
 
         if (debugMode)
         {
@@ -1046,10 +1056,61 @@ public class BallController : MonoBehaviour
         }
 
         SetBallState(BallState.Thrown);
+        ApplyUltimateBallVFX();
 
         if (debugMode)
         {
             Debug.Log($"Ball thrown: {currentThrowType}, Damage: {currentDamage}, Speed: {throwSpeed}");
+        }
+    }
+
+    /// <summary>
+    /// Apply ultimate ball VFX when ball is thrown as ultimate
+    /// </summary>
+    public void ApplyUltimateBallVFX()
+    {
+        if (currentThrowType != ThrowType.Ultimate) return;
+
+        PlayerCharacter ultimateThrower = thrower;
+        if (ultimateThrower == null) return;
+
+        // Don't apply if already has VFX
+        if (hasUltimateBallVFX && ultimateBallVFXInstance != null) return;
+
+        CharacterData characterData = ultimateThrower.GetCharacterData();
+        if (characterData == null) return;
+
+        // Get and spawn ultimate ball VFX
+        GameObject ballVFXPrefab = characterData.GetUltimateBallVFX();
+        if (ballVFXPrefab != null)
+        {
+            ultimateBallVFXInstance = Instantiate(ballVFXPrefab, ballTransform.position, Quaternion.identity);
+            ultimateBallVFXInstance.transform.SetParent(ballTransform);
+            ultimateBallVFXInstance.transform.localPosition = Vector3.zero;
+            hasUltimateBallVFX = true;
+
+            if (debugMode)
+            {
+                Debug.Log($"Applied ultimate ball VFX for {ultimateThrower.name}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Remove ultimate ball VFX (called when ball hits or is destroyed)
+    /// </summary>
+    public void RemoveUltimateBallVFX()
+    {
+        if (hasUltimateBallVFX && ultimateBallVFXInstance != null)
+        {
+            Destroy(ultimateBallVFXInstance);
+            ultimateBallVFXInstance = null;
+            hasUltimateBallVFX = false;
+
+            if (debugMode)
+            {
+                Debug.Log("Ultimate ball VFX removed");
+            }
         }
     }
 
@@ -1060,11 +1121,14 @@ public class BallController : MonoBehaviour
         velocity = Vector3.zero;
         hasHitTarget = false;
 
-        // NEW: Reset wall collision state
+        // REMOVE ULTIMATE BALL VFX WHEN BALL RESETS
+        RemoveUltimateBallVFX();
+
+        // Reset wall collision state
         currentWallBounces = 0;
         hasHitWallThisFrame = false;
 
-        // FIXED: RESET HOLD TIMER completely
+        // RESET HOLD TIMER completely
         StopHoldTimer();
 
         // Clear holders
@@ -1109,13 +1173,15 @@ public class BallController : MonoBehaviour
         switch (newState)
         {
             case BallState.Free:
+                // REMOVE ULTIMATE BALL VFX WHEN BALL BECOMES FREE
+                RemoveUltimateBallVFX();
+
                 thrower = null;
                 legacyThrower = null;
                 targetOpponent = null;
                 hasHitTarget = false;
                 isJumpThrow = false;
                 homingEnabled = false;
-                // FIXED: STOP HOLD TIMER WHEN BALL BECOMES FREE
                 StopHoldTimer();
                 if (collisionSystem != null)
                 {
@@ -1123,11 +1189,13 @@ public class BallController : MonoBehaviour
                 }
                 break;
             case BallState.Held:
+                // REMOVE ULTIMATE BALL VFX WHEN BALL IS HELD
+                RemoveUltimateBallVFX();
+
                 velocity = Vector3.zero;
                 // Hold timer is started in pickup/catch methods
                 break;
             case BallState.Thrown:
-                // FIXED: STOP HOLD TIMER WHEN BALL IS THROWN
                 StopHoldTimer();
                 break;
         }
@@ -1286,6 +1354,14 @@ public class BallController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Set the thrower for this ball (needed for multithrow balls)
+    /// </summary>
+    public void SetThrower(PlayerCharacter newThrower)
+    {
+        thrower = newThrower;
+        legacyThrower = null;
+    }
     public void OnCatchFailed()
     {
         velocity *= 0.8f;

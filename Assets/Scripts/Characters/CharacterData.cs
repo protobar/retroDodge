@@ -1,8 +1,8 @@
 ﻿using UnityEngine;
 
 /// <summary>
-/// Enhanced CharacterData with clean ability system
-/// Full customization for Ultimate, Trick, and Treat abilities
+/// Simplified CharacterData with focused VFX system
+/// Arrays only for throws and hits, specific effects for abilities
 /// </summary>
 [CreateAssetMenu(fileName = "New Character", menuName = "Retro Dodge/Character Data")]
 public class CharacterData : ScriptableObject
@@ -49,49 +49,65 @@ public class CharacterData : ScriptableObject
     [Range(0f, 1f)]
     public float throwAccuracy = 1f;
 
-    [Header("Visual Effects")]
+    [Header("Character Color & Basic Effects")]
     public Color characterColor = Color.white;
-    public GameObject throwEffect;
     public GameObject dashEffect;
 
-    [Header("Audio")]
-    public AudioClip[] throwSounds;
-    public AudioClip[] jumpSounds;
-    public AudioClip dashSound;
+    [Header("VFX Position Offsets (Ultimate/Trick/Treat)")]
+    [SerializeField] private Vector3 ultimateActivationOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 trickEffectOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 treatEffectOffset = new Vector3(0f, 1.5f, 0f);
 
     [Header("═══════════════════════════════════")]
-    [Header("ABILITY SYSTEM")]
+    [Header("SIMPLIFIED VFX SYSTEM")]
     [Header("═══════════════════════════════════")]
 
-    [Header("Ultimate Ability")]
+    [Header("Throw VFX - Character Specific (Arrays for Variety)")]
+    [SerializeField] private GameObject[] normalThrowVFX = new GameObject[3]; // Each character has unique throw effects
+    [SerializeField] private GameObject[] jumpThrowVFX = new GameObject[2]; // Each character has unique jump throw effects
+
+    [Header("Hit VFX - Shared (Arrays for Variety)")]
+    [Tooltip("Same hit effects for all characters - just variety")]
+    [SerializeField] private GameObject[] normalHitVFX = new GameObject[3]; // Shared: thump, pow, boom
+    [SerializeField] private GameObject[] jumpThrowHitVFX = new GameObject[2]; // Shared: stronger impacts
+    [SerializeField] private GameObject[] ultimateHitVFX = new GameObject[2]; // Shared: massive impacts
+
+    [Header("═══════════════════════════════════")]
+    [Header("ULTIMATE ABILITY")]
+    [Header("═══════════════════════════════════")]
+
+    [Header("Ultimate Settings")]
     public UltimateType ultimateType = UltimateType.PowerThrow;
+
+    [Header("Ultimate VFX - Specific to Character")]
+    [SerializeField] private GameObject ultimateActivationVFX; // Player activation effect (e.g., Fire Aura for Grudge)
+    [SerializeField] private GameObject ultimateBallVFX; // Ball effect during flight (e.g., Fire Ball for Grudge)
+    [SerializeField] private GameObject ultimateImpactVFX; // Impact effect when ult hits (e.g., Fire Explosion)
+
+    [Header("Ultimate Audio")]
+    [SerializeField] private AudioClip ultimateActivationSound; // "You are dead!" etc.
+    [SerializeField] private AudioClip ultimateImpactSound; // Impact sound
 
     [Header("Ultimate: PowerThrow Settings")]
     [SerializeField] private int powerThrowDamage = 35;
     [SerializeField] private float powerThrowSpeed = 30f;
     [SerializeField] private float powerThrowKnockback = 12f;
     [SerializeField] private float powerThrowScreenShake = 1.2f;
-    [SerializeField] private GameObject powerThrowEffect;
-    [SerializeField] private AudioClip powerThrowSound;
 
     [Header("Ultimate: MultiThrow Settings")]
     [SerializeField] private int multiThrowCount = 4;
     [SerializeField] private int multiThrowDamagePerBall = 12;
     [SerializeField] private float multiThrowSpeed = 22f;
-    [SerializeField] private float multiThrowSpread = 20f; // degrees
-    [SerializeField] private float multiThrowDelay = 0.15f; // seconds between balls
-    [SerializeField] private Vector3 multiThrowSpawnOffset = new Vector3(0.8f, 0.5f, 0f); // spawn position offset
-    [SerializeField] private GameObject multiThrowEffect;
-    [SerializeField] private AudioClip multiThrowSound;
+    [SerializeField] private float multiThrowSpread = 20f;
+    [SerializeField] private float multiThrowDelay = 0.15f;
+    [SerializeField] private Vector3 multiThrowSpawnOffset = new Vector3(0.8f, 0.5f, 0f);
 
     [Header("Ultimate: Curveball Settings")]
     [SerializeField] private int curveballDamage = 25;
     [SerializeField] private float curveballSpeed = 20f;
-    [SerializeField] private float curveballAmplitude = 3f; // Y-axis curve height
-    [SerializeField] private float curveballFrequency = 4f; // How fast it oscillates
-    [SerializeField] private float curveballDuration = 2f; // How long curve lasts
-    [SerializeField] private GameObject curveballEffect;
-    [SerializeField] private AudioClip curveballSound;
+    [SerializeField] private float curveballAmplitude = 3f;
+    [SerializeField] private float curveballFrequency = 4f;
+    [SerializeField] private float curveballDuration = 2f;
 
     [Header("Ultimate Charge")]
     [Range(50f, 200f)]
@@ -99,24 +115,28 @@ public class CharacterData : ScriptableObject
     [Range(0.5f, 3f)]
     public float ultimateChargeRate = 1f;
 
-    [Header("Trick Ability (Opponent-Focused)")]
+    [Header("═══════════════════════════════════")]
+    [Header("TRICK ABILITY (Opponent-Focused)")]
+    [Header("═══════════════════════════════════")]
+
+    [Header("Trick Settings")]
     public TrickType trickType = TrickType.SlowSpeed;
 
+    [Header("Trick VFX - Spawns on Opponent Only")]
+    [SerializeField] private GameObject trickEffectVFX; // Effect that spawns on opponent (damage, slow, freeze effect)
+
+    [Header("Trick Audio")]
+    [SerializeField] private AudioClip trickActivationSound; // Sound when trick is used
+
     [Header("Trick: Slow Speed Settings")]
-    [SerializeField] private float slowSpeedMultiplier = 0.3f; // 30% of normal speed
+    [SerializeField] private float slowSpeedMultiplier = 0.3f;
     [SerializeField] private float slowSpeedDuration = 4f;
-    [SerializeField] private GameObject slowSpeedEffect;
-    [SerializeField] private AudioClip slowSpeedSound;
 
     [Header("Trick: Freeze Settings")]
     [SerializeField] private float freezeDuration = 2.5f;
-    [SerializeField] private GameObject freezeEffect;
-    [SerializeField] private AudioClip freezeSound;
 
     [Header("Trick: Instant Damage Settings")]
     [SerializeField] private int instantDamageAmount = 15;
-    [SerializeField] private GameObject instantDamageEffect;
-    [SerializeField] private AudioClip instantDamageSound;
 
     [Header("Trick Charge")]
     [Range(30f, 100f)]
@@ -124,24 +144,28 @@ public class CharacterData : ScriptableObject
     [Range(0.5f, 3f)]
     public float trickChargeRate = 1f;
 
-    [Header("Treat Ability (Self-Focused)")]
+    [Header("═══════════════════════════════════")]
+    [Header("TREAT ABILITY (Self-Focused)")]
+    [Header("═══════════════════════════════════")]
+
+    [Header("Treat Settings")]
     public TreatType treatType = TreatType.Shield;
+
+    [Header("Treat VFX - Spawns on Self Only")]
+    [SerializeField] private GameObject treatEffectVFX; // Effect that spawns on self (shield, speed boost, teleport effect)
+
+    [Header("Treat Audio")]
+    [SerializeField] private AudioClip treatActivationSound; // Sound when treat is used
 
     [Header("Treat: Shield Settings")]
     [SerializeField] private float shieldDuration = 4f;
-    [SerializeField] private GameObject shieldEffect;
-    [SerializeField] private AudioClip shieldSound;
 
     [Header("Treat: Teleport Settings")]
     [SerializeField] private float teleportRange = 8f;
-    [SerializeField] private GameObject teleportEffect;
-    [SerializeField] private AudioClip teleportSound;
 
     [Header("Treat: Speed Boost Settings")]
     [SerializeField] private float speedBoostMultiplier = 2.5f;
     [SerializeField] private float speedBoostDuration = 5f;
-    [SerializeField] private GameObject speedBoostEffect;
-    [SerializeField] private AudioClip speedBoostSound;
 
     [Header("Treat Charge")]
     [Range(30f, 100f)]
@@ -149,8 +173,101 @@ public class CharacterData : ScriptableObject
     [Range(0.5f, 3f)]
     public float treatChargeRate = 1f;
 
+    [Header("═══════════════════════════════════")]
+    [Header("BASIC AUDIO")]
+    [Header("═══════════════════════════════════")]
+
+    [Header("Basic Audio")]
+    public AudioClip[] throwSounds;
+    public AudioClip[] jumpSounds;
+    public AudioClip dashSound;
+
     // ═══════════════════════════════════════════════════════════════
-    // PROPERTY GETTERS FOR CLEAN ACCESS
+    // SIMPLIFIED VFX GETTER METHODS
+    // ═══════════════════════════════════════════════════════════════
+
+    #region Throw VFX (Character Specific)
+    public GameObject GetRandomNormalThrowVFX()
+    {
+        return GetRandomFromArray(normalThrowVFX);
+    }
+
+    public GameObject GetRandomJumpThrowVFX()
+    {
+        return GetRandomFromArray(jumpThrowVFX);
+    }
+    #endregion
+
+    #region Hit VFX (Shared Between Characters)
+    public GameObject GetRandomNormalHitVFX()
+    {
+        return GetRandomFromArray(normalHitVFX);
+    }
+
+    public GameObject GetRandomJumpThrowHitVFX()
+    {
+        return GetRandomFromArray(jumpThrowHitVFX);
+    }
+
+    public GameObject GetRandomUltimateHitVFX()
+    {
+        return GetRandomFromArray(ultimateHitVFX);
+    }
+    #endregion
+
+    #region Ultimate VFX (Character Specific)
+    public GameObject GetUltimateActivationVFX()
+    {
+        return ultimateActivationVFX;
+    }
+
+    public GameObject GetUltimateBallVFX()
+    {
+        return ultimateBallVFX;
+    }
+
+    public GameObject GetUltimateImpactVFX()
+    {
+        return ultimateImpactVFX;
+    }
+
+    public AudioClip GetUltimateActivationSound()
+    {
+        return ultimateActivationSound;
+    }
+
+    public AudioClip GetUltimateImpactSound()
+    {
+        return ultimateImpactSound;
+    }
+    #endregion
+
+    #region Trick VFX (Single Effect on Opponent)
+    public GameObject GetTrickEffectVFX()
+    {
+        return trickEffectVFX;
+    }
+
+    public AudioClip GetTrickActivationSound()
+    {
+        return trickActivationSound;
+    }
+    #endregion
+
+    #region Treat VFX (Single Effect on Self)
+    public GameObject GetTreatEffectVFX()
+    {
+        return treatEffectVFX;
+    }
+
+    public AudioClip GetTreatActivationSound()
+    {
+        return treatActivationSound;
+    }
+    #endregion
+
+    // ═══════════════════════════════════════════════════════════════
+    // EXISTING PROPERTY GETTERS (Keep for compatibility)
     // ═══════════════════════════════════════════════════════════════
 
     #region Basic Properties
@@ -206,7 +323,7 @@ public class CharacterData : ScriptableObject
     }
     #endregion
 
-    #region Ultimate Ability Properties
+    #region Ultimate Properties
     public int GetUltimateDamage()
     {
         switch (ultimateType)
@@ -237,36 +354,6 @@ public class CharacterData : ScriptableObject
         }
     }
 
-    public GameObject GetUltimateEffect()
-    {
-        switch (ultimateType)
-        {
-            case UltimateType.PowerThrow:
-                return powerThrowEffect;
-            case UltimateType.MultiThrow:
-                return multiThrowEffect;
-            case UltimateType.Curveball:
-                return curveballEffect;
-            default:
-                return null;
-        }
-    }
-
-    public AudioClip GetUltimateSound()
-    {
-        switch (ultimateType)
-        {
-            case UltimateType.PowerThrow:
-                return powerThrowSound;
-            case UltimateType.MultiThrow:
-                return multiThrowSound;
-            case UltimateType.Curveball:
-                return curveballSound;
-            default:
-                return null;
-        }
-    }
-
     // PowerThrow specific
     public float GetPowerThrowKnockback() => powerThrowKnockback;
     public float GetPowerThrowScreenShake() => powerThrowScreenShake;
@@ -283,37 +370,7 @@ public class CharacterData : ScriptableObject
     public float GetCurveballDuration() => curveballDuration;
     #endregion
 
-    #region Trick Ability Properties
-    public GameObject GetTrickEffect()
-    {
-        switch (trickType)
-        {
-            case TrickType.SlowSpeed:
-                return slowSpeedEffect;
-            case TrickType.Freeze:
-                return freezeEffect;
-            case TrickType.InstantDamage:
-                return instantDamageEffect;
-            default:
-                return null;
-        }
-    }
-
-    public AudioClip GetTrickSound()
-    {
-        switch (trickType)
-        {
-            case TrickType.SlowSpeed:
-                return slowSpeedSound;
-            case TrickType.Freeze:
-                return freezeSound;
-            case TrickType.InstantDamage:
-                return instantDamageSound;
-            default:
-                return null;
-        }
-    }
-
+    #region Trick Properties
     // SlowSpeed specific
     public float GetSlowSpeedMultiplier() => slowSpeedMultiplier;
     public float GetSlowSpeedDuration() => slowSpeedDuration;
@@ -325,37 +382,7 @@ public class CharacterData : ScriptableObject
     public int GetInstantDamageAmount() => instantDamageAmount;
     #endregion
 
-    #region Treat Ability Properties
-    public GameObject GetTreatEffect()
-    {
-        switch (treatType)
-        {
-            case TreatType.Shield:
-                return shieldEffect;
-            case TreatType.Teleport:
-                return teleportEffect;
-            case TreatType.SpeedBoost:
-                return speedBoostEffect;
-            default:
-                return null;
-        }
-    }
-
-    public AudioClip GetTreatSound()
-    {
-        switch (treatType)
-        {
-            case TreatType.Shield:
-                return shieldSound;
-            case TreatType.Teleport:
-                return teleportSound;
-            case TreatType.SpeedBoost:
-                return speedBoostSound;
-            default:
-                return null;
-        }
-    }
-
+    #region Treat Properties
     // Shield specific
     public float GetShieldDuration() => shieldDuration;
 
@@ -365,11 +392,39 @@ public class CharacterData : ScriptableObject
     // SpeedBoost specific
     public float GetSpeedBoostMultiplier() => speedBoostMultiplier;
     public float GetSpeedBoostDuration() => speedBoostDuration;
+
+    //Abilities VFX Spawn Positions
+    public Vector3 GetUltimateActivationOffset() => ultimateActivationOffset;
+    public Vector3 GetTrickEffectOffset() => trickEffectOffset;
+    public Vector3 GetTreatEffectOffset() => treatEffectOffset;
     #endregion
+
+    // ═══════════════════════════════════════════════════════════════
+    // UTILITY METHODS
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Get random element from array, with null safety
+    /// </summary>
+    private T GetRandomFromArray<T>(T[] array) where T : Object
+    {
+        if (array == null || array.Length == 0) return null;
+
+        // Filter out null entries
+        var validEntries = new System.Collections.Generic.List<T>();
+        foreach (var item in array)
+        {
+            if (item != null) validEntries.Add(item);
+        }
+
+        if (validEntries.Count == 0) return null;
+
+        return validEntries[Random.Range(0, validEntries.Count)];
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ENUMS
+// ENUMS (Keep existing)
 // ═══════════════════════════════════════════════════════════════
 
 public enum ThrowType

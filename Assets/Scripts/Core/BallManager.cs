@@ -246,10 +246,10 @@ public class BallManager : MonoBehaviour
             // Execute throw (this will automatically reset the hold timer in BallController)
             currentBall.ThrowBall(direction, 1f);
 
-            // Apply throw effects
-            if (characterData.throwEffect != null)
+            // Apply throw effects using VFXManager
+            if (VFXManager.Instance != null)
             {
-                Instantiate(characterData.throwEffect, currentBall.transform.position, Quaternion.identity);
+                VFXManager.Instance.SpawnThrowVFX(currentBall.transform.position, thrower, throwType);
             }
 
             if (debugMode)
