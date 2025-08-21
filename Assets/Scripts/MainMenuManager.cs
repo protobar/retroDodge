@@ -3,19 +3,36 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections;
+using Photon.Pun;
+using Photon.Realtime;
+using Hashtable = ExitGames.Client.Photon.Hashtable;
 
 /// <summary>
-/// Main Menu Manager - Network Ready but Locally Testable
-/// Handles main menu navigation and scene transitions
+/// PUN2 Main Menu Manager - Fixed multiplayer implementation
+/// Handles connection, nickname, matchmaking, and scene transitions
 /// </summary>
-public class MainMenuManager : MonoBehaviour
+public class MainMenuManager : MonoBehaviourPunCallbacks
 {
+    [Header("Connection UI")]
+    [SerializeField] private GameObject connectionPanel;
+    [SerializeField] private TMP_InputField nicknameInputField;
+    [SerializeField] private Button connectButton;
+    [SerializeField] private TMP_Text connectionStatusText;
+    [SerializeField] private GameObject loadingIndicator;
+
     [Header("Main Menu UI")]
     [SerializeField] private GameObject mainMenuPanel;
-    [SerializeField] private Button playButton;
-    [SerializeField] private Button characterSelectButton;
+    [SerializeField] private Button quickMatchButton;
+    [SerializeField] private Button customMatchButton;
     [SerializeField] private Button settingsButton;
     [SerializeField] private Button quitButton;
+
+    [Header("Custom Match UI")]
+    [SerializeField] private GameObject customMatchPanel;
+    [SerializeField] private TMP_InputField roomNameInputField;
+    [SerializeField] private Button createRoomButton;
+    [SerializeField] private Button joinRoomButton;
+    [SerializeField] private Button backFromCustomButton;
 
     [Header("Settings Panel")]
     [SerializeField] private GameObject settingsPanel;
@@ -26,26 +43,35 @@ public class MainMenuManager : MonoBehaviour
 
     [Header("Scene Management")]
     [SerializeField] private string characterSelectionScene = "CharacterSelection";
-    [SerializeField] private string gameplayScene = "GameplayArena";
-
-    [Header("Network Settings (Future)")]
-    [SerializeField] private bool enableNetworking = false;
-    [SerializeField] private bool isHost = true;
+    [SerializeField] private float sceneTransitionDelay = 2f;
 
     [Header("Audio")]
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip buttonClickSound;
     [SerializeField] private AudioClip backgroundMusic;
+    [SerializeField] private AudioClip successSound;
+    [SerializeField] private AudioClip errorSound;
 
     [Header("Visual Effects")]
     [SerializeField] private GameObject menuTransitionEffect;
     [SerializeField] private float transitionDuration = 0.5f;
 
+    [Header("Network Settings")]
+    [SerializeField] private byte maxPlayersPerRoom = 2;
+    [SerializeField] private float connectionTimeout = 10f;
+    [SerializeField] private float matchmakingTimeout = 15f;
+
     [Header("Debug")]
     [SerializeField] private bool debugMode = true;
 
     // Game state
+    private bool isConnecting = false;
     private bool isTransitioning = false;
+    private bool isMatchmaking = false;
+    private Coroutine connectionTimeoutCoroutine;
+    private Coroutine matchmakingTimeoutCoroutine;
+
+    #region Unity Lifecycle
 
     void Awake()
     {
@@ -58,6 +84,14 @@ public class MainMenuManager : MonoBehaviour
         }
 
         DontDestroyOnLoad(gameObject);
+
+        // CRITICAL: Set PhotonNetwork settings BEFORE connecting
+        PhotonNetwork.AutomaticallySyncScene = true;
+        PhotonNetwork.GameVersion = "1.0";
+
+        // IMPORTANT: SendRate and SerializationRate for better performance
+        PhotonNetwork.SendRate = 20;
+        PhotonNetwork.SerializationRate = 10;
     }
 
     void Start()
@@ -69,33 +103,52 @@ public class MainMenuManager : MonoBehaviour
 
         if (debugMode)
         {
-            Debug.Log("MainMenuManager initialized - Network Ready: " + enableNetworking);
+            Debug.Log("PUN2 MainMenuManager initialized");
         }
     }
 
+    #endregion
+
+    #region Initialization
+
     void InitializeMainMenu()
     {
-        // Show main menu, hide other panels
-        if (mainMenuPanel != null)
-            mainMenuPanel.SetActive(true);
+        // Show connection panel first, hide everything else
+        SetPanelActive(connectionPanel, true);
+        SetPanelActive(mainMenuPanel, false);
+        SetPanelActive(customMatchPanel, false);
+        SetPanelActive(settingsPanel, false);
 
-        if (settingsPanel != null)
-            settingsPanel.SetActive(false);
+        // Set loading indicator off
+        if (loadingIndicator != null)
+            loadingIndicator.SetActive(false);
 
-        // Set initial button states
-        if (playButton != null)
-            playButton.interactable = true;
+        // Set default nickname
+        if (nicknameInputField != null)
+        {
+            string savedNickname = PlayerPrefs.GetString("PlayerNickname", "Player" + Random.Range(1000, 9999));
+            nicknameInputField.text = savedNickname;
+        }
+
+        UpdateConnectionStatus("Enter your nickname and connect to start playing!");
 
         isTransitioning = false;
+        isConnecting = false;
+        isMatchmaking = false;
     }
 
     void SetupButtonListeners()
     {
-        if (playButton != null)
-            playButton.onClick.AddListener(OnPlayButtonClicked);
+        // Connection buttons
+        if (connectButton != null)
+            connectButton.onClick.AddListener(OnConnectButtonClicked);
 
-        if (characterSelectButton != null)
-            characterSelectButton.onClick.AddListener(OnCharacterSelectClicked);
+        // Main menu buttons
+        if (quickMatchButton != null)
+            quickMatchButton.onClick.AddListener(OnQuickMatchClicked);
+
+        if (customMatchButton != null)
+            customMatchButton.onClick.AddListener(OnCustomMatchClicked);
 
         if (settingsButton != null)
             settingsButton.onClick.AddListener(OnSettingsClicked);
@@ -103,6 +156,17 @@ public class MainMenuManager : MonoBehaviour
         if (quitButton != null)
             quitButton.onClick.AddListener(OnQuitClicked);
 
+        // Custom match buttons
+        if (createRoomButton != null)
+            createRoomButton.onClick.AddListener(OnCreateRoomClicked);
+
+        if (joinRoomButton != null)
+            joinRoomButton.onClick.AddListener(OnJoinRoomClicked);
+
+        if (backFromCustomButton != null)
+            backFromCustomButton.onClick.AddListener(OnBackFromCustomClicked);
+
+        // Settings buttons
         if (backFromSettingsButton != null)
             backFromSettingsButton.onClick.AddListener(OnBackFromSettingsClicked);
 
@@ -118,7 +182,7 @@ public class MainMenuManager : MonoBehaviour
 
         if (debugMode)
         {
-            Debug.Log("MainMenu button listeners setup complete");
+            Debug.Log("All button listeners setup complete");
         }
     }
 
@@ -161,147 +225,442 @@ public class MainMenuManager : MonoBehaviour
         }
     }
 
-    #region Button Event Handlers
-
-    public void OnPlayButtonClicked()
-    {
-        if (isTransitioning) return;
-
-        PlayButtonSound();
-
-        if (debugMode)
-        {
-            Debug.Log("Play button clicked - Starting character selection");
-        }
-
-        // For now, go directly to character selection
-        // In multiplayer, this would handle host/join logic
-        StartCharacterSelection();
-    }
-
-    public void OnCharacterSelectClicked()
-    {
-        if (isTransitioning) return;
-
-        PlayButtonSound();
-        StartCharacterSelection();
-    }
-
-    public void OnSettingsClicked()
-    {
-        if (isTransitioning) return;
-
-        PlayButtonSound();
-        ShowSettingsPanel();
-    }
-
-    public void OnQuitClicked()
-    {
-        PlayButtonSound();
-
-        if (debugMode)
-        {
-            Debug.Log("Quit button clicked");
-        }
-
-        StartCoroutine(QuitGameWithDelay());
-    }
-
-    public void OnBackFromSettingsClicked()
-    {
-        PlayButtonSound();
-        HideSettingsPanel();
-    }
-
     #endregion
 
-    #region Settings Event Handlers
+    #region Connection Flow
 
-    public void OnMasterVolumeChanged(float value)
+    public void OnConnectButtonClicked()
     {
-        AudioListener.volume = value;
-        PlayerPrefs.SetFloat("MasterVolume", value);
-        PlayerPrefs.Save();
-    }
+        if (isConnecting) return;
 
-    public void OnSFXVolumeChanged(float value)
-    {
-        if (audioSource != null)
-            audioSource.volume = value;
+        string nickname = nicknameInputField?.text?.Trim();
 
-        PlayerPrefs.SetFloat("SFXVolume", value);
-        PlayerPrefs.Save();
-    }
-
-    public void OnFullscreenToggled(bool isFullscreen)
-    {
-        Screen.fullScreen = isFullscreen;
-        PlayerPrefs.SetInt("Fullscreen", isFullscreen ? 1 : 0);
-        PlayerPrefs.Save();
-
-        if (debugMode)
+        if (string.IsNullOrEmpty(nickname))
         {
-            Debug.Log($"Fullscreen toggled: {isFullscreen}");
+            UpdateConnectionStatus("Please enter a valid nickname!");
+            PlaySound(errorSound);
+            return;
         }
+
+        if (nickname.Length < 2)
+        {
+            UpdateConnectionStatus("Nickname must be at least 2 characters!");
+            PlaySound(errorSound);
+            return;
+        }
+
+        if (nickname.Length > 20)
+        {
+            UpdateConnectionStatus("Nickname must be 20 characters or less!");
+            PlaySound(errorSound);
+            return;
+        }
+
+        StartConnection(nickname);
     }
 
-    #endregion
-
-    #region Scene Transitions
-
-    void StartCharacterSelection()
+    void StartConnection(string nickname)
     {
-        if (enableNetworking)
+        isConnecting = true;
+        PlaySound(buttonClickSound);
+
+        // Save nickname
+        PhotonNetwork.NickName = nickname;
+        PlayerPrefs.SetString("PlayerNickname", nickname);
+        PlayerPrefs.Save();
+
+        // Update UI
+        SetButtonInteractable(connectButton, false);
+        if (loadingIndicator != null)
+            loadingIndicator.SetActive(true);
+
+        UpdateConnectionStatus("Connecting to Photon servers...");
+
+        // Start connection timeout
+        if (connectionTimeoutCoroutine != null)
         {
-            // Future: Handle network character selection
-            StartCoroutine(TransitionToNetworkCharacterSelection());
+            StopCoroutine(connectionTimeoutCoroutine);
+        }
+        connectionTimeoutCoroutine = StartCoroutine(ConnectionTimeoutCoroutine());
+
+        // Connect to Photon
+        if (!PhotonNetwork.IsConnected)
+        {
+            PhotonNetwork.ConnectUsingSettings();
         }
         else
         {
-            // Local character selection
-            StartCoroutine(TransitionToLocalCharacterSelection());
+            // Already connected, just proceed to main menu
+            OnConnectedToMaster();
         }
-    }
-
-    IEnumerator TransitionToLocalCharacterSelection()
-    {
-        isTransitioning = true;
-
-        // Disable buttons
-        SetButtonsInteractable(false);
-
-        // Play transition effect
-        if (menuTransitionEffect != null)
-        {
-            GameObject effect = Instantiate(menuTransitionEffect, transform.position, Quaternion.identity);
-            Destroy(effect, transitionDuration);
-        }
-
-        // Wait for transition
-        yield return new WaitForSeconds(transitionDuration);
-
-        // Load character selection scene
-        SceneManager.LoadScene(characterSelectionScene);
-    }
-
-    IEnumerator TransitionToNetworkCharacterSelection()
-    {
-        isTransitioning = true;
 
         if (debugMode)
         {
-            Debug.Log("Starting network character selection (Future Implementation)");
+            Debug.Log($"Starting connection with nickname: {nickname}");
+        }
+    }
+
+    IEnumerator ConnectionTimeoutCoroutine()
+    {
+        yield return new WaitForSeconds(connectionTimeout);
+
+        // Only timeout if we're still connecting and this coroutine wasn't cancelled
+        if (isConnecting)
+        {
+            isConnecting = false;
+            UpdateConnectionStatus("Connection timeout! Please try again.");
+            PlaySound(errorSound);
+
+            SetButtonInteractable(connectButton, true);
+            if (loadingIndicator != null)
+                loadingIndicator.SetActive(false);
+
+            if (PhotonNetwork.IsConnected)
+            {
+                PhotonNetwork.Disconnect();
+            }
+
+            if (debugMode)
+            {
+                Debug.LogError("Connection timed out");
+            }
         }
 
-        // Future: Network setup logic here
-        // For now, fall back to local
-        yield return StartCoroutine(TransitionToLocalCharacterSelection());
+        connectionTimeoutCoroutine = null;
     }
+
+    #endregion
+
+    #region Button Handlers
+
+    void OnQuickMatchClicked()
+    {
+        if (isTransitioning || isMatchmaking) return;
+
+        PlaySound(buttonClickSound);
+        StartQuickMatch();
+    }
+
+    void OnCustomMatchClicked()
+    {
+        if (isTransitioning) return;
+
+        PlaySound(buttonClickSound);
+        ShowCustomMatchPanel();
+    }
+
+    void OnCreateRoomClicked()
+    {
+        if (isTransitioning || isMatchmaking) return;
+
+        string roomName = roomNameInputField?.text?.Trim();
+
+        if (string.IsNullOrEmpty(roomName))
+        {
+            UpdateConnectionStatus("Please enter a room name!");
+            PlaySound(errorSound);
+            return;
+        }
+
+        PlaySound(buttonClickSound);
+        CreateCustomRoom(roomName);
+    }
+
+    void OnJoinRoomClicked()
+    {
+        if (isTransitioning || isMatchmaking) return;
+
+        string roomName = roomNameInputField?.text?.Trim();
+
+        if (string.IsNullOrEmpty(roomName))
+        {
+            UpdateConnectionStatus("Please enter a room name!");
+            PlaySound(errorSound);
+            return;
+        }
+
+        PlaySound(buttonClickSound);
+        JoinCustomRoom(roomName);
+    }
+
+    void OnBackFromCustomClicked()
+    {
+        PlaySound(buttonClickSound);
+        ShowMainMenuPanel();
+    }
+
+    void OnSettingsClicked()
+    {
+        PlaySound(buttonClickSound);
+        ShowSettingsPanel();
+    }
+
+    void OnBackFromSettingsClicked()
+    {
+        PlaySound(buttonClickSound);
+        HideSettingsPanel();
+    }
+
+    void OnQuitClicked()
+    {
+        PlaySound(buttonClickSound);
+        StartCoroutine(QuitGameWithDelay());
+    }
+
+    #endregion
+
+    #region Matchmaking
+
+    void StartQuickMatch()
+    {
+        // CRITICAL FIX: Check for IsConnectedAndReady instead of just IsConnected
+        if (!PhotonNetwork.IsConnectedAndReady)
+        {
+            UpdateConnectionStatus("Not connected to Photon servers!");
+            PlaySound(errorSound);
+            return;
+        }
+
+        isMatchmaking = true;
+        SetMainMenuButtonsInteractable(false);
+        UpdateConnectionStatus("Looking for a match...");
+
+        // Start matchmaking timeout
+        if (matchmakingTimeoutCoroutine != null)
+        {
+            StopCoroutine(matchmakingTimeoutCoroutine);
+        }
+        matchmakingTimeoutCoroutine = StartCoroutine(MatchmakingTimeoutCoroutine());
+
+        // IMPROVED: Use JoinRandomOrCreateRoom for better reliability
+        RoomOptions roomOptions = new RoomOptions
+        {
+            MaxPlayers = maxPlayersPerRoom,
+            IsVisible = true,
+            IsOpen = true,
+            // IMPORTANT: Set custom properties to help with matchmaking
+            CustomRoomProperties = new Hashtable() { { "gameVersion", PhotonNetwork.GameVersion } },
+            CustomRoomPropertiesForLobby = new string[] { "gameVersion" }
+        };
+
+        PhotonNetwork.JoinRandomOrCreateRoom(
+            null, // No expected custom properties
+            maxPlayersPerRoom,
+            Photon.Realtime.MatchmakingMode.FillRoom,
+            null, // No type of lobby
+            null, // No SQL lobby filter
+            "QuickMatch_" + System.DateTime.Now.Ticks, // Unique room name
+            roomOptions
+        );
+
+        if (debugMode)
+        {
+            Debug.Log("Starting quick match with JoinRandomOrCreateRoom...");
+        }
+    }
+
+    void CreateCustomRoom(string roomName)
+    {
+        if (!PhotonNetwork.IsConnectedAndReady)
+        {
+            UpdateConnectionStatus("Not connected to Photon servers!");
+            PlaySound(errorSound);
+            return;
+        }
+
+        isMatchmaking = true;
+        SetCustomMatchButtonsInteractable(false);
+        UpdateConnectionStatus($"Creating room '{roomName}'...");
+
+        // Start timeout
+        if (matchmakingTimeoutCoroutine != null)
+        {
+            StopCoroutine(matchmakingTimeoutCoroutine);
+        }
+        matchmakingTimeoutCoroutine = StartCoroutine(MatchmakingTimeoutCoroutine());
+
+        RoomOptions roomOptions = new RoomOptions
+        {
+            MaxPlayers = maxPlayersPerRoom,
+            IsVisible = true,
+            IsOpen = true,
+            CustomRoomProperties = new Hashtable() { { "gameVersion", PhotonNetwork.GameVersion } },
+            CustomRoomPropertiesForLobby = new string[] { "gameVersion" }
+        };
+
+        PhotonNetwork.CreateRoom(roomName, roomOptions);
+
+        if (debugMode)
+        {
+            Debug.Log($"Creating custom room: {roomName}");
+        }
+    }
+
+    void JoinCustomRoom(string roomName)
+    {
+        if (!PhotonNetwork.IsConnectedAndReady)
+        {
+            UpdateConnectionStatus("Not connected to Photon servers!");
+            PlaySound(errorSound);
+            return;
+        }
+
+        isMatchmaking = true;
+        SetCustomMatchButtonsInteractable(false);
+        UpdateConnectionStatus($"Joining room '{roomName}'...");
+
+        // Start timeout
+        if (matchmakingTimeoutCoroutine != null)
+        {
+            StopCoroutine(matchmakingTimeoutCoroutine);
+        }
+        matchmakingTimeoutCoroutine = StartCoroutine(MatchmakingTimeoutCoroutine());
+
+        PhotonNetwork.JoinRoom(roomName);
+
+        if (debugMode)
+        {
+            Debug.Log($"Joining custom room: {roomName}");
+        }
+    }
+
+    IEnumerator MatchmakingTimeoutCoroutine()
+    {
+        yield return new WaitForSeconds(matchmakingTimeout);
+
+        if (isMatchmaking)
+        {
+            isMatchmaking = false;
+            UpdateConnectionStatus("Matchmaking timeout! Please try again.");
+            PlaySound(errorSound);
+
+            // Reset UI
+            SetMainMenuButtonsInteractable(true);
+            SetCustomMatchButtonsInteractable(true);
+
+            // Leave room if we're in one
+            if (PhotonNetwork.InRoom)
+            {
+                PhotonNetwork.LeaveRoom();
+            }
+
+            if (debugMode)
+            {
+                Debug.LogError("Matchmaking timed out");
+            }
+        }
+
+        matchmakingTimeoutCoroutine = null;
+    }
+
+    #endregion
+
+    #region UI Helpers
+
+    void SetPanelActive(GameObject panel, bool active)
+    {
+        if (panel != null)
+            panel.SetActive(active);
+    }
+
+    void SetButtonInteractable(Button button, bool interactable)
+    {
+        if (button != null)
+            button.interactable = interactable;
+    }
+
+    void SetMainMenuButtonsInteractable(bool interactable)
+    {
+        SetButtonInteractable(quickMatchButton, interactable);
+        SetButtonInteractable(customMatchButton, interactable);
+        SetButtonInteractable(settingsButton, interactable);
+        SetButtonInteractable(quitButton, interactable);
+    }
+
+    void SetCustomMatchButtonsInteractable(bool interactable)
+    {
+        SetButtonInteractable(createRoomButton, interactable);
+        SetButtonInteractable(joinRoomButton, interactable);
+        SetButtonInteractable(backFromCustomButton, interactable);
+    }
+
+    void ShowMainMenuPanel()
+    {
+        SetPanelActive(connectionPanel, false);
+        SetPanelActive(mainMenuPanel, true);
+        SetPanelActive(customMatchPanel, false);
+        SetPanelActive(settingsPanel, false);
+
+        UpdateConnectionStatus($"Connected as {PhotonNetwork.NickName}");
+    }
+
+    void ShowCustomMatchPanel()
+    {
+        SetPanelActive(mainMenuPanel, false);
+        SetPanelActive(customMatchPanel, true);
+    }
+
+    void ShowSettingsPanel()
+    {
+        SetPanelActive(mainMenuPanel, false);
+        SetPanelActive(settingsPanel, true);
+    }
+
+    void HideSettingsPanel()
+    {
+        SetPanelActive(settingsPanel, false);
+        SetPanelActive(mainMenuPanel, true);
+    }
+
+    void UpdateConnectionStatus(string message)
+    {
+        if (connectionStatusText != null)
+            connectionStatusText.text = message;
+
+        if (debugMode)
+        {
+            Debug.Log($"Status: {message}");
+        }
+    }
+
+    void PlaySound(AudioClip clip)
+    {
+        if (audioSource != null && clip != null)
+        {
+            audioSource.PlayOneShot(clip);
+        }
+    }
+
+    #endregion
+
+    #region Settings
+
+    void OnMasterVolumeChanged(float value)
+    {
+        AudioListener.volume = value;
+        PlayerPrefs.SetFloat("MasterVolume", value);
+    }
+
+    void OnSFXVolumeChanged(float value)
+    {
+        if (audioSource != null)
+            audioSource.volume = value;
+        PlayerPrefs.SetFloat("SFXVolume", value);
+    }
+
+    void OnFullscreenToggled(bool isFullscreen)
+    {
+        Screen.fullScreen = isFullscreen;
+        PlayerPrefs.SetInt("Fullscreen", isFullscreen ? 1 : 0);
+    }
+
+    #endregion
+
+    #region Scene Transition
 
     IEnumerator QuitGameWithDelay()
     {
-        SetButtonsInteractable(false);
-
+        SetMainMenuButtonsInteractable(false);
         yield return new WaitForSeconds(0.5f);
 
         if (debugMode)
@@ -312,150 +671,277 @@ public class MainMenuManager : MonoBehaviour
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.isPlaying = false;
 #else
-            Application.Quit();
+        Application.Quit();
 #endif
     }
 
-    #endregion
-
-    #region UI Utilities
-
-    void SetButtonsInteractable(bool interactable)
+    void TransitionToCharacterSelection()
     {
-        if (playButton != null)
-            playButton.interactable = interactable;
+        if (isTransitioning) return;
 
-        if (characterSelectButton != null)
-            characterSelectButton.interactable = interactable;
-
-        if (settingsButton != null)
-            settingsButton.interactable = interactable;
-
-        if (quitButton != null)
-            quitButton.interactable = interactable;
+        StartCoroutine(TransitionToCharacterSelectionCoroutine());
     }
 
-    void ShowSettingsPanel()
+    IEnumerator TransitionToCharacterSelectionCoroutine()
     {
-        if (mainMenuPanel != null)
-            mainMenuPanel.SetActive(false);
+        isTransitioning = true;
+        UpdateConnectionStatus("Loading character selection...");
 
-        if (settingsPanel != null)
-            settingsPanel.SetActive(true);
-
-        if (debugMode)
+        // Optional: Show transition effect
+        if (menuTransitionEffect != null)
         {
-            Debug.Log("Settings panel shown");
+            menuTransitionEffect.SetActive(true);
+            yield return new WaitForSeconds(transitionDuration);
         }
-    }
 
-    void HideSettingsPanel()
-    {
-        if (settingsPanel != null)
-            settingsPanel.SetActive(false);
-
-        if (mainMenuPanel != null)
-            mainMenuPanel.SetActive(true);
-
-        if (debugMode)
+        // Load character selection scene
+        if (PhotonNetwork.IsMasterClient)
         {
-            Debug.Log("Settings panel hidden");
-        }
-    }
-
-    void PlayButtonSound()
-    {
-        if (audioSource != null && buttonClickSound != null)
-        {
-            audioSource.PlayOneShot(buttonClickSound);
+            PhotonNetwork.LoadLevel(characterSelectionScene);
         }
     }
 
     #endregion
 
-    #region Network Ready Methods (Future)
+    #region Photon PUN2 Callbacks
 
-    /// <summary>
-    /// Future: Enable networking mode
-    /// </summary>
-    public void EnableNetworking(bool enable)
+    public override void OnConnectedToMaster()
     {
-        enableNetworking = enable;
+        // Stop the timeout first
+        if (connectionTimeoutCoroutine != null)
+        {
+            StopCoroutine(connectionTimeoutCoroutine);
+            connectionTimeoutCoroutine = null;
+        }
+
+        // Set connecting to false
+        isConnecting = false;
+
+        PlaySound(successSound);
+        UpdateConnectionStatus($"Connected successfully as {PhotonNetwork.NickName}!");
+
+        // Update UI
+        SetButtonInteractable(connectButton, true);
+        if (loadingIndicator != null)
+            loadingIndicator.SetActive(false);
+
+        // Show main menu after a short delay
+        StartCoroutine(ShowMainMenuDelayed());
 
         if (debugMode)
         {
-            Debug.Log($"Networking {(enable ? "enabled" : "disabled")}");
+            Debug.Log($"Connected to Master Server as {PhotonNetwork.NickName}");
+            Debug.Log($"Network State: {PhotonNetwork.NetworkClientState}");
         }
     }
 
-    /// <summary>
-    /// Future: Set as host or client
-    /// </summary>
-    public void SetNetworkRole(bool host)
+    IEnumerator ShowMainMenuDelayed()
     {
-        isHost = host;
+        yield return new WaitForSeconds(1f);
+        ShowMainMenuPanel();
+    }
+
+    public override void OnDisconnected(DisconnectCause cause)
+    {
+        if (connectionTimeoutCoroutine != null)
+        {
+            StopCoroutine(connectionTimeoutCoroutine);
+            connectionTimeoutCoroutine = null;
+        }
+
+        if (matchmakingTimeoutCoroutine != null)
+        {
+            StopCoroutine(matchmakingTimeoutCoroutine);
+            matchmakingTimeoutCoroutine = null;
+        }
+
+        isConnecting = false;
+        isTransitioning = false;
+        isMatchmaking = false;
+
+        UpdateConnectionStatus($"Disconnected: {cause}");
+        PlaySound(errorSound);
+
+        // Reset UI
+        SetButtonInteractable(connectButton, true);
+        SetMainMenuButtonsInteractable(true);
+        SetCustomMatchButtonsInteractable(true);
+
+        if (loadingIndicator != null)
+            loadingIndicator.SetActive(false);
+
+        SetPanelActive(connectionPanel, true);
+        SetPanelActive(mainMenuPanel, false);
+        SetPanelActive(customMatchPanel, false);
 
         if (debugMode)
         {
-            Debug.Log($"Network role set to: {(host ? "Host" : "Client")}");
+            Debug.Log($"Disconnected from Photon: {cause}");
         }
     }
 
-    /// <summary>
-    /// Future: Called when network connection established
-    /// </summary>
-    public void OnNetworkConnected()
+    // REMOVED OnJoinRandomFailed - Using JoinRandomOrCreateRoom now
+
+    public override void OnJoinedRoom()
     {
+        // Stop matchmaking timeout
+        if (matchmakingTimeoutCoroutine != null)
+        {
+            StopCoroutine(matchmakingTimeoutCoroutine);
+            matchmakingTimeoutCoroutine = null;
+        }
+
+        isMatchmaking = false;
+        PlaySound(successSound);
+        UpdateConnectionStatus($"Joined room: {PhotonNetwork.CurrentRoom.Name}");
+
+        // Re-enable buttons
+        SetMainMenuButtonsInteractable(true);
+        SetCustomMatchButtonsInteractable(true);
+
         if (debugMode)
         {
-            Debug.Log("Network connection established");
+            Debug.Log($"Joined room: {PhotonNetwork.CurrentRoom.Name} with {PhotonNetwork.CurrentRoom.PlayerCount} players");
+            Debug.Log($"Is Master Client: {PhotonNetwork.IsMasterClient}");
+        }
+
+        // Check if we have enough players to start
+        CheckRoomPlayerCount();
+    }
+
+    public override void OnPlayerEnteredRoom(Player newPlayer)
+    {
+        UpdateConnectionStatus($"{newPlayer.NickName} joined the room!");
+
+        if (debugMode)
+        {
+            Debug.Log($"Player {newPlayer.NickName} entered room. Total players: {PhotonNetwork.CurrentRoom.PlayerCount}");
+        }
+
+        // Check if we have enough players to start
+        CheckRoomPlayerCount();
+    }
+
+    public override void OnPlayerLeftRoom(Player otherPlayer)
+    {
+        UpdateConnectionStatus($"{otherPlayer.NickName} left the room.");
+
+        if (debugMode)
+        {
+            Debug.Log($"Player {otherPlayer.NickName} left room. Total players: {PhotonNetwork.CurrentRoom.PlayerCount}");
         }
     }
 
-    /// <summary>
-    /// Future: Called when network connection lost
-    /// </summary>
-    public void OnNetworkDisconnected()
+    public override void OnCreateRoomFailed(short returnCode, string message)
+    {
+        if (matchmakingTimeoutCoroutine != null)
+        {
+            StopCoroutine(matchmakingTimeoutCoroutine);
+            matchmakingTimeoutCoroutine = null;
+        }
+
+        isMatchmaking = false;
+        SetCustomMatchButtonsInteractable(true);
+
+        UpdateConnectionStatus($"Failed to create room: {message}");
+        PlaySound(errorSound);
+
+        if (debugMode)
+        {
+            Debug.Log($"Create room failed: {message} (Return Code: {returnCode})");
+        }
+    }
+
+    public override void OnJoinRoomFailed(short returnCode, string message)
+    {
+        if (matchmakingTimeoutCoroutine != null)
+        {
+            StopCoroutine(matchmakingTimeoutCoroutine);
+            matchmakingTimeoutCoroutine = null;
+        }
+
+        isMatchmaking = false;
+        SetCustomMatchButtonsInteractable(true);
+        SetMainMenuButtonsInteractable(true);
+
+        UpdateConnectionStatus($"Failed to join room: {message}");
+        PlaySound(errorSound);
+
+        if (debugMode)
+        {
+            Debug.Log($"Join room failed: {message} (Return Code: {returnCode})");
+        }
+    }
+
+    // NEW: Handle OnLeftRoom callback
+    public override void OnLeftRoom()
     {
         if (debugMode)
         {
-            Debug.Log("Network connection lost");
+            Debug.Log("Left room successfully");
         }
 
-        // Return to main menu
-        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+        // Reset matchmaking state
+        isMatchmaking = false;
+        SetMainMenuButtonsInteractable(true);
+        SetCustomMatchButtonsInteractable(true);
+
+        UpdateConnectionStatus($"Connected as {PhotonNetwork.NickName}");
+    }
+
+    void CheckRoomPlayerCount()
+    {
+        if (PhotonNetwork.CurrentRoom.PlayerCount >= maxPlayersPerRoom)
+        {
+            UpdateConnectionStatus("Match found! Starting game...");
+            TransitionToCharacterSelection();
+        }
+        else
+        {
+            UpdateConnectionStatus($"Waiting for players... ({PhotonNetwork.CurrentRoom.PlayerCount}/{maxPlayersPerRoom})");
+        }
     }
 
     #endregion
 
-    #region Debug Methods
+    #region Debug
 
     void Update()
     {
+        if (!debugMode) return;
+
         // Debug controls
-        if (debugMode)
+        if (Input.GetKeyDown(KeyCode.F1))
         {
-            if (Input.GetKeyDown(KeyCode.F1))
-            {
-                OnPlayButtonClicked();
-            }
+            OnConnectButtonClicked();
+        }
 
-            if (Input.GetKeyDown(KeyCode.F2))
-            {
-                OnSettingsClicked();
-            }
+        if (Input.GetKeyDown(KeyCode.F2))
+        {
+            OnQuickMatchClicked();
+        }
 
-            if (Input.GetKeyDown(KeyCode.Escape))
+        if (Input.GetKeyDown(KeyCode.F3))
+        {
+            OnCustomMatchClicked();
+        }
+
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (settingsPanel != null && settingsPanel.activeSelf)
             {
-                if (settingsPanel != null && settingsPanel.activeSelf)
-                {
-                    OnBackFromSettingsClicked();
-                }
-                else
-                {
-                    OnQuitClicked();
-                }
+                OnBackFromSettingsClicked();
             }
+            else if (customMatchPanel != null && customMatchPanel.activeSelf)
+            {
+                OnBackFromCustomClicked();
+            }
+        }
+
+        // NEW: Debug key to leave room
+        if (Input.GetKeyDown(KeyCode.L) && PhotonNetwork.InRoom)
+        {
+            PhotonNetwork.LeaveRoom();
         }
     }
 
@@ -463,19 +949,29 @@ public class MainMenuManager : MonoBehaviour
     {
         if (!debugMode) return;
 
-        GUILayout.BeginArea(new Rect(10, 10, 300, 150));
+        GUILayout.BeginArea(new Rect(10, 10, 400, 300));
         GUILayout.BeginVertical("box");
 
-        GUILayout.Label("=== MAIN MENU DEBUG ===");
-        GUILayout.Label($"Networking: {enableNetworking}");
-        GUILayout.Label($"Role: {(isHost ? "Host" : "Client")}");
-        GUILayout.Label($"Transitioning: {isTransitioning}");
+        GUILayout.Label("=== PUN2 MAIN MENU DEBUG ===");
+        GUILayout.Label($"Connection State: {PhotonNetwork.NetworkClientState}");
+        GUILayout.Label($"Connected: {PhotonNetwork.IsConnected}");
+        GUILayout.Label($"Connected & Ready: {PhotonNetwork.IsConnectedAndReady}");
+        GUILayout.Label($"In Room: {PhotonNetwork.InRoom}");
+        GUILayout.Label($"Is Master Client: {PhotonNetwork.IsMasterClient}");
+        GUILayout.Label($"Nickname: {PhotonNetwork.NickName}");
+        GUILayout.Label($"Players in Room: {(PhotonNetwork.CurrentRoom?.PlayerCount ?? 0)}");
+        GUILayout.Label($"Room Name: {(PhotonNetwork.CurrentRoom?.Name ?? "None")}");
+        GUILayout.Label($"Is Connecting: {isConnecting}");
+        GUILayout.Label($"Is Matchmaking: {isMatchmaking}");
+        GUILayout.Label($"Is Transitioning: {isTransitioning}");
 
         GUILayout.Space(10);
         GUILayout.Label("Debug Controls:");
-        GUILayout.Label("F1 - Start Game");
-        GUILayout.Label("F2 - Settings");
-        GUILayout.Label("ESC - Back/Quit");
+        GUILayout.Label("F1 - Connect");
+        GUILayout.Label("F2 - Quick Match");
+        GUILayout.Label("F3 - Custom Match");
+        GUILayout.Label("L - Leave Room");
+        GUILayout.Label("ESC - Back");
 
         GUILayout.EndVertical();
         GUILayout.EndArea();

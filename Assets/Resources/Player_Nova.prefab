@@ -18,6 +18,7 @@ GameObject:
   - component: {fileID: 595057405840706538}
   - component: {fileID: 6837583187912932837}
   - component: {fileID: -3910053151060509909}
+  - component: {fileID: 5977501817383454101}
   m_Layer: 8
   m_Name: Player_Nova
   m_TagString: Player
@@ -129,7 +130,7 @@ MonoBehaviour:
   perfectCatchWindow: 0.3
   goodCatchWindow: 0.5
   catchCooldown: 0.5
-  debugMode: 1
+  debugMode: 0
   catchKey: 108
   catchIndicator: {fileID: 0}
   alwaysShowCatchRange: 0
@@ -170,8 +171,8 @@ MonoBehaviour:
   customTrickKey: 119
   customTreatKey: 101
   useDuckSystem: 1
-  isPUN2Enabled: 0
-  isLocalPlayer: 1
+  isPUN2Enabled: 1
+  isLocalPlayer: 0
   inputBufferTime: 0.15
   showDebugInfo: 0
   forceMobileMode: 0
@@ -229,6 +230,8 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 1024
   groundCheckDistance: 0.3
+  useVFXManager: 1
+  vfxSpawnHeight: 1.5
 --- !u!114 &6837583187912932837
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -278,3 +281,25 @@ MonoBehaviour:
   duckExhaustedSound: {fileID: 0}
   cooldownEndSound: {fileID: 0}
   debugMode: 0
+--- !u!114 &5977501817383454101
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa584fbee541324448dd18d8409c7a41, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ObservedComponentsFoldoutOpen: 1
+  Group: 0
+  prefixField: -1
+  Synchronization: 3
+  OwnershipTransfer: 0
+  observableSearch: 2
+  ObservedComponents: []
+  sceneViewId: 0
+  InstantiationId: 0
+  isRuntimeInstantiated: 0
