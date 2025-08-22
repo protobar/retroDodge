@@ -65,6 +65,14 @@ MonoBehaviour:
   - OnGameStarted
   - SpawnLocalPlayer
   - SpawnLocalPlayerCharacter
+  - ReceivePlayerInput
+  - SyncPlayerAction
+  - SyncBallEvent
+  - RequestPickupFromMaster
+  - RequestThrowFromMaster
+  - RequestPickupValidation
+  - SyncPickupRejection
+  - RegisterBallOnClients
   DisableAutoOpenWizard: 1
   ShowSettings: 0
   DevRegionSetOnce: 1

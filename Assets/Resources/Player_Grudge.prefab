@@ -19,6 +19,7 @@ GameObject:
   - component: {fileID: 2194072730587793859}
   - component: {fileID: -2602709676357483726}
   - component: {fileID: 3171496574075786320}
+  - component: {fileID: 1504208963714581354}
   m_Layer: 8
   m_Name: Player_Grudge
   m_TagString: Player
@@ -131,7 +132,7 @@ MonoBehaviour:
   goodCatchWindow: 0.5
   catchCooldown: 0.5
   debugMode: 0
-  catchKey: 108
+  catchKey: 115
   catchIndicator: {fileID: 0}
   alwaysShowCatchRange: 0
   perfectZoneColor: {r: 0, g: 1, b: 0, a: 1}
@@ -158,6 +159,8 @@ MonoBehaviour:
   playerType: 0
   enableKeyboardInput: 1
   enableMobileInput: 0
+  enableInputPrediction: 1
+  inputSendRate: 30
   useCustomKeys: 0
   customLeftKey: 276
   customRightKey: 275
@@ -172,7 +175,8 @@ MonoBehaviour:
   customTreatKey: 101
   useDuckSystem: 1
   isPUN2Enabled: 1
-  isLocalPlayer: 0
+  autoDetectOwnership: 1
+  forceLocalControl: 0
   inputBufferTime: 0.15
   showDebugInfo: 0
   forceMobileMode: 0
@@ -226,6 +230,8 @@ MonoBehaviour:
   autoLoadCharacterOnStart: 1
   debugMode: 0
   showCharacterInfo: 0
+  enableNetworkSync: 1
+  sendRate: 20
   groundLayer:
     serializedVersion: 2
     m_Bits: 1024
@@ -299,7 +305,42 @@ MonoBehaviour:
   Synchronization: 3
   OwnershipTransfer: 0
   observableSearch: 2
-  ObservedComponents: []
+  ObservedComponents:
+  - {fileID: 1815663371216282099}
+  - {fileID: 1504208963714581354}
   sceneViewId: 0
   InstantiationId: 0
   isRuntimeInstantiated: 0
+--- !u!114 &1504208963714581354
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 990030946171809883}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8efc6b1d64977384eb3405357896c656, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_PositionModel:
+    SynchronizeEnabled: 1
+    TeleportEnabled: 1
+    TeleportIfDistanceGreaterThan: 3
+    InterpolateOption: 2
+    InterpolateMoveTowardsSpeed: 1
+    InterpolateLerpSpeed: 1
+    ExtrapolateOption: 0
+    ExtrapolateSpeed: 1
+    ExtrapolateIncludingRoundTripTime: 1
+    ExtrapolateNumberOfStoredPositions: 1
+  m_RotationModel:
+    SynchronizeEnabled: 1
+    InterpolateOption: 1
+    InterpolateRotateTowardsSpeed: 180
+    InterpolateLerpSpeed: 5
+  m_ScaleModel:
+    SynchronizeEnabled: 0
+    InterpolateOption: 0
+    InterpolateMoveTowardsSpeed: 1
+    InterpolateLerpSpeed: 0

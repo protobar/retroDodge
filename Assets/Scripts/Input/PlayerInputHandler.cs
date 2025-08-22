@@ -1,15 +1,24 @@
 using UnityEngine;
+using Photon.Pun;
 
 /// <summary>
-/// Enhanced PlayerInputHandler with Duck System integration and complete mobile support
-/// Includes Ultimate/Trick/Treat mobile inputs that were missing
+/// FIXED: PlayerInputHandler with proper PUN2 ownership model
+/// Each player processes their own input regardless of master client status
+/// Only blocks input processing for remote players' characters
 /// </summary>
-public class PlayerInputHandler : MonoBehaviour
+public class PlayerInputHandler : MonoBehaviourPun
 {
     [Header("Player Configuration")]
     [SerializeField] private PlayerInputType playerType = PlayerInputType.Player1;
     [SerializeField] private bool enableKeyboardInput = true;
     [SerializeField] public bool enableMobileInput = true;
+
+    [Header("Network Input Settings")]
+    [SerializeField] private bool enableInputPrediction = true;
+    [SerializeField] private float inputSendRate = 30f;
+
+    private PlayerInputHandler inputHandler;
+    private float lastInputSend = 0f;
 
     [Header("Custom Key Bindings (Optional Override)")]
     [SerializeField] private bool useCustomKeys = false;
@@ -29,8 +38,12 @@ public class PlayerInputHandler : MonoBehaviour
     [SerializeField] private bool useDuckSystem = true;
 
     [Header("PUN2 Network Settings")]
-    [SerializeField] private bool isPUN2Enabled = false;
-    [SerializeField] private bool isLocalPlayer = true;
+    [SerializeField] public bool isPUN2Enabled = false;
+
+    // FIXED: Changed from isLocalPlayer to clearer ownership check
+    [Header("Ownership Detection")]
+    [SerializeField] private bool autoDetectOwnership = true;
+    [SerializeField] private bool forceLocalControl = false; // For testing
 
     [Header("Input Buffer Settings")]
     [SerializeField] private float inputBufferTime = 0.15f;
@@ -41,6 +54,10 @@ public class PlayerInputHandler : MonoBehaviour
     [Header("Testing (Single Player)")]
     [SerializeField] private bool forceMobileMode = false;
     [SerializeField] private bool autoRegisterInSinglePlayer = true;
+
+    // FIXED: Ownership state tracking
+    private bool isMyCharacter = true; // Default to true for single player
+    private bool isNetworkReady = false;
 
     // Input state - current frame
     private float horizontalInput = 0f;
@@ -123,6 +140,43 @@ public class PlayerInputHandler : MonoBehaviour
         {
             RegisterWithMobileUI();
         }
+
+        inputHandler = GetComponent<PlayerInputHandler>();
+
+        // FIXED: Properly determine ownership
+        DetermineOwnership();
+    }
+
+    // FIXED: New ownership determination method
+    void DetermineOwnership()
+    {
+        if (forceLocalControl)
+        {
+            isMyCharacter = true;
+            isNetworkReady = true;
+            if (showDebugInfo)
+                Debug.Log($"{gameObject.name} - Ownership: FORCED LOCAL CONTROL");
+            return;
+        }
+
+        if (isPUN2Enabled && photonView != null)
+        {
+            // In networked game: only control characters that belong to this client
+            isMyCharacter = photonView.IsMine;
+            isNetworkReady = PhotonNetwork.IsConnected;
+
+            if (showDebugInfo)
+                Debug.Log($"{gameObject.name} - Ownership: PUN2 IsMine={isMyCharacter}, NetworkReady={isNetworkReady}");
+        }
+        else
+        {
+            // Single player or non-networked: control all characters
+            isMyCharacter = true;
+            isNetworkReady = true;
+
+            if (showDebugInfo)
+                Debug.Log($"{gameObject.name} - Ownership: SINGLE PLAYER (local control)");
+        }
     }
 
     void RegisterWithMobileUI()
@@ -169,7 +223,7 @@ public class PlayerInputHandler : MonoBehaviour
                     trickKey = KeyCode.W;
                     treatKey = KeyCode.E;
                     ultimateKey = KeyCode.Q;
-                    dashKey = KeyCode.LeftShift; // unchanged unless you want a new key
+                    dashKey = KeyCode.LeftShift;
                     break;
 
                 case PlayerInputType.Player2:
@@ -183,10 +237,9 @@ public class PlayerInputHandler : MonoBehaviour
                     trickKey = KeyCode.I;
                     treatKey = KeyCode.O;
                     ultimateKey = KeyCode.U;
-                    dashKey = KeyCode.RightShift; // unchanged unless you want a new key
+                    dashKey = KeyCode.RightShift;
                     break;
             }
-
         }
 
         if (showDebugInfo)
@@ -200,9 +253,28 @@ public class PlayerInputHandler : MonoBehaviour
 
     void Update()
     {
-        if (isPUN2Enabled && !isLocalPlayer) return;
+        // FIXED: Re-check ownership if network state changes
+        if (!isNetworkReady)
+        {
+            DetermineOwnership();
+        }
+
+        // FIXED: Only block input for remote players' characters
+        if (isPUN2Enabled && !isMyCharacter)
+        {
+            if (showDebugInfo && horizontalInput != 0f)
+                Debug.Log($"{gameObject.name} - Input blocked: not my character");
+            return;
+        }
 
         ResetFrameInputs();
+
+        // Send network updates for owned characters
+        if (isPUN2Enabled && isMyCharacter && Time.time - lastInputSend >= 1f / inputSendRate)
+        {
+            SendInputToNetwork();
+            lastInputSend = Time.time;
+        }
 
         if (enableKeyboardInput)
         {
@@ -216,12 +288,62 @@ public class PlayerInputHandler : MonoBehaviour
 
         HandleInputBuffering();
 
-        if (showDebugInfo)
+        if (showDebugInfo && HasAnyInput())
         {
             DisplayDebugInfo();
         }
 
         ResetMobileFrameInputs();
+    }
+
+    // FIXED: Improved input networking
+    void SendInputToNetwork()
+    {
+        if (inputHandler == null || !photonView.IsMine) return;
+
+        // Only send input if there's actual input to avoid spam
+        float horizontal = inputHandler.GetHorizontal();
+        bool hasInput = Mathf.Abs(horizontal) > 0.01f ||
+                       inputHandler.GetJumpPressed() ||
+                       inputHandler.GetDuckHeld() ||
+                       inputHandler.GetThrowPressed() ||
+                       inputHandler.GetPickupPressed();
+
+        if (hasInput)
+        {
+            // Send critical input data as RPC for immediate response
+            photonView.RPC("ReceivePlayerInput", RpcTarget.Others,
+                          horizontal,
+                          inputHandler.GetJumpPressed(),
+                          inputHandler.GetDuckHeld(),
+                          inputHandler.GetThrowPressed(),
+                          inputHandler.GetPickupPressed(),
+                          PhotonNetwork.Time);
+        }
+    }
+
+    [PunRPC]
+    void ReceivePlayerInput(float horizontal, bool jump, bool duck, bool throwInput, bool pickup, double timestamp)
+    {
+        // Apply received input to remote player for smoother prediction
+        if (enableInputPrediction && !photonView.IsMine)
+        {
+            // Calculate lag and predict where player should be
+            float lag = Mathf.Abs((float)(PhotonNetwork.Time - timestamp));
+
+            // For now, just store the input for visual feedback
+            // The actual game logic will be handled by the owning client
+            if (showDebugInfo)
+            {
+                Debug.Log($"{gameObject.name} - Received remote input: H={horizontal}, J={jump}, D={duck}, T={throwInput}, P={pickup}, Lag={lag:F3}");
+            }
+        }
+    }
+
+    bool HasAnyInput()
+    {
+        return horizontalInput != 0 || jumpPressed || duckHeld || throwPressed || catchPressed ||
+               pickupPressed || dashPressed || ultimatePressed || trickPressed || treatPressed;
     }
 
     void ResetFrameInputs()
@@ -423,7 +545,74 @@ public class PlayerInputHandler : MonoBehaviour
 
     void HandleInputBuffering()
     {
-        // Input buffering implementation remains the same
+        // Allow buffered inputs to be used within the buffer window
+        float currentTime = Time.time;
+
+        // Jump buffering
+        if (!jumpPressed && (currentTime - lastJumpInput <= inputBufferTime))
+        {
+            jumpPressed = true;
+        }
+
+        // Throw buffering
+        if (!throwPressed && (currentTime - lastThrowInput <= inputBufferTime))
+        {
+            throwPressed = true;
+        }
+
+        // Catch buffering
+        if (!catchPressed && (currentTime - lastCatchInput <= inputBufferTime))
+        {
+            catchPressed = true;
+        }
+
+        // Pickup buffering
+        if (!pickupPressed && (currentTime - lastPickupInput <= inputBufferTime))
+        {
+            pickupPressed = true;
+        }
+
+        // Dash buffering
+        if (!dashPressed && (currentTime - lastDashInput <= inputBufferTime))
+        {
+            dashPressed = true;
+        }
+
+        // Ultimate buffering
+        if (!ultimatePressed && (currentTime - lastUltimateInput <= inputBufferTime))
+        {
+            ultimatePressed = true;
+        }
+
+        // Trick buffering
+        if (!trickPressed && (currentTime - lastTrickInput <= inputBufferTime))
+        {
+            trickPressed = true;
+        }
+
+        // Treat buffering
+        if (!treatPressed && (currentTime - lastTreatInput <= inputBufferTime))
+        {
+            treatPressed = true;
+        }
+    }
+
+    void DisplayDebugInfo()
+    {
+        string inputInfo = $"{gameObject.name} - Input: ";
+        inputInfo += $"H:{horizontalInput:F2} ";
+        if (jumpPressed) inputInfo += "JUMP ";
+        if (duckHeld) inputInfo += "DUCK ";
+        if (throwPressed) inputInfo += "THROW ";
+        if (throwHeld) inputInfo += "THROW_HELD ";
+        if (catchPressed) inputInfo += "CATCH ";
+        if (pickupPressed) inputInfo += "PICKUP ";
+        if (dashPressed) inputInfo += "DASH ";
+        if (ultimatePressed) inputInfo += "ULTIMATE ";
+        if (trickPressed) inputInfo += "TRICK ";
+        if (treatPressed) inputInfo += "TREAT ";
+
+        Debug.Log(inputInfo);
     }
 
     // ===========================================
@@ -435,6 +624,34 @@ public class PlayerInputHandler : MonoBehaviour
         mobileHorizontal = Mathf.Clamp(value, -1f, 1f);
         if (showDebugInfo)
             Debug.Log($"{gameObject.name} - SetMobileHorizontal({value})");
+    }
+
+    public void OnMobileLeftDown()
+    {
+        mobileLeftPressed = true;
+        if (showDebugInfo)
+            Debug.Log($"{gameObject.name} - Mobile Left Down");
+    }
+
+    public void OnMobileLeftUp()
+    {
+        mobileLeftPressed = false;
+        if (showDebugInfo)
+            Debug.Log($"{gameObject.name} - Mobile Left Up");
+    }
+
+    public void OnMobileRightDown()
+    {
+        mobileRightPressed = true;
+        if (showDebugInfo)
+            Debug.Log($"{gameObject.name} - Mobile Right Down");
+    }
+
+    public void OnMobileRightUp()
+    {
+        mobileRightPressed = false;
+        if (showDebugInfo)
+            Debug.Log($"{gameObject.name} - Mobile Right Up");
     }
 
     public void OnMobileJump()
@@ -507,7 +724,6 @@ public class PlayerInputHandler : MonoBehaviour
             Debug.Log($"{gameObject.name} - Mobile Dash");
     }
 
-    // FIXED: Add missing Ultimate/Trick/Treat mobile callbacks
     public void OnMobileUltimate()
     {
         mobileUltimatePressedThisFrame = true;
@@ -532,265 +748,123 @@ public class PlayerInputHandler : MonoBehaviour
             Debug.Log($"{gameObject.name} - Mobile Treat");
     }
 
-    public void OnMobileLeftDown()
-    {
-        mobileLeftPressed = true;
-        if (showDebugInfo)
-            Debug.Log($"{gameObject.name} - Mobile Left Down");
-    }
-
-    public void OnMobileLeftUp()
-    {
-        mobileLeftPressed = false;
-        if (showDebugInfo)
-            Debug.Log($"{gameObject.name} - Mobile Left Up");
-    }
-
-    public void OnMobileRightDown()
-    {
-        mobileRightPressed = true;
-        if (showDebugInfo)
-            Debug.Log($"{gameObject.name} - Mobile Right Down");
-    }
-
-    public void OnMobileRightUp()
-    {
-        mobileRightPressed = false;
-        if (showDebugInfo)
-            Debug.Log($"{gameObject.name} - Mobile Right Up");
-    }
-
     // ===========================================
-    // PUBLIC GETTER METHODS FOR GAME SCRIPTS
+    // PUBLIC INPUT GETTERS
     // ===========================================
 
-    public float GetHorizontal() => horizontalInput;
-
-    public bool GetJumpPressed() => jumpPressed;
-
-    public bool GetJumpBuffered()
+    public float GetHorizontal()
     {
-        if (Time.time - lastJumpInput <= inputBufferTime)
-        {
-            lastJumpInput = -1f;
-            return true;
-        }
-        return false;
+        return horizontalInput;
     }
 
-    // ENHANCED: Duck getter with system integration
+    public bool GetJumpPressed()
+    {
+        return jumpPressed;
+    }
+
     public bool GetDuckHeld()
     {
-        if (useDuckSystem && duckSystem != null)
-        {
-            // Return true if duck system says we're ducking, even if input released
-            return duckSystem.IsDucking() || (duckHeld && duckSystem.CanDuck());
-        }
         return duckHeld;
     }
 
-    // NEW: Additional duck system getters
-    public bool GetDuckPressed()
+    public bool GetThrowPressed()
     {
-        if (useDuckSystem && duckSystem != null)
-        {
-            // Return true only if we just started ducking this frame
-            return duckSystem.IsDucking() && duckHeld;
-        }
-        return duckHeld; // Fallback for non-duck-system
+        return throwPressed;
     }
 
-    public bool CanDuck()
+    public bool GetThrowHeld()
     {
-        if (useDuckSystem && duckSystem != null)
-        {
-            return duckSystem.CanDuck();
-        }
-        return true; // Always can duck without system
+        return throwHeld;
     }
 
-    public bool GetThrowPressed() => throwPressed;
-    public bool GetThrowHeld() => throwHeld;
-
-    public bool GetThrowBuffered()
+    public bool GetCatchPressed()
     {
-        if (Time.time - lastThrowInput <= inputBufferTime)
-        {
-            lastThrowInput = -1f;
-            return true;
-        }
-        return false;
+        return catchPressed;
     }
 
-    public bool GetCatchPressed() => catchPressed;
-
-    public bool GetCatchBuffered()
+    public bool GetPickupPressed()
     {
-        if (Time.time - lastCatchInput <= inputBufferTime)
-        {
-            lastCatchInput = -1f;
-            return true;
-        }
-        return false;
+        return pickupPressed;
     }
 
-    public bool GetPickupPressed() => pickupPressed;
-
-    public bool GetPickupBuffered()
+    public bool GetDashPressed()
     {
-        if (Time.time - lastPickupInput <= inputBufferTime)
-        {
-            lastPickupInput = -1f;
-            return true;
-        }
-        return false;
+        return dashPressed;
     }
 
-    public bool GetDashPressed() => dashPressed;
-
-    public bool GetDashBuffered()
+    public bool GetUltimatePressed()
     {
-        if (Time.time - lastDashInput <= inputBufferTime)
-        {
-            lastDashInput = -1f;
-            return true;
-        }
-        return false;
+        return ultimatePressed;
     }
 
-    // FIXED: Complete Ultimate/Trick/Treat getters
-    public bool GetUltimatePressed() => ultimatePressed;
-
-    public bool GetUltimateBuffered()
+    public bool GetTrickPressed()
     {
-        if (Time.time - lastUltimateInput <= inputBufferTime)
-        {
-            lastUltimateInput = -1f;
-            return true;
-        }
-        return false;
+        return trickPressed;
     }
 
-    public bool GetTrickPressed() => trickPressed;
-
-    public bool GetTrickBuffered()
+    public bool GetTreatPressed()
     {
-        if (Time.time - lastTrickInput <= inputBufferTime)
-        {
-            lastTrickInput = -1f;
-            return true;
-        }
-        return false;
+        return treatPressed;
     }
 
-    public bool GetTreatPressed() => treatPressed;
+    // ===========================================
+    // NETWORK STATE GETTERS
+    // ===========================================
 
-    public bool GetTreatBuffered()
+    public bool IsMyCharacter()
     {
-        if (Time.time - lastTreatInput <= inputBufferTime)
-        {
-            lastTreatInput = -1f;
-            return true;
-        }
-        return false;
+        return isMyCharacter;
+    }
+
+    public bool IsNetworkReady()
+    {
+        return isNetworkReady;
+    }
+
+    public PlayerInputType GetPlayerType()
+    {
+        return playerType;
     }
 
     // ===========================================
     // UTILITY METHODS
     // ===========================================
 
-    public PlayerInputType GetPlayerType() => playerType;
-
-    public bool IsMobileInputActive()
+    public void SetPlayerType(PlayerInputType newType)
     {
-        return mobileLeftPressed || mobileRightPressed || mobileDuckPressed ||
-               mobileJumpPressedThisFrame || mobileThrowPressedThisFrame ||
-               mobileCatchPressedThisFrame || mobilePickupPressedThisFrame ||
-               mobileDashPressedThisFrame || mobileUltimatePressedThisFrame ||
-               mobileTrickPressedThisFrame || mobileTreatPressedThisFrame;
-    }
-
-    public void SetPlayerType(PlayerInputType type)
-    {
-        playerType = type;
+        playerType = newType;
         SetupKeyMappings();
     }
 
-    // Duck system utilities
-    public DuckSystem GetDuckSystem() => duckSystem;
-    public bool IsUsingDuckSystem() => useDuckSystem && duckSystem != null;
-
-    void DisplayDebugInfo()
+    public void EnableDebugInfo(bool enable)
     {
-        if (horizontalInput != 0 || jumpPressed || duckHeld || throwPressed || catchPressed ||
-            pickupPressed || dashPressed || ultimatePressed || trickPressed || treatPressed)
+        showDebugInfo = enable;
+    }
+
+    public void ForceOwnershipRefresh()
+    {
+        DetermineOwnership();
+    }
+
+
+    // ===========================================
+    // GIZMOS FOR DEBUG VISUALIZATION
+    // ===========================================
+
+    void OnDrawGizmosSelected()
+    {
+        if (!showDebugInfo) return;
+
+        // Draw input state visualization
+        Gizmos.color = isMyCharacter ? Color.green : Color.red;
+        Gizmos.DrawWireSphere(transform.position + Vector3.up * 2f, 0.3f);
+
+        // Draw horizontal input as arrow
+        if (Mathf.Abs(horizontalInput) > 0.1f)
         {
-            string duckInfo = "";
-            if (useDuckSystem && duckSystem != null)
-            {
-                duckInfo = $" Duck:[{duckHeld}|{duckSystem.IsDucking()}|{duckSystem.CanDuck()}]";
-            }
-            else
-            {
-                duckInfo = $" Duck:{duckHeld}";
-            }
-
-            Debug.Log($"{gameObject.name} ({playerType}) - " +
-                     $"H:{horizontalInput:F1} J:{jumpPressed}{duckInfo} " +
-                     $"T:{throwPressed} C:{catchPressed} P:{pickupPressed} " +
-                     $"Dash:{dashPressed} Ult:{ultimatePressed} Trick:{trickPressed} Treat:{treatPressed} " +
-                     $"Mobile:{IsMobileInputActive()}");
-        }
-    }
-
-    public bool GetKeyEquivalent(KeyCode key)
-    {
-        if (key == leftKey) return horizontalInput < -0.5f;
-        if (key == rightKey) return horizontalInput > 0.5f;
-        if (key == jumpKey) return jumpPressed;
-        if (key == duckKey) return GetDuckHeld();
-        if (key == throwKey) return throwPressed;
-        if (key == catchKey) return catchPressed;
-        if (key == pickupKey) return pickupPressed;
-        if (key == dashKey) return dashPressed;
-        if (key == ultimateKey) return ultimatePressed;
-        if (key == trickKey) return trickPressed;
-        if (key == treatKey) return treatPressed;
-
-        return false;
-    }
-
-    public void ResetMobileInputs()
-    {
-        mobileLeftPressed = false;
-        mobileRightPressed = false;
-        mobileDuckPressed = false;
-        mobileJumpPressedThisFrame = false;
-        mobileThrowPressedThisFrame = false;
-        mobileCatchPressedThisFrame = false;
-        mobilePickupPressedThisFrame = false;
-        mobileDashPressedThisFrame = false;
-        mobileUltimatePressedThisFrame = false;
-        mobileTrickPressedThisFrame = false;
-        mobileTreatPressedThisFrame = false;
-        mobileHorizontal = 0f;
-
-        if (showDebugInfo)
-        {
-            Debug.Log($"{gameObject.name} - Mobile inputs reset");
-        }
-    }
-
-    void OnDestroy()
-    {
-        ResetMobileInputs();
-    }
-
-    void OnApplicationPause(bool pauseStatus)
-    {
-        if (pauseStatus)
-        {
-            ResetMobileInputs();
+            Vector3 direction = Vector3.right * horizontalInput;
+            Gizmos.color = Color.blue;
+            Gizmos.DrawRay(transform.position + Vector3.up * 1.5f, direction);
         }
     }
 }

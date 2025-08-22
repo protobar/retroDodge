@@ -1,10 +1,13 @@
 ﻿using UnityEngine;
+using System.Collections;
+using Photon.Pun;
+using Photon.Realtime;
 
 /// <summary>
-/// Enhanced BallManager with Ball Hold Timer integration
-/// Manages ball lifecycle and communicates with Hold Timer UI
+/// Network BallManager with Master Client Authority
+/// FIXED: Now properly registers ball on all clients
 /// </summary>
-public class BallManager : MonoBehaviour
+public class BallManager : MonoBehaviourPunCallbacks
 {
     public static BallManager Instance { get; private set; }
 
@@ -18,21 +21,13 @@ public class BallManager : MonoBehaviour
     [SerializeField] private bool autoShowTimerOnPickup = true;
     [SerializeField] private bool autoHideTimerOnThrow = true;
 
-    [Header("Debug")]
-    [SerializeField] private bool debugMode = true;
-
     // Current ball reference
     private BallController currentBall;
-
-    // Game state
     private bool gameActive = true;
-
-    // Hold timer UI tracking
     private bool isTimerUIShown = false;
 
     void Awake()
     {
-        // Singleton setup
         if (Instance == null)
         {
             Instance = this;
@@ -46,21 +41,67 @@ public class BallManager : MonoBehaviour
 
     void Start()
     {
-        SpawnBall();
+        // Only Master Client spawns the ball initially
+        if (PhotonNetwork.IsMasterClient)
+        {
+            SpawnBall();
+        }
+        else
+        {
+            // FIXED: Non-master clients should look for existing ball
+            StartCoroutine(FindExistingBall());
+        }
+    }
+
+    /// <summary>
+    /// FIXED: Coroutine for non-master clients to find the ball spawned by master
+    /// </summary>
+    IEnumerator FindExistingBall()
+    {
+        // Wait a frame to ensure the ball has been spawned
+        yield return null;
+        
+        // Try to find the ball for up to 2 seconds
+        float timeout = 2f;
+        float elapsed = 0f;
+        
+        while (currentBall == null && elapsed < timeout)
+        {
+            BallController[] balls = FindObjectsOfType<BallController>();
+            if (balls.Length > 0)
+            {
+                // Register the first ball found
+                currentBall = balls[0];
+                Debug.Log($"[BallManager] Non-master client found and registered ball: {currentBall.name}");
+                break;
+            }
+            
+            yield return new WaitForSeconds(0.1f);
+            elapsed += 0.1f;
+        }
+        
+        if (currentBall == null)
+        {
+            Debug.LogWarning("[BallManager] Non-master client could not find ball after timeout");
+        }
     }
 
     void Update()
     {
-        // Monitor ball state for hold timer UI integration
         if (enableHoldTimerUI && currentBall != null)
         {
             MonitorBallHoldState();
         }
-
-        // Debug controls
-        if (debugMode)
+        
+        // FIXED: Continuously check for ball if we don't have one
+        if (currentBall == null && gameActive)
         {
-            HandleDebugInput();
+            BallController foundBall = FindObjectOfType<BallController>();
+            if (foundBall != null)
+            {
+                currentBall = foundBall;
+                Debug.Log($"[BallManager] Found and registered ball during update: {currentBall.name}");
+            }
         }
     }
 
@@ -68,224 +109,271 @@ public class BallManager : MonoBehaviour
     {
         bool ballIsHeld = currentBall.IsHeld();
 
-        // Show timer UI when ball is picked up
         if (ballIsHeld && !isTimerUIShown && autoShowTimerOnPickup)
         {
             ShowHoldTimerUI();
         }
-        // Hide timer UI when ball is thrown or becomes free
         else if (!ballIsHeld && isTimerUIShown && autoHideTimerOnThrow)
         {
             HideHoldTimerUI();
         }
     }
 
-    void HandleDebugInput()
-    {
-        // Debug key to reset ball
-        if (Input.GetKeyDown(KeyCode.R))
-        {
-            ResetBall();
-        }
-
-        // Debug key to respawn ball
-        if (Input.GetKeyDown(KeyCode.T))
-        {
-            SpawnBall();
-        }
-
-        // Debug key to toggle hold timer UI
-        if (Input.GetKeyDown(KeyCode.Y))
-        {
-            if (isTimerUIShown)
-            {
-                HideHoldTimerUI();
-            }
-            else if (currentBall != null && currentBall.IsHeld())
-            {
-                ShowHoldTimerUI();
-            }
-        }
-
-        // Debug key to show character info
-        if (Input.GetKeyDown(KeyCode.I))
-        {
-            ShowCharacterDebugInfo();
-        }
-    }
-
     void SpawnBall()
     {
-        if (ballPrefab == null)
-        {
-            Debug.LogError("Ball prefab not assigned in BallManager!");
-            return;
-        }
+        if (ballPrefab == null) return;
 
-        // Destroy existing ball if any
         if (currentBall != null)
         {
-            // Hide timer UI before destroying ball
             if (isTimerUIShown)
             {
                 HideHoldTimerUI();
             }
 
-            Destroy(currentBall.gameObject);
-        }
-
-        // Spawn new ball
-        GameObject ballObj = Instantiate(ballPrefab, spawnPosition, Quaternion.identity);
-        currentBall = ballObj.GetComponent<BallController>();
-
-        if (currentBall == null)
-        {
-            Debug.LogError("Ball prefab doesn't have BallController component!");
-            return;
-        }
-
-        // Subscribe to ball events for hold timer integration
-        SubscribeToBallEvents();
-
-        if (debugMode)
-        {
-            Debug.Log("Ball spawned at center with hold timer integration!");
-        }
-    }
-
-    void SubscribeToBallEvents()
-    {
-        // Note: In a real implementation, you might want to add events to BallController
-        // For now, we'll use the MonitorBallHoldState method in Update()
-
-        if (debugMode)
-        {
-            Debug.Log("Subscribed to ball events for hold timer integration");
-        }
-    }
-
-    /// <summary>
-    /// Request ball pickup - works with any character type
-    /// Now includes hold timer UI integration
-    /// </summary>
-    public void RequestBallPickup(PlayerCharacter character)
-    {
-        if (currentBall != null && gameActive)
-        {
-            bool success = currentBall.TryPickup(character);
-            if (success)
+            if (currentBall.photonView != null)
             {
-                // Ball pickup successful - timer is automatically started in BallController
-                if (enableHoldTimerUI && autoShowTimerOnPickup)
-                {
-                    ShowHoldTimerUI();
-                }
-
-                if (debugMode)
-                {
-                    string characterName = character.GetCharacterData()?.characterName ?? character.name;
-                    Debug.Log($"{characterName} successfully picked up the ball! Hold timer started.");
-                }
+                PhotonNetwork.Destroy(currentBall.gameObject);
+            }
+            else
+            {
+                Destroy(currentBall.gameObject);
             }
         }
+
+        // Network spawn ball
+        if (PhotonNetwork.IsMasterClient)
+        {
+            GameObject ballObj = PhotonNetwork.Instantiate(ballPrefab.name, spawnPosition, Quaternion.identity);
+            currentBall = ballObj.GetComponent<BallController>();
+            
+            // FIXED: Notify all clients about the new ball
+            photonView.RPC("RegisterBallOnClients", RpcTarget.Others, ballObj.GetPhotonView().ViewID);
+            
+            Debug.Log($"[BallManager] Master spawned ball with ViewID: {ballObj.GetPhotonView().ViewID}");
+        }
     }
 
     /// <summary>
-    /// LEGACY: For backward compatibility with old CharacterController
+    /// FIXED: RPC to register the ball on all clients
+    /// </summary>
+    [PunRPC]
+    void RegisterBallOnClients(int ballViewID)
+    {
+        // Find the ball by its PhotonView ID
+        PhotonView ballPhotonView = PhotonView.Find(ballViewID);
+        if (ballPhotonView != null)
+        {
+            currentBall = ballPhotonView.GetComponent<BallController>();
+            Debug.Log($"[BallManager] Client registered ball with ViewID: {ballViewID}");
+        }
+        else
+        {
+            Debug.LogError($"[BallManager] Could not find ball with ViewID: {ballViewID}");
+        }
+    }
+
+    /// <summary>
+    /// FIXED: Enhanced pickup request with better null checking
+    /// </summary>
+    public bool RequestBallPickup(PlayerCharacter character)
+    {
+        Debug.Log($"🏀 === BALLMANAGER PICKUP START === {character.name}");
+
+        // FIXED: Better null checking with helpful debug info
+        if (currentBall == null)
+        {
+            Debug.LogError($"❌ currentBall is NULL! Attempting to find ball...");
+            
+            // Try to find the ball one more time
+            BallController foundBall = FindObjectOfType<BallController>();
+            if (foundBall != null)
+            {
+                currentBall = foundBall;
+                Debug.Log($"✅ Found ball during pickup attempt: {currentBall.name}");
+            }
+            else
+            {
+                Debug.LogError($"❌ No ball found in scene at all!");
+                return false;
+            }
+        }
+
+        if (!currentBall.IsFree())
+        {
+            Debug.LogWarning($"❌ Ball not free - state: {currentBall.GetBallState()}");
+            return false;
+        }
+
+        // Check distance
+        float distance = Vector3.Distance(character.transform.position, currentBall.transform.position);
+        Debug.Log($"📏 BallManager distance check: {distance:F2}");
+
+        if (distance > 1.2f)
+        {
+            Debug.LogWarning($"❌ Distance too far in BallManager: {distance:F2} > 1.2");
+            return false;
+        }
+
+        PhotonView characterView = character.GetComponent<PhotonView>();
+        PhotonView ballView = currentBall.GetComponent<PhotonView>();
+
+        Debug.Log($"📡 BallManager PhotonView Analysis:");
+        Debug.Log($"  - Character PhotonView: {(characterView != null ? "EXISTS" : "NULL")}");
+        Debug.Log($"  - Ball PhotonView: {(ballView != null ? "EXISTS" : "NULL")}");
+
+        if (characterView != null)
+        {
+            Debug.Log($"  - Character ViewID: {characterView.ViewID}");
+            Debug.Log($"  - Character IsMine: {characterView.IsMine}");
+            Debug.Log($"  - Character Owner: {characterView.Owner?.NickName ?? "NULL"}");
+        }
+
+        if (ballView != null)
+        {
+            Debug.Log($"  - Ball ViewID: {ballView.ViewID}");
+            Debug.Log($"  - Ball IsMine: {ballView.IsMine}");
+            Debug.Log($"  - Ball Owner: {ballView.Owner?.NickName ?? "NULL"}");
+        }
+
+        if (characterView != null && characterView.IsMine && ballView != null)
+        {
+            Debug.Log($"✅ BallManager: This is our local player");
+
+            // If we don't own the ball, request ownership
+            if (!ballView.IsMine)
+            {
+                Debug.Log($"🔄 BallManager: Ball not owned locally, requesting ownership");
+                Debug.Log($"  - Ball owner before: {ballView.Owner?.NickName ?? "NULL"}");
+
+                ballView.RequestOwnership();
+
+                Debug.Log($"  - Ball owner after: {ballView.Owner?.NickName ?? "NULL"}");
+                Debug.Log($"  - Ball IsMine after: {ballView.IsMine}");
+                Debug.Log($"❌ BallManager: Returning false, will retry next frame");
+                return false;
+            }
+
+            Debug.Log($"✅ BallManager: We own the ball, proceeding to TryPickup");
+            bool result = currentBall.TryPickup(character);
+            Debug.Log($"🎯 BallManager: TryPickup result = {result}");
+            return result;
+        }
+        else
+        {
+            Debug.Log($"🎮 BallManager: Single player or master client mode");
+            bool result = currentBall.TryPickup(character);
+            Debug.Log($"🎯 BallManager: Single player TryPickup result = {result}");
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Legacy support for CharacterController
     /// </summary>
     public void RequestBallPickup(CharacterController character)
     {
         if (currentBall != null && gameActive)
         {
-            bool success = currentBall.TryPickupLegacy(character);
-            if (success)
+            if (PhotonNetwork.IsMasterClient)
             {
-                // Ball pickup successful - timer is automatically started in BallController
-                if (enableHoldTimerUI && autoShowTimerOnPickup)
+                bool success = currentBall.TryPickupLegacy(character);
+                if (success && enableHoldTimerUI && autoShowTimerOnPickup)
                 {
                     ShowHoldTimerUI();
                 }
-
-                if (debugMode)
-                {
-                    Debug.Log($"{character.name} successfully picked up the ball! Hold timer started.");
-                }
             }
         }
     }
 
     /// <summary>
-    /// NEW: Request ball throw with character data integration
-    /// This method gets damage from the character's data
-    /// Now includes hold timer UI integration
+    /// Request ball throw with character data and network authority
     /// </summary>
     public void RequestBallThrowWithCharacterData(PlayerCharacter thrower, CharacterData characterData, ThrowType throwType, int damage)
     {
-        if (currentBall != null && currentBall.GetHolder() == thrower)
+        if (currentBall == null || characterData == null) return;
+
+        if (currentBall.GetHolder() != thrower) return;
+
+        if (PhotonNetwork.IsMasterClient)
         {
-            // Hide hold timer UI before throwing
-            if (isTimerUIShown && autoHideTimerOnThrow)
+            ExecuteThrowOnMasterClient(thrower, characterData, throwType, damage);
+        }
+        else
+        {
+            // Non-master clients send throw request to Master Client
+            PhotonView throwerView = thrower.GetComponent<PhotonView>();
+            if (throwerView != null)
             {
-                HideHoldTimerUI();
+                photonView.RPC("RequestThrowFromMaster", RpcTarget.MasterClient,
+                             throwerView.ViewID, (int)throwType, damage);
             }
-
-            // Apply character-specific throw modifications
-            float throwSpeed = characterData.GetThrowSpeed(GetBaseThrowSpeed(throwType));
-            Vector3 direction = Vector3.right; // BallController will handle targeting
-
-            // Apply accuracy modifier
-            if (currentBall.GetCurrentTarget() != null)
-            {
-                Vector3 targetDir = (currentBall.GetCurrentTarget().position - currentBall.transform.position).normalized;
-                direction = characterData.ApplyThrowAccuracy(targetDir);
-            }
-
-            // Set ball damage and throw properties
-            currentBall.SetThrowData(throwType, damage, throwSpeed);
-
-            // Execute throw (this will automatically reset the hold timer in BallController)
-            currentBall.ThrowBall(direction, 1f);
-
-            // Apply throw effects using VFXManager
-            if (VFXManager.Instance != null)
-            {
-                VFXManager.Instance.SpawnThrowVFX(currentBall.transform.position, thrower, throwType);
-            }
-
-            if (debugMode)
-            {
-                Debug.Log($"{characterData.characterName} threw {throwType} ball: {damage} damage, {throwSpeed} speed. Hold timer stopped.");
-            }
-
-            // Schedule respawn if ball goes out of bounds
-            StartCoroutine(CheckForRespawn());
         }
     }
 
+    void ExecuteThrowOnMasterClient(PlayerCharacter thrower, CharacterData characterData, ThrowType throwType, int damage)
+    {
+        if (isTimerUIShown && autoHideTimerOnThrow)
+        {
+            HideHoldTimerUI();
+        }
+
+        float throwSpeed = characterData.GetThrowSpeed(GetBaseThrowSpeed(throwType));
+        Vector3 direction = Vector3.right;
+
+        // Find target for direction calculation
+        PlayerCharacter opponent = FindOpponent(thrower);
+        if (opponent != null)
+        {
+            Vector3 targetDir = (opponent.transform.position - currentBall.transform.position).normalized;
+            direction = characterData.ApplyThrowAccuracy(targetDir);
+        }
+
+        currentBall.SetThrowData(throwType, damage, throwSpeed);
+        currentBall.SetThrower(thrower);
+        currentBall.ThrowBall(direction, 1f);
+
+        // Apply VFX
+        if (VFXManager.Instance != null)
+        {
+            VFXManager.Instance.SpawnThrowVFX(currentBall.transform.position, thrower, throwType);
+        }
+
+        StartCoroutine(CheckForRespawn());
+    }
+
+    PlayerCharacter FindOpponent(PlayerCharacter thrower)
+    {
+        PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
+        foreach (PlayerCharacter player in allPlayers)
+        {
+            if (player != thrower)
+            {
+                return player;
+            }
+        }
+        return null;
+    }
+
     /// <summary>
-    /// LEGACY: Simplified throw method for backward compatibility
+    /// Legacy throw method
     /// </summary>
     public void RequestBallThrowSimple(PlayerCharacter thrower, float power = 1f)
     {
         if (currentBall != null && currentBall.GetHolder() == thrower)
         {
-            // Hide hold timer UI before throwing
-            if (isTimerUIShown && autoHideTimerOnThrow)
-            {
-                HideHoldTimerUI();
-            }
-
             CharacterData characterData = thrower.GetCharacterData();
             if (characterData != null)
             {
-                // Use character data for throw
                 ThrowType throwType = thrower.IsGrounded() ? ThrowType.Normal : ThrowType.JumpThrow;
                 int damage = characterData.GetThrowDamage(throwType);
                 RequestBallThrowWithCharacterData(thrower, characterData, throwType, damage);
             }
-            else
+            else if (PhotonNetwork.IsMasterClient)
             {
-                // Fallback to basic throw
+                if (isTimerUIShown && autoHideTimerOnThrow)
+                {
+                    HideHoldTimerUI();
+                }
                 currentBall.ThrowBall(Vector3.right, power);
                 StartCoroutine(CheckForRespawn());
             }
@@ -293,44 +381,34 @@ public class BallManager : MonoBehaviour
     }
 
     /// <summary>
-    /// LEGACY: For old CharacterController compatibility
+    /// Legacy CharacterController throw
     /// </summary>
     public void RequestBallThrowSimple(CharacterController thrower, float power = 1f)
     {
-        if (currentBall != null && currentBall.GetHolderLegacy() == thrower)
+        if (currentBall != null && currentBall.GetHolderLegacy() == thrower && PhotonNetwork.IsMasterClient)
         {
-            // Hide hold timer UI before throwing
             if (isTimerUIShown && autoHideTimerOnThrow)
             {
                 HideHoldTimerUI();
             }
-
-            // Basic throw without character data
             currentBall.ThrowBall(Vector3.right, power);
             StartCoroutine(CheckForRespawn());
         }
     }
 
-    /// <summary>
-    /// Get base throw speed based on throw type
-    /// </summary>
     float GetBaseThrowSpeed(ThrowType throwType)
     {
-        switch (throwType)
+        return throwType switch
         {
-            case ThrowType.Normal:
-                return 18f;
-            case ThrowType.JumpThrow:
-                return 22f;
-            case ThrowType.Ultimate:
-                return 25f;
-            default:
-                return 18f;
-        }
+            ThrowType.Normal => 18f,
+            ThrowType.JumpThrow => 22f,
+            ThrowType.Ultimate => 25f,
+            _ => 18f
+        };
     }
 
     /// <summary>
-    /// FIXED: Handle ultimate throws with new UltimateType enum
+    /// Handle ultimate throws
     /// </summary>
     public void RequestUltimateThrow(PlayerCharacter thrower, UltimateType ultimateType)
     {
@@ -344,38 +422,25 @@ public class BallManager : MonoBehaviour
         switch (ultimateType)
         {
             case UltimateType.PowerThrow:
-                // Single powerful throw
                 RequestBallThrowWithCharacterData(thrower, characterData, ThrowType.Ultimate, ultimateDamage);
                 break;
-
             case UltimateType.MultiThrow:
-                // Create multiple balls (implementation handled by PlayerCharacter)
-                StartCoroutine(MultiThrowCoroutine(thrower, characterData));
+                if (PhotonNetwork.IsMasterClient)
+                {
+                    StartCoroutine(MultiThrowCoroutine(thrower, characterData));
+                }
                 break;
-
             case UltimateType.Curveball:
-                // Enable curve behavior (implementation handled by PlayerCharacter)
                 RequestBallThrowWithCharacterData(thrower, characterData, ThrowType.Ultimate, ultimateDamage);
                 break;
-
             default:
-                // Default to power throw
                 RequestBallThrowWithCharacterData(thrower, characterData, ThrowType.Ultimate, ultimateDamage);
                 break;
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"{characterData.characterName} used ultimate: {ultimateType}");
         }
     }
 
-    /// <summary>
-    /// Handle multi-throw ultimate (called from RequestUltimateThrow)
-    /// </summary>
-    System.Collections.IEnumerator MultiThrowCoroutine(PlayerCharacter thrower, CharacterData characterData)
+    IEnumerator MultiThrowCoroutine(PlayerCharacter thrower, CharacterData characterData)
     {
-        // Hide hold timer UI for multi-throw
         if (isTimerUIShown)
         {
             HideHoldTimerUI();
@@ -387,72 +452,62 @@ public class BallManager : MonoBehaviour
 
         for (int i = 0; i < throwCount; i++)
         {
-            // Create a temporary ball for multi-throw
-            GameObject tempBallObj = Instantiate(ballPrefab, thrower.transform.position + Vector3.up * 1.5f, Quaternion.identity);
+            GameObject tempBallObj = PhotonNetwork.Instantiate(ballPrefab.name,
+                                                             thrower.transform.position + Vector3.up * 1.5f,
+                                                             Quaternion.identity);
             BallController tempBall = tempBallObj.GetComponent<BallController>();
 
             if (tempBall != null)
             {
                 tempBall.SetThrowData(ThrowType.Ultimate, damagePerBall, throwSpeed);
+                tempBall.SetThrower(thrower);
 
-                // Throw in spread pattern
                 float spreadAngle = characterData.GetMultiThrowSpread();
                 float angleOffset = (i - (throwCount - 1) * 0.5f) * (spreadAngle / throwCount);
                 Vector3 throwDir = Quaternion.Euler(0, angleOffset, 0) * Vector3.right;
                 throwDir.y = 0.1f;
 
                 tempBall.ThrowBall(throwDir.normalized, 1f);
+
+                // Auto-destroy temp balls after time
+                StartCoroutine(DestroyTempBall(tempBallObj, 4f));
             }
 
             yield return new WaitForSeconds(characterData.GetMultiThrowDelay());
         }
     }
 
+    IEnumerator DestroyTempBall(GameObject ballObj, float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        if (ballObj != null)
+        {
+            PhotonNetwork.Destroy(ballObj);
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════
-    // HOLD TIMER UI INTEGRATION METHODS
+    // HOLD TIMER UI INTEGRATION
     // ═══════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// Show the ball hold timer UI
-    /// </summary>
     void ShowHoldTimerUI()
     {
         if (BallHoldTimerUI.Instance != null && currentBall != null)
         {
             BallHoldTimerUI.Instance.ShowTimer(currentBall);
             isTimerUIShown = true;
-
-            if (debugMode)
-            {
-                Debug.Log("BallManager: Hold timer UI shown");
-            }
-        }
-        else if (debugMode)
-        {
-            Debug.LogWarning("BallManager: Cannot show hold timer UI - Instance or current ball is null");
         }
     }
 
-    /// <summary>
-    /// Hide the ball hold timer UI
-    /// </summary>
     void HideHoldTimerUI()
     {
         if (BallHoldTimerUI.Instance != null)
         {
             BallHoldTimerUI.Instance.HideTimer();
             isTimerUIShown = false;
-
-            if (debugMode)
-            {
-                Debug.Log("BallManager: Hold timer UI hidden");
-            }
         }
     }
 
-    /// <summary>
-    /// Force show hold timer UI (for debugging)
-    /// </summary>
     public void ForceShowHoldTimerUI()
     {
         if (currentBall != null && currentBall.IsHeld())
@@ -461,9 +516,6 @@ public class BallManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Force hide hold timer UI (for debugging)
-    /// </summary>
     public void ForceHideHoldTimerUI()
     {
         HideHoldTimerUI();
@@ -471,32 +523,28 @@ public class BallManager : MonoBehaviour
 
     public void ResetBall()
     {
-        if (currentBall != null)
+        if (PhotonNetwork.IsMasterClient && currentBall != null)
         {
-            // Hide timer UI before resetting
             if (isTimerUIShown)
             {
                 HideHoldTimerUI();
             }
-
             currentBall.ResetBall();
         }
-        else
+        else if (currentBall == null)
         {
             SpawnBall();
         }
     }
 
-    System.Collections.IEnumerator CheckForRespawn()
+    IEnumerator CheckForRespawn()
     {
         yield return new WaitForSeconds(respawnDelay);
 
-        // Check if ball is out of bounds or needs respawn
-        if (currentBall != null)
+        if (currentBall != null && PhotonNetwork.IsMasterClient)
         {
             Vector3 ballPos = currentBall.transform.position;
 
-            // If ball fell too low or went too far out
             if (ballPos.y < -3f || Mathf.Abs(ballPos.x) > 20f)
             {
                 SpawnBall();
@@ -505,33 +553,83 @@ public class BallManager : MonoBehaviour
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // PUBLIC GETTERS AND CONFIGURATION
+    // NETWORK RPC HANDLERS
     // ═══════════════════════════════════════════════════════════════
 
-    public BallController GetCurrentBall() => currentBall;
+    [PunRPC]
+    void RequestPickupFromMaster(int characterViewID)
+    {
+        if (!PhotonNetwork.IsMasterClient) return;
+
+        PhotonView characterView = PhotonView.Find(characterViewID);
+        PlayerCharacter character = characterView?.GetComponent<PlayerCharacter>();
+
+        if (character != null && currentBall != null)
+        {
+            bool success = currentBall.TryPickup(character);
+            if (success && enableHoldTimerUI && autoShowTimerOnPickup)
+            {
+                ShowHoldTimerUI();
+            }
+        }
+    }
+
+    [PunRPC]
+    void RequestThrowFromMaster(int throwerViewID, int throwType, int damage)
+    {
+        if (!PhotonNetwork.IsMasterClient) return;
+
+        PhotonView throwerView = PhotonView.Find(throwerViewID);
+        PlayerCharacter thrower = throwerView?.GetComponent<PlayerCharacter>();
+
+        if (thrower != null && currentBall != null)
+        {
+            CharacterData characterData = thrower.GetCharacterData();
+            if (characterData != null)
+            {
+                ExecuteThrowOnMasterClient(thrower, characterData, (ThrowType)throwType, damage);
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PUBLIC INTERFACE
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// FIXED: Enhanced GetCurrentBall with auto-find fallback
+    /// </summary>
+    public BallController GetCurrentBall()
+    {
+        // If we don't have a ball reference, try to find it
+        if (currentBall == null)
+        {
+            currentBall = FindObjectOfType<BallController>();
+            if (currentBall != null)
+            {
+                Debug.Log($"[BallManager] GetCurrentBall() found ball: {currentBall.name}");
+            }
+        }
+        return currentBall;
+    }
+    
     public bool HasActiveBall() => currentBall != null;
     public Vector3 GetBallSpawnPosition() => spawnPosition;
     public bool IsHoldTimerUIEnabled() => enableHoldTimerUI;
     public bool IsTimerUIShown() => isTimerUIShown;
 
-    // Game state control
     public void SetGameActive(bool active)
     {
         gameActive = active;
-
-        // Hide timer UI if game becomes inactive
         if (!active && isTimerUIShown)
         {
             HideHoldTimerUI();
         }
     }
 
-    // Hold timer UI configuration
     public void SetHoldTimerUIEnabled(bool enabled)
     {
         enableHoldTimerUI = enabled;
-
-        // Hide UI if being disabled
         if (!enabled && isTimerUIShown)
         {
             HideHoldTimerUI();
@@ -548,124 +646,87 @@ public class BallManager : MonoBehaviour
         autoHideTimerOnThrow = enabled;
     }
 
-    // Character registration for multiplayer
-    public void RegisterPlayer(int playerId, Transform playerTransform, PlayerCharacter playerCharacter, bool isLocal = true)
+    // ═══════════════════════════════════════════════════════════════
+    // PUN CALLBACKS
+    // ═══════════════════════════════════════════════════════════════
+
+    public override void OnMasterClientSwitched(Player newMasterClient)
     {
-        // TODO: Implement player registration for multiplayer
-        if (debugMode)
+        // If this client became Master Client, take control of ball spawning
+        if (PhotonNetwork.IsMasterClient && currentBall == null)
         {
-            string characterName = playerCharacter.GetCharacterData()?.characterName ?? "Unknown";
-            Debug.Log($"Registered player {playerId} ({characterName}) - Local: {isLocal}");
+            SpawnBall();
         }
     }
 
-    // Debug methods
-    void ShowCharacterDebugInfo()
+    public override void OnPlayerLeftRoom(Player otherPlayer)
     {
-        PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
-
-        Debug.Log("=== CHARACTER DEBUG INFO ===");
-        foreach (PlayerCharacter player in allPlayers)
+        // Handle player leaving - could trigger game end logic
+        if (PhotonNetwork.CurrentRoom.PlayerCount < 2)
         {
-            CharacterData data = player.GetCharacterData();
-            if (data != null)
-            {
-                Debug.Log($"{data.characterName}: HP={data.maxHealth}, Speed={data.moveSpeed}, " +
-                         $"Ultimate={data.ultimateType}, Trick={data.trickType}, Treat={data.treatType}");
-            }
-        }
-
-        // Show hold timer info
-        if (currentBall != null && currentBall.IsHeld())
-        {
-            Debug.Log($"=== BALL HOLD TIMER INFO ===");
-            Debug.Log($"Hold Duration: {currentBall.GetHoldDuration():F2}s");
-            Debug.Log($"Current Phase: {currentBall.GetCurrentHoldPhase()}");
-            Debug.Log($"Timer UI Shown: {isTimerUIShown}");
+            // Less than 2 players, might want to pause or end game
+            SetGameActive(false);
         }
     }
 
-    void OnDrawGizmosSelected()
+    // ═══════════════════════════════════════════════════════════════
+    // NETWORK BALL MANAGEMENT
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// FIXED: Called when a ball is spawned (by any means)
+    /// </summary>
+    public void OnBallSpawned(BallController ball)
     {
-        // Draw spawn position
-        Gizmos.color = Color.green;
-        Gizmos.DrawWireSphere(spawnPosition, 0.5f);
+        currentBall = ball;
+        Debug.Log($"[BallManager] Ball registered via OnBallSpawned: {ball.name}");
+    }
 
-        // Show character throw ranges (if ball exists)
-        if (currentBall != null)
-        {
-            PlayerCharacter holder = currentBall.GetHolder();
-            if (holder != null)
-            {
-                CharacterData data = holder.GetCharacterData();
-                if (data != null)
-                {
-                    // Visualize throw accuracy
-                    Gizmos.color = Color.yellow;
-                    float accuracy = data.throwAccuracy;
-                    Gizmos.DrawWireSphere(currentBall.transform.position, (1f - accuracy) * 2f);
-                }
-
-                // Visualize hold timer state
-                if (currentBall.IsHeld())
-                {
-                    float holdProgress = currentBall.GetHoldProgress();
-                    string phase = currentBall.GetCurrentHoldPhase();
-
-                    // Color based on hold timer phase
-                    Color timerColor = phase switch
-                    {
-                        "Warning" => Color.yellow,
-                        "Danger" => Color.red,
-                        "Penalty" => Color.magenta,
-                        _ => Color.green
-                    };
-
-                    Gizmos.color = timerColor;
-                    Gizmos.DrawWireSphere(currentBall.transform.position + Vector3.up * 2f, 0.3f + holdProgress * 0.3f);
-
-                    // Draw timer progress arc
-                    Gizmos.color = Color.white;
-                    Vector3 timerPos = currentBall.transform.position + Vector3.up * 2.5f;
-                    Gizmos.DrawWireSphere(timerPos, holdProgress * 0.5f);
-                }
-            }
-        }
-
-        // Draw UI state indicator
+    public void OnBallDestroyed()
+    {
         if (isTimerUIShown)
         {
-            Gizmos.color = Color.cyan;
-            Gizmos.DrawWireCube(transform.position + Vector3.up * 3f, Vector3.one * 0.2f);
+            HideHoldTimerUI();
         }
+        currentBall = null;
     }
-
+    
+    // ═══════════════════════════════════════════════════════════════
+    // DEBUG GUI
+    // ═══════════════════════════════════════════════════════════════
+    
     void OnGUI()
     {
-        if (!debugMode) return;
+        if (!Application.isPlaying) return;
 
-        GUILayout.BeginArea(new Rect(10, Screen.height - 150, 400, 140));
-        GUILayout.BeginVertical("box");
+        // BallManager debug panel (top right)
+        float x = Screen.width - 420;
+        GUI.Box(new Rect(x, 10, 400, 150), "BALLMANAGER DEBUG INFO");
 
-        GUILayout.Label("=== BALL MANAGER DEBUG ===");
-        GUILayout.Label($"Current Ball: {(currentBall != null ? "Active" : "None")}");
-        GUILayout.Label($"Game Active: {gameActive}");
-        GUILayout.Label($"Hold Timer UI: {(enableHoldTimerUI ? "Enabled" : "Disabled")}");
-        GUILayout.Label($"Timer UI Shown: {isTimerUIShown}");
-
+        float y = 30;
+        GUI.Label(new Rect(x + 10, y, 380, 20), $"IsMasterClient: {PhotonNetwork.IsMasterClient}");
+        y += 20;
+        GUI.Label(new Rect(x + 10, y, 380, 20), $"Current Ball: {(currentBall != null ? currentBall.name : "NULL")}");
+        y += 20;
+        
         if (currentBall != null)
         {
-            GUILayout.Label($"Ball State: {currentBall.GetBallState()}");
-
-            if (currentBall.IsHeld())
+            PhotonView ballPV = currentBall.GetComponent<PhotonView>();
+            if (ballPV != null)
             {
-                GUILayout.Label($"Hold Duration: {currentBall.GetHoldDuration():F1}s");
-                GUILayout.Label($"Hold Phase: {currentBall.GetCurrentHoldPhase()}");
-                GUILayout.Label($"Hold Progress: {currentBall.GetHoldProgress():P0}");
+                GUI.Label(new Rect(x + 10, y, 380, 20), $"Ball ViewID: {ballPV.ViewID}");
+                y += 20;
+                GUI.Label(new Rect(x + 10, y, 380, 20), $"Ball Owner: {ballPV.Owner?.NickName ?? "NULL"}");
+                y += 20;
+                GUI.Label(new Rect(x + 10, y, 380, 20), $"Ball IsMine: {ballPV.IsMine}");
+                y += 20;
             }
         }
+        
+        GUI.Label(new Rect(x + 10, y, 380, 20), $"Game Active: {gameActive}");
+        y += 20;
+        GUI.Label(new Rect(x + 10, y, 380, 20), $"Timer UI Shown: {isTimerUIShown}");
 
-        GUILayout.EndVertical();
-        GUILayout.EndArea();
+        //GUILayout.EndArea();
     }
 }

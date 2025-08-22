@@ -3492,7 +3492,7 @@ MonoBehaviour:
   maxPlayersPerRoom: 2
   connectionTimeout: 20
   matchmakingTimeout: 15
-  debugMode: 1
+  debugMode: 0
 --- !u!1 &980163797
 GameObject:
   m_ObjectHideFlags: 0

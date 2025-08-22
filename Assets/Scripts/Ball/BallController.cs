@@ -1,83 +1,59 @@
 ﻿using UnityEngine;
 using System.Collections;
+using Photon.Pun;
 
 /// <summary>
-/// Enhanced BallController with Complete Ball Hold Timer System
-/// Includes Warning Phase, Danger Phase, and Penalty Damage
-/// FIXED: Ball no longer gives damage immediately on pickup
+/// Network BallController with Master Client Authority
+/// Clean version with PUN2 networking and hold timer system
 /// </summary>
-public class BallController : MonoBehaviour
+public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 {
     [Header("Ball Settings")]
     [SerializeField] private float baseSpeed = 25f;
     [SerializeField] private float gravity = 15f;
     [SerializeField] private float pickupRange = 1.2f;
     [SerializeField] private float bounceMultiplier = 0.6f;
+    private bool lastOwnershipState = false;
 
-    [Header("Ball Hold Timer System")]
+    [Header("Ball Hold Timer")]
     [SerializeField] private float maxHoldTime = 5f;
     [SerializeField] private float warningStartTime = 3f;
     [SerializeField] private float dangerStartTime = 4f;
     [SerializeField] private float holdPenaltyDamage = 10f;
-    [SerializeField] private bool enableHoldTimer = true;
     [SerializeField] private bool resetBallOnPenalty = true;
-    [SerializeField] private float ballDropDelay = 0.5f; // Delay before ball drops/resets
 
-    [Header("Hold Timer Visual Effects")]
-    [SerializeField] private GameObject warningEffect;
-    [SerializeField] private GameObject dangerEffect;
-    [SerializeField] private GameObject corruptionEffect;
+    [Header("Hold Timer Effects")]
     [SerializeField] private Color warningColor = Color.yellow;
     [SerializeField] private Color dangerColor = Color.red;
     [SerializeField] private Color corruptionColor = Color.magenta;
-
-    [Header("Hold Timer Audio")]
     [SerializeField] private AudioClip warningSound;
     [SerializeField] private AudioClip dangerSound;
     [SerializeField] private AudioClip corruptionSound;
-    [SerializeField] private AudioClip tickSound;
 
-    [Header("NEO GEO 1996 Authentic Physics")]
-    [SerializeField] private float normalThrowSpeed = 18f;
-    [SerializeField] private float jumpThrowSpeed = 22f;
-    [SerializeField] private bool useNeoGeoPhysics = true;
-
-    [Header("Ball Hold Position")]
+    [Header("Ball Position")]
     [SerializeField] private Vector3 holdOffset = new Vector3(0.5f, 1.5f, 0f);
-    [SerializeField] private bool useRelativeToPlayer = true;
     [SerializeField] private float holdFollowSpeed = 10f;
-    [SerializeField] private bool smoothHoldMovement = true;
 
-    [Header("Wall & Bounds Collision")]
-    [SerializeField] private bool enableWallCollision = true;
+    [Header("Arena Bounds")]
     [SerializeField] private float arenaLeftBound = -12f;
     [SerializeField] private float arenaRightBound = 12f;
     [SerializeField] private float arenaTopBound = 8f;
     [SerializeField] private float arenaBottomBound = -2f;
     [SerializeField] private float wallBounceMultiplier = 0.75f;
-    [SerializeField] private float energyLossOnBounce = 0.1f;
     [SerializeField] private int maxWallBounces = 3;
-
-    [Header("Wall Collision Effects")]
-    [SerializeField] private GameObject wallBounceEffect;
-    [SerializeField] private AudioClip wallBounceSound;
-    [SerializeField] private bool enableWallShake = true;
-
-    [Header("Ultimate Ball VFX")]
-    private GameObject ultimateBallVFXInstance; // Track the VFX instance
-    private bool hasUltimateBallVFX = false;
-
-    // Wall collision state
-    private int currentWallBounces = 0;
-    private bool hasHitWallThisFrame = false;
 
     [Header("Visual Settings")]
     [SerializeField] private float rotationSpeed = 360f;
     [SerializeField] private Color availableColor = Color.white;
     [SerializeField] private Color heldColor = Color.yellow;
 
-    [Header("Debug")]
-    [SerializeField] private bool debugMode = true;
+    [Header("Network Settings")]
+    [SerializeField] private float positionLerpRate = 15f;
+    [SerializeField] private float velocityLerpRate = 10f;
+
+    private float lastOwnershipCheck = 0f;
+    private bool wasOwned = false;
+    private float lastRetryLog = 0f;
 
     // Ball state
     public enum BallState { Free, Held, Thrown }
@@ -87,42 +63,41 @@ public class BallController : MonoBehaviour
     private int currentDamage = 10;
     private float currentThrowSpeed = 18f;
 
-    // Ball Hold Timer State - FIXED VARIABLES
+    // Network sync variables
+    private Vector3 networkPosition;
+    private Vector3 networkVelocity;
+    private BallState networkBallState;
+    private int networkHolderID = -1;
+    private int networkThrowerID = -1;
+    private bool hasNetworkAuthority = false;
+
+    // Hold timer state
     private float ballHoldStartTime = 0f;
     private bool isShowingWarning = false;
     private bool isInDangerPhase = false;
-    private bool hasAppliedPenalty = false; // Changed: Only apply penalty once
+    private bool hasAppliedPenalty = false;
     private Coroutine ballDropCoroutine;
 
-    // Physics
+    // Physics and state
     public Vector3 velocity;
     private bool isGrounded = false;
-    private bool hasHitTarget = false;
     private bool homingEnabled = false;
+    private int currentWallBounces = 0;
 
     // References
     private Transform ballTransform;
     private Renderer ballRenderer;
     private CollisionDamageSystem collisionSystem;
     private AudioSource audioSource;
-
-    // Character system integration
     private PlayerCharacter holder;
-    private CharacterController legacyHolder;
     private PlayerCharacter thrower;
-    private CharacterController legacyThrower;
     private Transform targetOpponent;
-    private bool isJumpThrow = false;
+    private Color originalBallColor;
 
     // Ground detection
     [SerializeField] private LayerMask groundLayer = 1;
     [SerializeField] private float groundCheckDistance = 0.6f;
 
-    // Visual effects for hold timer
-    private GameObject activeWarningEffect;
-    private GameObject activeDangerEffect;
-    private GameObject activeCorruptionEffect;
-    private Color originalBallColor;
 
     void Awake()
     {
@@ -130,7 +105,6 @@ public class BallController : MonoBehaviour
         ballRenderer = GetComponent<Renderer>();
         audioSource = GetComponent<AudioSource>();
 
-        // Setup audio source
         if (audioSource == null)
         {
             audioSource = gameObject.AddComponent<AudioSource>();
@@ -138,14 +112,18 @@ public class BallController : MonoBehaviour
             audioSource.volume = 0.7f;
         }
 
-        // Setup collision damage system
+        if (photonView != null)
+        {
+            photonView.OwnershipTransfer = OwnershipOption.Takeover;
+            Debug.Log("Ball PhotonView set to Takeover ownership");
+        }
+
         collisionSystem = GetComponent<CollisionDamageSystem>();
         if (collisionSystem == null)
         {
             collisionSystem = gameObject.AddComponent<CollisionDamageSystem>();
         }
 
-        // Ensure ball has a collider
         if (GetComponent<Collider>() == null)
         {
             SphereCollider ballCollider = gameObject.AddComponent<SphereCollider>();
@@ -153,7 +131,6 @@ public class BallController : MonoBehaviour
             ballCollider.isTrigger = false;
         }
 
-        // Store original ball color
         if (ballRenderer != null)
         {
             originalBallColor = ballRenderer.material.color;
@@ -164,6 +141,88 @@ public class BallController : MonoBehaviour
 
     void Update()
     {
+        // Store previous authority state for change detection
+        bool previousAuthority = hasNetworkAuthority;
+
+        // FIXED: Network authority is based on PhotonView ownership
+        hasNetworkAuthority = photonView.IsMine;
+
+        // Log authority changes
+        if (hasNetworkAuthority != previousAuthority)
+        {
+            Debug.Log($"🔄 AUTHORITY CHANGED: {previousAuthority} → {hasNetworkAuthority}");
+            Debug.Log($"  - photonView.IsMine: {photonView.IsMine}");
+            Debug.Log($"  - photonView.Owner: {photonView.Owner?.NickName ?? "NULL"}");
+            Debug.Log($"  - Local Player: {PhotonNetwork.LocalPlayer?.NickName ?? "NULL"}");
+        }
+
+        if (hasNetworkAuthority)
+        {
+            // We own this ball - run full ball logic
+            HandleBallLogic();
+        }
+        else
+        {
+            // We don't own this ball - interpolate to network state
+            InterpolateBallPosition();
+            ApplyNetworkState();
+        }
+
+        // All clients handle visuals
+        UpdateVisuals();
+
+        // Check for ownership changes and retry pickup
+        CheckForPickupRetry();
+    }
+
+    void CheckForPickupRetry()
+    {
+        bool nowOwned = photonView.IsMine;
+
+        // Log ownership state every 2 seconds when ball is free
+        if (Time.time - lastRetryLog > 2f && currentState == BallState.Free)
+        {
+            Debug.Log($"🔍 Ball Status Check:");
+            Debug.Log($"  - Owner: {photonView.Owner?.NickName ?? "NULL"}");
+            Debug.Log($"  - IsMine: {photonView.IsMine}");
+            Debug.Log($"  - hasNetworkAuthority: {hasNetworkAuthority}");
+            Debug.Log($"  - State: {currentState}");
+            lastRetryLog = Time.time;
+        }
+
+        // If we just gained ownership, check if a local player wants to pick up
+        if (nowOwned && !wasOwned && currentState == BallState.Free)
+        {
+            Debug.Log($"🔄 OWNERSHIP GAINED - checking for local players wanting pickup");
+
+            // Check if any local player is close enough to pick up
+            PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
+            Debug.Log($"📊 Found {allPlayers.Length} players in scene");
+
+            foreach (PlayerCharacter player in allPlayers)
+            {
+                PhotonView playerView = player.GetComponent<PhotonView>();
+                if (playerView != null)
+                {
+                    float distance = Vector3.Distance(ballTransform.position, player.transform.position);
+                    Debug.Log($"  - {player.name}: IsMine={playerView.IsMine}, HasBall={player.HasBall()}, Distance={distance:F2}");
+
+                    if (playerView.IsMine && !player.HasBall() && distance <= pickupRange)
+                    {
+                        Debug.Log($"🔄 AUTO-RETRYING pickup for {player.name} after ownership transfer");
+                        bool success = TryPickup(player);
+                        Debug.Log($"🔄 Auto-retry result: {(success ? "SUCCESS" : "FAILED")}");
+                        if (success) break;
+                    }
+                }
+            }
+        }
+
+        wasOwned = nowOwned;
+    }
+
+    void HandleBallLogic()
+    {
         switch (currentState)
         {
             case BallState.Free:
@@ -171,57 +230,44 @@ public class BallController : MonoBehaviour
                 break;
             case BallState.Held:
                 HandleHeldBall();
-                if (enableHoldTimer)
-                {
-                    UpdateBallHoldTimer();
-                }
+                UpdateBallHoldTimer();
                 break;
             case BallState.Thrown:
                 HandleThrownBall();
                 break;
         }
-
-        CheckPickupRange();
-        UpdateVisuals();
     }
 
     void HandleFreeBall()
     {
-        // Apply gravity when ball is FREE
         if (!isGrounded)
         {
             velocity.y -= gravity * Time.deltaTime;
         }
         else
         {
-            // Ball bounces or comes to rest
             if (velocity.y < -1f)
             {
                 velocity.y = -velocity.y * bounceMultiplier;
-                if (velocity.y < 2f)
-                {
-                    velocity.y = 0f;
-                }
+                if (velocity.y < 2f) velocity.y = 0f;
             }
             else
             {
                 velocity.y = 0f;
             }
 
-            // Apply friction on ground
             velocity.x *= 0.95f;
             velocity.z *= 0.95f;
         }
 
-        // Move the ball
         ballTransform.Translate(velocity * Time.deltaTime, Space.World);
         CheckGrounded();
     }
 
     void HandleHeldBall()
     {
-        // Support both new PlayerCharacter and legacy CharacterController
         Transform holderTransform = null;
+
         if (holder != null)
         {
             holderTransform = holder.transform;
@@ -233,17 +279,8 @@ public class BallController : MonoBehaviour
 
         if (holderTransform != null)
         {
-            Vector3 holdPosition = CalculateHoldPosition(holderTransform);
-
-            if (smoothHoldMovement)
-            {
-                ballTransform.position = Vector3.Lerp(ballTransform.position, holdPosition, holdFollowSpeed * Time.deltaTime);
-            }
-            else
-            {
-                ballTransform.position = holdPosition;
-            }
-
+            Vector3 holdPosition = holderTransform.position + holdOffset;
+            ballTransform.position = Vector3.Lerp(ballTransform.position, holdPosition, holdFollowSpeed * Time.deltaTime);
             velocity = Vector3.zero;
         }
         else
@@ -252,46 +289,18 @@ public class BallController : MonoBehaviour
         }
     }
 
-    Vector3 CalculateHoldPosition(Transform holderTransform)
-    {
-        Vector3 basePosition = holderTransform.position;
-
-        if (useRelativeToPlayer)
-        {
-            Vector3 holdPosition = basePosition;
-            holdPosition += holderTransform.right * holdOffset.x;
-            holdPosition += Vector3.up * holdOffset.y;
-            holdPosition += holderTransform.forward * holdOffset.z;
-            return holdPosition;
-        }
-        else
-        {
-            return basePosition + holdOffset;
-        }
-    }
-
     void HandleThrownBall()
     {
-        // Existing Neo Geo physics
-        if (useNeoGeoPhysics)
+        if (homingEnabled && targetOpponent != null)
         {
-            HandleNeoGeoPhysics();
+            Vector3 directionToTarget = (targetOpponent.position - ballTransform.position).normalized;
+            velocity = Vector3.Slerp(velocity, directionToTarget * velocity.magnitude, 2f * Time.deltaTime);
         }
 
-        // Existing homing behavior
-        if (homingEnabled)
-        {
-            ApplyHomingBehavior();
-        }
-
-        // NEW: Check for wall collisions
         CheckWallCollisions();
-
-        // Move the ball (existing logic)
         ballTransform.Translate(velocity * Time.deltaTime, Space.World);
-
-        // Existing ground collision
         CheckGrounded();
+
         if (isGrounded && velocity.y <= 0)
         {
             velocity.y = -velocity.y * bounceMultiplier;
@@ -301,7 +310,6 @@ public class BallController : MonoBehaviour
             }
         }
 
-        // Enhanced out-of-bounds check
         if (ballTransform.position.y < arenaBottomBound - 3f)
         {
             ResetBall();
@@ -310,288 +318,108 @@ public class BallController : MonoBehaviour
 
     void CheckWallCollisions()
     {
-        if (!enableWallCollision || currentState != BallState.Thrown) return;
-        if (velocity.magnitude < 0.1f || hasHitWallThisFrame) return;
+        if (velocity.magnitude < 0.1f || currentWallBounces >= maxWallBounces) return;
 
         Vector3 currentPos = ballTransform.position;
         Vector3 nextPos = currentPos + velocity * Time.deltaTime;
 
-        // Left wall
-        if (currentPos.x > arenaLeftBound && nextPos.x <= arenaLeftBound)
+        if ((currentPos.x > arenaLeftBound && nextPos.x <= arenaLeftBound) ||
+            (currentPos.x < arenaRightBound && nextPos.x >= arenaRightBound))
         {
-            HandleWallBounce("Left");
-        }
-        // Right wall
-        else if (currentPos.x < arenaRightBound && nextPos.x >= arenaRightBound)
-        {
-            HandleWallBounce("Right");
-        }
-        // Top wall
-        else if (currentPos.y < arenaTopBound && nextPos.y >= arenaTopBound)
-        {
-            HandleWallBounce("Top");
-        }
-        // Bottom wall
-        else if (currentPos.y > arenaBottomBound && nextPos.y <= arenaBottomBound)
-        {
-            HandleWallBounce("Bottom");
+            velocity.x = -velocity.x * wallBounceMultiplier;
+            currentWallBounces++;
         }
 
-        hasHitWallThisFrame = false;
-    }
-
-    void HandleWallBounce(string wallType)
-    {
-        hasHitWallThisFrame = true;
-        currentWallBounces++;
-
-        switch (wallType)
+        if ((currentPos.y < arenaTopBound && nextPos.y >= arenaTopBound) ||
+            (currentPos.y > arenaBottomBound && nextPos.y <= arenaBottomBound))
         {
-            case "Left":
-                ballTransform.position = new Vector3(arenaLeftBound, ballTransform.position.y, ballTransform.position.z);
-                velocity.x = -velocity.x * wallBounceMultiplier;
-                break;
-            case "Right":
-                ballTransform.position = new Vector3(arenaRightBound, ballTransform.position.y, ballTransform.position.z);
-                velocity.x = -velocity.x * wallBounceMultiplier;
-                break;
-            case "Top":
-                ballTransform.position = new Vector3(ballTransform.position.x, arenaTopBound, ballTransform.position.z);
-                velocity.y = -velocity.y * wallBounceMultiplier;
-                break;
-            case "Bottom":
-                ballTransform.position = new Vector3(ballTransform.position.x, arenaBottomBound, ballTransform.position.z);
-                velocity.y = -velocity.y * wallBounceMultiplier * 0.8f;
-                break;
+            velocity.y = -velocity.y * wallBounceMultiplier;
+            currentWallBounces++;
         }
 
-        // Apply energy loss
-        velocity *= (1f - energyLossOnBounce);
-
-        // Add slight randomness
-        velocity += new Vector3(Random.Range(-0.5f, 0.5f), Random.Range(-0.5f, 0.5f), 0);
-
-        // Effects
-        PlayWallBounceEffects(wallType);
-
-        // Stop bouncing if too many bounces or too slow
         if (currentWallBounces >= maxWallBounces || velocity.magnitude < 2f)
         {
             SetBallState(BallState.Free);
             currentWallBounces = 0;
         }
-
-        if (debugMode)
-        {
-            Debug.Log($"⚡ Wall Bounce: {wallType} | Velocity: {velocity.magnitude:F1} | Bounces: {currentWallBounces}");
-        }
-    }
-
-    void PlayWallBounceEffects(string wallType)
-    {
-        // Play sound
-        if (wallBounceSound != null && audioSource != null)
-        {
-            audioSource.PlayOneShot(wallBounceSound, 0.5f);
-        }
-
-        // Screen shake
-        if (enableWallShake)
-        {
-            CameraController camera = FindObjectOfType<CameraController>();
-            if (camera != null)
-            {
-                camera.ShakeCamera(0.2f, 0.15f);
-            }
-        }
-
-        // Spawn effect
-        if (wallBounceEffect != null)
-        {
-            GameObject effect = Instantiate(wallBounceEffect, ballTransform.position, Quaternion.identity);
-            Destroy(effect, 2f);
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // BALL HOLD TIMER SYSTEM - FIXED IMPLEMENTATION
+    // BALL HOLD TIMER SYSTEM
     // ═══════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// Main ball hold timer update - called every frame when ball is held
-    /// FIXED: Now properly checks hold duration and prevents immediate damage
-    /// </summary>
     void UpdateBallHoldTimer()
     {
         if (currentState != BallState.Held || ballHoldStartTime == 0f) return;
 
-        float holdDuration = GetHoldDuration();
+        float holdDuration = Time.time - ballHoldStartTime;
 
-        // Warning Phase (3-4 seconds) - only trigger once
         if (holdDuration >= warningStartTime && !isShowingWarning && !isInDangerPhase && !hasAppliedPenalty)
         {
             StartWarningPhase();
         }
 
-        // Danger Phase (4-5 seconds) - only trigger once
         if (holdDuration >= dangerStartTime && !isInDangerPhase && !hasAppliedPenalty)
         {
             StartDangerPhase();
         }
 
-        // Penalty Phase (5+ seconds) - only trigger once
         if (holdDuration >= maxHoldTime && !hasAppliedPenalty)
         {
             StartPenaltyPhase();
         }
 
-        // Update visual effects
         UpdateHoldTimerVisuals(holdDuration);
-
-        if (debugMode && Time.frameCount % 60 == 0) // Log once per second
-        {
-            Debug.Log($"Ball Hold Timer: {holdDuration:F1}s | Warning: {isShowingWarning} | Danger: {isInDangerPhase} | Penalty: {hasAppliedPenalty}");
-        }
     }
 
-    /// <summary>
-    /// Start the warning phase (3-4 seconds)
-    /// </summary>
     void StartWarningPhase()
     {
         isShowingWarning = true;
-
-        // Play warning sound
         PlayHoldTimerSound(warningSound);
 
-        // Create warning visual effect
-        if (warningEffect != null)
-        {
-            activeWarningEffect = Instantiate(warningEffect, ballTransform.position, Quaternion.identity);
-            activeWarningEffect.transform.SetParent(ballTransform);
-        }
-
-        // Change ball color to warning
         if (ballRenderer != null)
-        {
             ballRenderer.material.color = warningColor;
-        }
 
-        // Notify UI systems
         BallHoldTimerUI.Instance?.ShowWarning(this);
-
-        if (debugMode)
-        {
-            Debug.Log("🟡 Ball Hold Timer: WARNING PHASE STARTED");
-        }
     }
 
-    /// <summary>
-    /// Start the danger phase (4-5 seconds)
-    /// </summary>
     void StartDangerPhase()
     {
         isInDangerPhase = true;
-
-        // Stop warning effects
-        if (activeWarningEffect != null)
-        {
-            Destroy(activeWarningEffect);
-        }
-
-        // Play danger sound
         PlayHoldTimerSound(dangerSound);
 
-        // Create danger visual effect
-        if (dangerEffect != null)
-        {
-            activeDangerEffect = Instantiate(dangerEffect, ballTransform.position, Quaternion.identity);
-            activeDangerEffect.transform.SetParent(ballTransform);
-        }
-
-        // Change ball color to danger
         if (ballRenderer != null)
-        {
             ballRenderer.material.color = dangerColor;
-        }
 
-        // Notify UI systems
         BallHoldTimerUI.Instance?.ShowDanger(this);
 
-        // Screen shake warning
         CameraController cameraController = FindObjectOfType<CameraController>();
         if (cameraController != null)
-        {
             cameraController.ShakeCamera(0.2f, 0.3f);
-        }
-
-        if (debugMode)
-        {
-            Debug.Log("🔶 Ball Hold Timer: DANGER PHASE STARTED");
-        }
     }
 
-    /// <summary>
-    /// Start the penalty phase (5+ seconds) - one-time damage and ball drop
-    /// </summary>
     void StartPenaltyPhase()
     {
         hasAppliedPenalty = true;
-
-        // Stop danger effects
-        if (activeDangerEffect != null)
-        {
-            Destroy(activeDangerEffect);
-        }
-
-        // Play corruption sound
         PlayHoldTimerSound(corruptionSound);
 
-        // Create corruption visual effect
-        if (corruptionEffect != null)
-        {
-            activeCorruptionEffect = Instantiate(corruptionEffect, ballTransform.position, Quaternion.identity);
-            activeCorruptionEffect.transform.SetParent(ballTransform);
-        }
-
-        // Change ball color to corruption
         if (ballRenderer != null)
-        {
             ballRenderer.material.color = corruptionColor;
-        }
 
-        // Apply ONE-TIME penalty damage
         ApplyOneTimePenalty();
-
-        // Notify UI systems
         BallHoldTimerUI.Instance?.ShowPenalty(this);
 
-        // Strong screen shake
         CameraController cameraController = FindObjectOfType<CameraController>();
         if (cameraController != null)
-        {
             cameraController.ShakeCamera(0.8f, 0.8f);
-        }
 
-        if (debugMode)
-        {
-            Debug.Log("🔴 Ball Hold Timer: PENALTY PHASE - One-time damage applied!");
-        }
-
-        // Start ball drop/reset after delay
         if (ballDropCoroutine != null)
-        {
             StopCoroutine(ballDropCoroutine);
-        }
         ballDropCoroutine = StartCoroutine(DropBallAfterDelay());
     }
 
-    /// <summary>
-    /// Apply one-time penalty damage and prepare to drop ball
-    /// </summary>
     void ApplyOneTimePenalty()
     {
-        // Apply damage to ball holder
         if (holder != null)
         {
             PlayerHealth holderHealth = holder.GetComponent<PlayerHealth>();
@@ -599,11 +427,6 @@ public class BallController : MonoBehaviour
             {
                 int damage = Mathf.RoundToInt(holdPenaltyDamage);
                 holderHealth.TakeDamage(damage, null);
-
-                if (debugMode)
-                {
-                    Debug.Log($"💀 Ball Hold Penalty: {damage} damage to {holder.name} - Ball will be dropped!");
-                }
             }
         }
         else if (legacyHolder != null)
@@ -613,61 +436,26 @@ public class BallController : MonoBehaviour
             {
                 int damage = Mathf.RoundToInt(holdPenaltyDamage);
                 holderHealth.TakeDamage(damage, legacyHolder);
-
-                if (debugMode)
-                {
-                    Debug.Log($"💀 Ball Hold Penalty: {damage} damage to {legacyHolder.name} - Ball will be dropped!");
-                }
             }
-        }
-
-        // Extra screen shake for impact
-        CameraController cameraController = FindObjectOfType<CameraController>();
-        if (cameraController != null)
-        {
-            cameraController.ShakeCamera(0.5f, 0.3f);
         }
     }
 
-    /// <summary>
-    /// Coroutine to drop/reset ball after penalty delay
-    /// </summary>
-    System.Collections.IEnumerator DropBallAfterDelay()
+    IEnumerator DropBallAfterDelay()
     {
-        yield return new WaitForSeconds(ballDropDelay);
-
-        if (debugMode)
-        {
-            Debug.Log("⚡ Ball Hold Penalty: Dropping ball due to excessive hold time!");
-        }
-
-        // Show effect before dropping
-        if (activeCorruptionEffect != null)
-        {
-            // Make corruption effect more intense before ball drops
-            activeCorruptionEffect.transform.localScale *= 2f;
-        }
-
-        yield return new WaitForSeconds(0.2f);
+        yield return new WaitForSeconds(0.5f);
 
         if (resetBallOnPenalty)
         {
-            // Reset ball to center
             ResetBall();
         }
         else
         {
-            // Just drop the ball where the player is
             DropBall();
         }
     }
 
-    /// <summary>
-    /// Drop the ball at current location (alternative to reset)
-    /// </summary>
     void DropBall()
     {
-        // Release from holder
         if (holder != null)
         {
             holder.SetHasBall(false);
@@ -679,438 +467,546 @@ public class BallController : MonoBehaviour
             legacyHolder = null;
         }
 
-        // Add some random velocity so ball doesn't just sit there
-        velocity = new Vector3(
-            Random.Range(-3f, 3f),
-            Random.Range(2f, 4f),
-            Random.Range(-3f, 3f)
-        );
-
+        velocity = new Vector3(Random.Range(-3f, 3f), Random.Range(2f, 4f), Random.Range(-3f, 3f));
         SetBallState(BallState.Free);
-
-        if (debugMode)
-        {
-            Debug.Log("Ball dropped due to hold penalty!");
-        }
     }
 
-    /// <summary>
-    /// Update visual effects based on hold duration
-    /// </summary>
     void UpdateHoldTimerVisuals(float holdDuration)
     {
         if (ballRenderer == null) return;
 
-        // Pulsing effect during warning/danger phases
         if (isShowingWarning && !isInDangerPhase)
         {
-            // Yellow warning pulse
             float pulse = Mathf.Sin(Time.time * 4f) * 0.3f + 0.7f;
             ballRenderer.material.color = Color.Lerp(heldColor, warningColor, pulse);
         }
         else if (isInDangerPhase && !hasAppliedPenalty)
         {
-            // Red danger pulse (faster)
             float pulse = Mathf.Sin(Time.time * 8f) * 0.4f + 0.6f;
             ballRenderer.material.color = Color.Lerp(warningColor, dangerColor, pulse);
         }
         else if (hasAppliedPenalty)
         {
-            // Corruption pulse (very fast) - more intense
             float pulse = Mathf.Sin(Time.time * 15f) * 0.6f + 0.4f;
             ballRenderer.material.color = Color.Lerp(dangerColor, corruptionColor, pulse);
         }
     }
 
-    /// <summary>
-    /// Reset all hold timer states - FIXED VERSION
-    /// </summary>
     void ResetHoldTimer()
     {
-        // FIXED: Don't reset ballHoldStartTime here, only reset state flags
         isShowingWarning = false;
         isInDangerPhase = false;
         hasAppliedPenalty = false;
 
-        // Stop any running ball drop coroutine
         if (ballDropCoroutine != null)
         {
             StopCoroutine(ballDropCoroutine);
             ballDropCoroutine = null;
         }
 
-        // Clean up visual effects
-        if (activeWarningEffect != null)
-        {
-            Destroy(activeWarningEffect);
-            activeWarningEffect = null;
-        }
-
-        if (activeDangerEffect != null)
-        {
-            Destroy(activeDangerEffect);
-            activeDangerEffect = null;
-        }
-
-        if (activeCorruptionEffect != null)
-        {
-            Destroy(activeCorruptionEffect);
-            activeCorruptionEffect = null;
-        }
-
-        // Reset ball color
         if (ballRenderer != null)
-        {
             ballRenderer.material.color = originalBallColor;
-        }
 
-        // Notify UI systems
         BallHoldTimerUI.Instance?.HideTimer();
-
-        if (debugMode)
-        {
-            Debug.Log("⚪ Ball Hold Timer: RESET");
-        }
     }
 
-    /// <summary>
-    /// Completely stop and reset the hold timer - FIXED VERSION
-    /// </summary>
     void StopHoldTimer()
     {
         ballHoldStartTime = 0f;
         ResetHoldTimer();
-
-        if (debugMode)
-        {
-            Debug.Log("⏹️ Ball Hold Timer: STOPPED");
-        }
-    }
-
-    /// <summary>
-    /// Get current hold duration - FIXED VERSION
-    /// </summary>
-    public float GetHoldDuration()
-    {
-        if (currentState != BallState.Held || ballHoldStartTime == 0f) return 0f;
-        return Time.time - ballHoldStartTime;
-    }
-
-    /// <summary>
-    /// Get hold timer progress (0-1)
-    /// </summary>
-    public float GetHoldProgress()
-    {
-        if (currentState != BallState.Held || ballHoldStartTime == 0f) return 0f;
-        return Mathf.Clamp01(GetHoldDuration() / maxHoldTime);
-    }
-
-    /// <summary>
-    /// Check which phase we're in
-    /// </summary>
-    public string GetCurrentHoldPhase()
-    {
-        if (currentState != BallState.Held) return "None";
-        if (hasAppliedPenalty) return "Penalty";
-        if (isInDangerPhase) return "Danger";
-        if (isShowingWarning) return "Warning";
-        return "Normal";
-    }
-
-    /// <summary>
-    /// Play hold timer sound effect
-    /// </summary>
-    void PlayHoldTimerSound(AudioClip clip)
-    {
-        if (audioSource != null && clip != null)
-        {
-            audioSource.PlayOneShot(clip);
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // EXISTING BALL CONTROLLER METHODS (FIXED for Hold Timer)
+    // NETWORK SYNCHRONIZATION
+    // ═══════════════════════════════════════════════════════════════
+
+    void InterpolateBallPosition()
+    {
+        if (hasNetworkAuthority) return;
+
+        float distance = Vector3.Distance(ballTransform.position, networkPosition);
+
+        if (distance > 5f)
+        {
+            ballTransform.position = networkPosition;
+            velocity = networkVelocity;
+        }
+        else if (distance > 0.1f)
+        {
+            float positionLerp = Time.deltaTime * positionLerpRate;
+            ballTransform.position = Vector3.Lerp(ballTransform.position, networkPosition, positionLerp);
+
+            float velocityLerp = Time.deltaTime * velocityLerpRate;
+            velocity = Vector3.Lerp(velocity, networkVelocity, velocityLerp);
+        }
+    }
+
+    void ApplyNetworkState()
+    {
+        if (hasNetworkAuthority) return;
+
+        if (networkBallState != currentState)
+        {
+            SetBallState(networkBallState);
+        }
+
+        if (networkHolderID != -1)
+        {
+            UpdateHolderFromNetwork(networkHolderID);
+        }
+
+        if (networkThrowerID != -1)
+        {
+            UpdateThrowerFromNetwork(networkThrowerID);
+        }
+    }
+
+    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+    {
+        if (stream.IsWriting && hasNetworkAuthority)
+        {
+            // Master Client: Send ball data
+            stream.SendNext(ballTransform.position);
+            stream.SendNext(velocity);
+            stream.SendNext((int)currentState);
+            stream.SendNext(GetHolderID());
+            stream.SendNext(GetThrowerID());
+            stream.SendNext(currentDamage);
+            stream.SendNext((int)currentThrowType);
+            stream.SendNext(Time.time);
+        }
+        else if (stream.IsReading)
+        {
+            // Other clients: Receive ball data
+            networkPosition = (Vector3)stream.ReceiveNext();
+            networkVelocity = (Vector3)stream.ReceiveNext();
+            networkBallState = (BallState)stream.ReceiveNext();
+            networkHolderID = (int)stream.ReceiveNext();
+            networkThrowerID = (int)stream.ReceiveNext();
+            currentDamage = (int)stream.ReceiveNext();
+            currentThrowType = (ThrowType)stream.ReceiveNext();
+            float timestamp = (float)stream.ReceiveNext();
+
+            // Apply lag compensation
+            float lag = Mathf.Abs((float)(PhotonNetwork.Time - timestamp));
+            if (networkVelocity.magnitude > 0.1f && lag > 0.02f)
+            {
+                networkPosition += networkVelocity * lag;
+            }
+        }
+    }
+
+    [PunRPC]
+    void RequestPickupValidation(int playerID, float posX, float posY, float posZ)
+    {
+        // Only Master Client validates pickup requests
+        if (!hasNetworkAuthority) return;
+
+        Vector3 requestPosition = new Vector3(posX, posY, posZ);
+        PlayerCharacter player = FindPlayerByID(playerID);
+
+        if (player != null && currentState == BallState.Free)
+        {
+            // Validate pickup is still possible
+            float distance = Vector3.Distance(ballTransform.position, player.transform.position);
+            if (distance <= pickupRange * 1.2f) // Slight tolerance for network lag
+            {
+                // Master Client authorizes pickup
+                holder = player;
+                SetBallState(BallState.Held);
+                player.SetHasBall(true);
+                ballHoldStartTime = Time.time;
+                ResetHoldTimer();
+
+                // Sync successful pickup to all clients (including the requester)
+                photonView.RPC("SyncBallEvent", RpcTarget.All, "Pickup",
+                             playerID,
+                             ballTransform.position.x, ballTransform.position.y, ballTransform.position.z,
+                             0f, 0f, 0f, 0, 0);
+            }
+            else
+            {
+                // Pickup denied - sync rejection
+                photonView.RPC("SyncPickupRejection", RpcTarget.All, playerID);
+            }
+        }
+    }
+
+    [PunRPC]
+    void SyncPickupRejection(int playerID)
+    {
+        PlayerCharacter player = FindPlayerByID(playerID);
+        if (player != null)
+        {
+            player.SetHasBall(false);
+            // Reset any optimistic pickup state
+        }
+    }
+
+    [PunRPC]
+    void SyncBallEvent(string eventType, int playerID, float posX, float posY, float posZ,
+                      float velX, float velY, float velZ, int damage, int throwType)
+    {
+        Vector3 position = new Vector3(posX, posY, posZ);
+        Vector3 ballVelocity = new Vector3(velX, velY, velZ);
+
+        switch (eventType)
+        {
+            case "Pickup":
+                HandleNetworkPickup(playerID, position);
+                break;
+            case "Throw":
+                HandleNetworkThrow(playerID, position, ballVelocity, damage, (ThrowType)throwType);
+                break;
+            case "Catch":
+                HandleNetworkCatch(playerID, position);
+                break;
+            case "Drop":
+                HandleNetworkDrop(position, ballVelocity);
+                break;
+        }
+    }
+
+    void HandleNetworkPickup(int playerID, Vector3 position)
+    {
+        if (hasNetworkAuthority) return;
+
+        PlayerCharacter player = FindPlayerByID(playerID);
+        if (player != null)
+        {
+            holder = player;
+            player.SetHasBall(true);
+            SetBallState(BallState.Held);
+            ballTransform.position = position;
+        }
+    }
+
+    void HandleNetworkThrow(int playerID, Vector3 position, Vector3 ballVelocity, int damage, ThrowType throwType)
+    {
+        if (hasNetworkAuthority) return;
+
+        PlayerCharacter player = FindPlayerByID(playerID);
+        if (player != null)
+        {
+            thrower = player;
+            player.SetHasBall(false);
+            holder = null;
+
+            ballTransform.position = position;
+            velocity = ballVelocity;
+            currentDamage = damage;
+            currentThrowType = throwType;
+            SetBallState(BallState.Thrown);
+        }
+    }
+
+    void HandleNetworkCatch(int playerID, Vector3 position)
+    {
+        if (hasNetworkAuthority) return;
+
+        PlayerCharacter player = FindPlayerByID(playerID);
+        if (player != null)
+        {
+            holder = player;
+            player.SetHasBall(true);
+            SetBallState(BallState.Held);
+            ballTransform.position = position;
+            velocity = Vector3.zero;
+        }
+    }
+
+    void HandleNetworkDrop(Vector3 position, Vector3 ballVelocity)
+    {
+        if (hasNetworkAuthority) return;
+
+        if (holder != null)
+        {
+            holder.SetHasBall(false);
+            holder = null;
+        }
+
+        ballTransform.position = position;
+        velocity = ballVelocity;
+        SetBallState(BallState.Free);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PUBLIC INTERFACE METHODS
     // ═══════════════════════════════════════════════════════════════
 
     public bool TryPickup(PlayerCharacter character)
     {
-        if (currentState != BallState.Free) return false;
+        Debug.Log($"⚽ === BALLCONTROLLER PICKUP START === {character.name}");
+
+        Debug.Log($"🔍 Ball State Check:");
+        Debug.Log($"  - Current State: {currentState}");
+        Debug.Log($"  - Is Free: {currentState == BallState.Free}");
+
+        if (currentState != BallState.Free)
+        {
+            Debug.LogWarning($"❌ Ball not free - current state: {currentState}");
+            return false;
+        }
 
         float distance = Vector3.Distance(ballTransform.position, character.transform.position);
+        Debug.Log($"📏 BallController distance: {distance:F2} (range: {pickupRange})");
+
         if (distance <= pickupRange)
         {
-            holder = character;
-            legacyHolder = null;
-            SetBallState(BallState.Held);
-            character.SetHasBall(true);
+            PhotonView characterView = character.GetComponent<PhotonView>();
 
-            // FIXED: START HOLD TIMER properly
-            ballHoldStartTime = Time.time;
-            ResetHoldTimer(); // This now only resets flags, not the timer
+            Debug.Log($"📡 BallController Network Analysis:");
+            Debug.Log($"  - PhotonNetwork.IsMasterClient: {PhotonNetwork.IsMasterClient}");
+            Debug.Log($"  - Ball hasNetworkAuthority: {hasNetworkAuthority}");
+            Debug.Log($"  - Ball photonView.IsMine: {photonView.IsMine}");
+            Debug.Log($"  - Ball Owner: {photonView.Owner?.NickName ?? "NULL"}");
 
-            if (debugMode)
+            if (characterView != null)
             {
-                string characterName = character.GetCharacterData()?.characterName ?? character.name;
-                Debug.Log($"{characterName} picked up the ball! Hold timer started at {ballHoldStartTime}");
+                Debug.Log($"  - Character ViewID: {characterView.ViewID}");
+                Debug.Log($"  - Character IsMine: {characterView.IsMine}");
+                Debug.Log($"  - Character Owner: {characterView.Owner?.NickName ?? "NULL"}");
             }
-            return true;
+
+            if (characterView != null && characterView.IsMine)
+            {
+                Debug.Log($"✅ BallController: This is MY character");
+                Debug.Log($"🔐 Authority Check: hasNetworkAuthority = {hasNetworkAuthority}");
+
+                if (hasNetworkAuthority)
+                {
+                    Debug.Log($"✅ BallController: We have network authority - executing pickup");
+
+                    // Execute pickup
+                    holder = character;
+                    SetBallState(BallState.Held);
+                    character.SetHasBall(true);
+                    ballHoldStartTime = Time.time;
+                    ResetHoldTimer();
+
+                    Debug.Log($"📤 Syncing pickup to other clients...");
+                    // Sync pickup to other clients
+                    photonView.RPC("SyncBallEvent", RpcTarget.Others, "Pickup",
+                                 characterView.ViewID,
+                                 ballTransform.position.x, ballTransform.position.y, ballTransform.position.z,
+                                 0f, 0f, 0f, 0, 0);
+
+                    Debug.Log($"🎉 {character.name} successfully picked up ball!");
+                    return true;
+                }
+                else
+                {
+                    Debug.LogWarning($"❌ BallController: No network authority yet");
+                    Debug.LogWarning($"  - hasNetworkAuthority: {hasNetworkAuthority}");
+                    Debug.LogWarning($"  - photonView.IsMine: {photonView.IsMine}");
+                    Debug.LogWarning($"  - Ball owner: {photonView.Owner?.NickName ?? "NULL"}");
+                    return false;
+                }
+            }
+            else if (hasNetworkAuthority && (characterView == null || !characterView.IsMine))
+            {
+                Debug.Log($"🎮 BallController: Authority holder processing remote pickup");
+
+                holder = character;
+                SetBallState(BallState.Held);
+                character.SetHasBall(true);
+                ballHoldStartTime = Time.time;
+                ResetHoldTimer();
+
+                Debug.Log($"📤 Syncing remote pickup to all clients...");
+                // Sync to all clients
+                photonView.RPC("SyncBallEvent", RpcTarget.All, "Pickup",
+                             characterView?.ViewID ?? -1,
+                             ballTransform.position.x, ballTransform.position.y, ballTransform.position.z,
+                             0f, 0f, 0f, 0, 0);
+
+                Debug.Log($"🎉 Remote pickup successful for {character.name}");
+                return true;
+            }
+            else
+            {
+                Debug.LogWarning($"❌ BallController: No authority and not my character");
+                Debug.LogWarning($"  - hasNetworkAuthority: {hasNetworkAuthority}");
+                Debug.LogWarning($"  - characterView?.IsMine: {characterView?.IsMine}");
+            }
         }
+        else
+        {
+            Debug.LogWarning($"❌ BallController: Distance too far: {distance:F2} > {pickupRange}");
+        }
+
+        Debug.Log($"⚽ === BALLCONTROLLER PICKUP END === FAILED");
         return false;
     }
 
-    public bool TryPickupLegacy(CharacterController character)
+    private bool ExecutePickupDirectly(PlayerCharacter character)
     {
-        if (currentState != BallState.Free) return false;
+        holder = character;
+        SetBallState(BallState.Held);
+        character.SetHasBall(true);
+        ballHoldStartTime = Time.time;
+        ResetHoldTimer();
 
-        float distance = Vector3.Distance(ballTransform.position, character.transform.position);
-        if (distance <= pickupRange)
+        // Sync to other clients
+        PhotonView characterView = character.GetComponent<PhotonView>();
+        if (characterView != null)
         {
-            legacyHolder = character;
-            holder = null;
-            SetBallState(BallState.Held);
-            character.SetHasBall(true);
-
-            // FIXED: START HOLD TIMER properly
-            ballHoldStartTime = Time.time;
-            ResetHoldTimer(); // This now only resets flags, not the timer
-
-            if (debugMode)
-            {
-                Debug.Log($"{character.name} picked up the ball! Hold timer started at {ballHoldStartTime}");
-            }
-            return true;
+            photonView.RPC("SyncBallEvent", RpcTarget.Others, "Pickup",
+                         characterView.ViewID,
+                         ballTransform.position.x, ballTransform.position.y, ballTransform.position.z,
+                         0f, 0f, 0f, 0, 0);
         }
-        return false;
+
+        Debug.Log($"{character.name} picked up ball (Direct)");
+        return true;
     }
+
+    private System.Collections.IEnumerator ExecutePickupAfterOwnership(PlayerCharacter character)
+    {
+        // Wait for ownership transfer
+        float timeout = 0.5f;
+        float elapsed = 0f;
+
+        while (!photonView.IsMine && elapsed < timeout)
+        {
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        if (photonView.IsMine && currentState == BallState.Free)
+        {
+            // Ownership transferred successfully - execute pickup
+            bool success = ExecutePickupDirectly(character);
+            Debug.Log($"Pickup after ownership transfer: {(success ? "SUCCESS" : "FAILED")}");
+        }
+        else
+        {
+            Debug.LogWarning($"Ownership transfer timeout or ball no longer free for {character.name}");
+        }
+    }
+
+
 
     public void OnCaught(PlayerCharacter catcher)
     {
-        if (catcher == null)
-        {
-            Debug.LogError("BallController.OnCaught: PlayerCharacter catcher is null!");
-            return;
-        }
-
-        // REMOVE ULTIMATE BALL VFX WHEN CAUGHT
-        RemoveUltimateBallVFX();
+        if (catcher == null) return;
 
         holder = catcher;
-        legacyHolder = null;
         SetBallState(BallState.Held);
         catcher.SetHasBall(true);
         velocity = Vector3.zero;
         thrower = null;
-        legacyThrower = null;
         targetOpponent = null;
-        hasHitTarget = false;
         homingEnabled = false;
-
-        // START HOLD TIMER FOR CAUGHT BALL
         ballHoldStartTime = Time.time;
         ResetHoldTimer();
-
-        if (debugMode)
-        {
-            string characterName = catcher.GetCharacterData()?.characterName ?? catcher.name;
-            Debug.Log($"{characterName} caught the ball! Hold timer started at {ballHoldStartTime}");
-        }
-    }
-
-    public void OnCaught(CharacterController catcher)
-    {
-        if (catcher == null)
-        {
-            Debug.LogError("BallController.OnCaught: CharacterController catcher is null!");
-            return;
-        }
-
-        // REMOVE ULTIMATE BALL VFX WHEN CAUGHT
-        RemoveUltimateBallVFX();
-
-        legacyHolder = catcher;
-        holder = null;
-        SetBallState(BallState.Held);
-        catcher.SetHasBall(true);
-        velocity = Vector3.zero;
-        thrower = null;
-        legacyThrower = null;
-        targetOpponent = null;
-        hasHitTarget = false;
-        homingEnabled = false;
-
-        // START HOLD TIMER FOR CAUGHT BALL
-        ballHoldStartTime = Time.time;
-        ResetHoldTimer();
-
-        if (debugMode)
-        {
-            Debug.Log($"{catcher.name} caught the ball! Hold timer started at {ballHoldStartTime}");
-        }
     }
 
     public void ThrowBall(Vector3 direction, float power)
     {
         if (currentState != BallState.Held) return;
 
-        // FIXED: STOP HOLD TIMER WHEN BALL IS THROWN
+        // FIXED: Only the ball owner or master client can throw
+        if (!hasNetworkAuthority)
+        {
+            Debug.LogWarning($"Cannot throw ball - no authority. hasNetworkAuthority={hasNetworkAuthority}");
+            return;
+        }
+
         StopHoldTimer();
 
-        // Set thrower reference (support both systems)
-        if (holder != null)
-        {
-            thrower = holder;
-            legacyThrower = null;
-        }
-        else if (legacyHolder != null)
-        {
-            legacyThrower = legacyHolder;
-            thrower = null;
-        }
+        thrower = holder;
 
-        hasHitTarget = false;
-
-        // Detect if this is a jump throw
-        bool isInAir = false;
-        if (thrower != null)
-        {
-            isInAir = !thrower.IsGrounded();
-        }
-        else if (legacyThrower != null)
-        {
-            isInAir = !legacyThrower.IsGrounded();
-        }
-
-        isJumpThrow = isInAir;
-
-        // Update throw type if not already set
-        if (currentThrowType == ThrowType.Normal && isJumpThrow)
+        bool isInAir = thrower != null && !thrower.IsGrounded();
+        if (currentThrowType == ThrowType.Normal && isInAir)
         {
             currentThrowType = ThrowType.JumpThrow;
         }
 
-        // Notify collision system
-        if (collisionSystem != null)
+        if (collisionSystem != null && thrower != null)
         {
-            if (thrower != null)
-            {
-                collisionSystem.OnBallThrown(thrower);
-            }
-            else if (legacyThrower != null)
-            {
-                collisionSystem.OnBallThrownLegacy(legacyThrower);
-            }
+            collisionSystem.OnBallThrown(thrower);
         }
 
-        // Find target opponent
         targetOpponent = FindOpponentForThrower();
-
-        Vector3 throwDirection;
-        float throwSpeed = currentThrowSpeed;
+        Vector3 throwDirection = direction;
 
         if (targetOpponent != null)
         {
-            Vector3 throwPos = ballTransform.position;
             Vector3 targetPos = targetOpponent.position;
-
-            if (isJumpThrow)
-            {
-                throwDirection = (targetPos - throwPos).normalized;
-                currentThrowType = ThrowType.JumpThrow;
-            }
-            else
-            {
-                Vector3 horizontalDirection = new Vector3(
-                    targetPos.x - throwPos.x,
-                    0f,
-                    targetPos.z - throwPos.z
-                );
-                throwDirection = horizontalDirection.normalized;
-            }
-
-            if (debugMode)
-            {
-                Debug.Log($"Throwing {currentThrowType} at {targetOpponent.name}: {currentDamage} damage");
-            }
-        }
-        else
-        {
-            throwDirection = isJumpThrow ?
-                new Vector3(1f, -0.5f, 0f).normalized :
-                Vector3.right;
-            throwSpeed = currentThrowSpeed;
+            throwDirection = (targetPos - ballTransform.position).normalized;
         }
 
-        // Set velocity
-        velocity = throwDirection * throwSpeed * power;
+        velocity = throwDirection * currentThrowSpeed * power;
 
-        // Release from holder
         if (holder != null)
         {
             holder.SetHasBall(false);
             holder = null;
         }
-        else if (legacyHolder != null)
-        {
-            legacyHolder.SetHasBall(false);
-            legacyHolder = null;
-        }
 
         SetBallState(BallState.Thrown);
-        ApplyUltimateBallVFX();
 
-        if (debugMode)
+        // Sync to other clients
+        PhotonView throwerView = thrower?.GetComponent<PhotonView>();
+        if (throwerView != null)
         {
-            Debug.Log($"Ball thrown: {currentThrowType}, Damage: {currentDamage}, Speed: {throwSpeed}");
+            photonView.RPC("SyncBallEvent", RpcTarget.Others, "Throw",
+                         throwerView.ViewID,
+                         ballTransform.position.x, ballTransform.position.y, ballTransform.position.z,
+                         velocity.x, velocity.y, velocity.z,
+                         currentDamage, (int)currentThrowType);
         }
     }
 
-    /// <summary>
-    /// Apply ultimate ball VFX when ball is thrown as ultimate
-    /// </summary>
-    public void ApplyUltimateBallVFX()
+
+    void CheckOwnershipChanges()
     {
-        if (currentThrowType != ThrowType.Ultimate) return;
+        bool currentOwnership = photonView.IsMine;
 
-        PlayerCharacter ultimateThrower = thrower;
-        if (ultimateThrower == null) return;
-
-        // Don't apply if already has VFX
-        if (hasUltimateBallVFX && ultimateBallVFXInstance != null) return;
-
-        CharacterData characterData = ultimateThrower.GetCharacterData();
-        if (characterData == null) return;
-
-        // Get and spawn ultimate ball VFX
-        GameObject ballVFXPrefab = characterData.GetUltimateBallVFX();
-        if (ballVFXPrefab != null)
+        if (currentOwnership != lastOwnershipState)
         {
-            ultimateBallVFXInstance = Instantiate(ballVFXPrefab, ballTransform.position, Quaternion.identity);
-            ultimateBallVFXInstance.transform.SetParent(ballTransform);
-            ultimateBallVFXInstance.transform.localPosition = Vector3.zero;
-            hasUltimateBallVFX = true;
-
-            if (debugMode)
-            {
-                Debug.Log($"Applied ultimate ball VFX for {ultimateThrower.name}");
-            }
+            // Ownership changed
+            OnBallOwnershipChanged(currentOwnership);
+            lastOwnershipState = currentOwnership;
         }
     }
 
-    /// <summary>
-    /// Remove ultimate ball VFX (called when ball hits or is destroyed)
-    /// </summary>
-    public void RemoveUltimateBallVFX()
+    void OnBallOwnershipChanged(bool nowOwned)
     {
-        if (hasUltimateBallVFX && ultimateBallVFXInstance != null)
+        if (nowOwned)
         {
-            Destroy(ultimateBallVFXInstance);
-            ultimateBallVFXInstance = null;
-            hasUltimateBallVFX = false;
+            // Ball ownership transferred to this client
+            hasNetworkAuthority = true;
 
-            if (debugMode)
+            Debug.Log($"Ball ownership gained by {PhotonNetwork.LocalPlayer.NickName}. " +
+                     $"New authority: {hasNetworkAuthority}");
+
+            // If a local player was trying to pick up, try again now that we have authority
+            if (hasNetworkAuthority && currentState == BallState.Free)
             {
-                Debug.Log("Ultimate ball VFX removed");
+                // Check if any local player is close enough to pick up
+                PlayerCharacter[] localPlayers = FindObjectsOfType<PlayerCharacter>();
+                foreach (PlayerCharacter player in localPlayers)
+                {
+                    PhotonView playerView = player.GetComponent<PhotonView>();
+                    if (playerView != null && playerView.IsMine)
+                    {
+                        float distance = Vector3.Distance(ballTransform.position, player.transform.position);
+                        if (distance <= pickupRange)
+                        {
+                            // Try pickup again now that we have authority
+                            Debug.Log($"Retrying pickup for {player.name} after ownership transfer");
+                            TryPickup(player);
+                            break;
+                        }
+                    }
+                }
             }
+        }
+        else
+        {
+            Debug.Log($"Ball ownership lost by {PhotonNetwork.LocalPlayer.NickName}");
         }
     }
 
@@ -1119,24 +1015,16 @@ public class BallController : MonoBehaviour
         Vector3 spawnPosition = new Vector3(0, 2f, 0);
         ballTransform.position = spawnPosition;
         velocity = Vector3.zero;
-        hasHitTarget = false;
-
-        // REMOVE ULTIMATE BALL VFX WHEN BALL RESETS
-        RemoveUltimateBallVFX();
-
-        // Reset wall collision state
         currentWallBounces = 0;
-        hasHitWallThisFrame = false;
 
-        // RESET HOLD TIMER completely
         StopHoldTimer();
 
-        // Clear holders
         if (holder != null)
         {
             holder.SetHasBall(false);
             holder = null;
         }
+
         if (legacyHolder != null)
         {
             legacyHolder.SetHasBall(false);
@@ -1146,13 +1034,11 @@ public class BallController : MonoBehaviour
         thrower = null;
         legacyThrower = null;
         targetOpponent = null;
-        isJumpThrow = false;
         homingEnabled = false;
 
-        // Reset throw data
         currentThrowType = ThrowType.Normal;
         currentDamage = 10;
-        currentThrowSpeed = normalThrowSpeed;
+        currentThrowSpeed = 18f;
 
         if (collisionSystem != null)
         {
@@ -1160,40 +1046,24 @@ public class BallController : MonoBehaviour
         }
 
         SetBallState(BallState.Free);
-
-        if (debugMode)
-        {
-            Debug.Log("Ball reset to center!");
-        }
     }
 
     public void SetBallState(BallState newState)
     {
         currentState = newState;
+
         switch (newState)
         {
             case BallState.Free:
-                // REMOVE ULTIMATE BALL VFX WHEN BALL BECOMES FREE
-                RemoveUltimateBallVFX();
-
                 thrower = null;
-                legacyThrower = null;
                 targetOpponent = null;
-                hasHitTarget = false;
-                isJumpThrow = false;
                 homingEnabled = false;
                 StopHoldTimer();
                 if (collisionSystem != null)
-                {
                     collisionSystem.OnBallReset();
-                }
                 break;
             case BallState.Held:
-                // REMOVE ULTIMATE BALL VFX WHEN BALL IS HELD
-                RemoveUltimateBallVFX();
-
                 velocity = Vector3.zero;
-                // Hold timer is started in pickup/catch methods
                 break;
             case BallState.Thrown:
                 StopHoldTimer();
@@ -1201,60 +1071,94 @@ public class BallController : MonoBehaviour
         }
     }
 
-    // Continue with the rest of the existing methods...
-    // (HandleNeoGeoPhysics, ApplyHomingBehavior, CheckPickupRange, etc.)
-
-    void HandleNeoGeoPhysics()
+    public void SetThrowData(ThrowType throwType, int damage, float throwSpeed)
     {
-        if (debugMode && Time.frameCount % 60 == 0)
+        currentThrowType = throwType;
+        currentDamage = damage;
+        currentThrowSpeed = throwSpeed;
+    }
+
+    public void SetThrower(PlayerCharacter newThrower)
+    {
+        thrower = newThrower;
+    }
+
+    public void EnableHoming(bool enable)
+    {
+        homingEnabled = enable;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // UTILITY METHODS
+    // ═══════════════════════════════════════════════════════════════
+
+    int GetHolderID()
+    {
+        if (holder != null)
         {
-            Debug.Log($"Neo Geo Physics: {currentThrowType}, Speed: {velocity.magnitude:F1}, Damage: {currentDamage}");
+            PhotonView holderView = holder.GetComponent<PhotonView>();
+            return holderView != null ? holderView.ViewID : -1;
+        }
+        return -1;
+    }
+
+    int GetThrowerID()
+    {
+        if (thrower != null)
+        {
+            PhotonView throwerView = thrower.GetComponent<PhotonView>();
+            return throwerView != null ? throwerView.ViewID : -1;
+        }
+        return -1;
+    }
+
+    PlayerCharacter FindPlayerByID(int viewID)
+    {
+        if (viewID == -1) return null;
+        PhotonView targetView = PhotonView.Find(viewID);
+        return targetView?.GetComponent<PlayerCharacter>();
+    }
+
+    void UpdateHolderFromNetwork(int viewID)
+    {
+        PlayerCharacter player = FindPlayerByID(viewID);
+        if (player != holder)
+        {
+            if (holder != null)
+                holder.SetHasBall(false);
+
+            holder = player;
+            if (holder != null)
+                holder.SetHasBall(true);
         }
     }
 
-    void ApplyHomingBehavior()
+    void UpdateThrowerFromNetwork(int viewID)
     {
-        if (targetOpponent != null)
+        PlayerCharacter player = FindPlayerByID(viewID);
+        if (player != thrower)
         {
-            Vector3 directionToTarget = (targetOpponent.position - ballTransform.position).normalized;
-            velocity = Vector3.Slerp(velocity, directionToTarget * velocity.magnitude, 2f * Time.deltaTime);
+            thrower = player;
         }
     }
 
-    void CheckPickupRange()
+    Transform FindOpponentForThrower()
     {
-        if (currentState != BallState.Free) return;
+        if (thrower == null) return null;
 
-        PlayerCharacter[] players = FindObjectsOfType<PlayerCharacter>();
-        foreach (PlayerCharacter player in players)
+        PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
+        foreach (PlayerCharacter player in allPlayers)
         {
-            float distance = Vector3.Distance(ballTransform.position, player.transform.position);
-            if (distance <= pickupRange)
-            {
-                ShowPickupIndicator(true);
-                return;
-            }
+            if (player != thrower)
+                return player.transform;
         }
-
-        GameObject legacyPlayer = GameObject.FindGameObjectWithTag("Player");
-        if (legacyPlayer != null)
-        {
-            float distance = Vector3.Distance(ballTransform.position, legacyPlayer.transform.position);
-            if (distance <= pickupRange)
-            {
-                ShowPickupIndicator(true);
-                return;
-            }
-        }
-
-        ShowPickupIndicator(false);
+        return null;
     }
 
     void CheckGrounded()
     {
         Vector3 rayStart = ballTransform.position;
         isGrounded = Physics.Raycast(rayStart, Vector3.down, groundCheckDistance, groundLayer);
-        Debug.DrawRay(rayStart, Vector3.down * groundCheckDistance, isGrounded ? Color.green : Color.red);
     }
 
     void UpdateVisuals()
@@ -1264,305 +1168,165 @@ public class BallController : MonoBehaviour
             ballTransform.Rotate(Vector3.right * rotationSpeed * Time.deltaTime, Space.Self);
         }
 
-        // Don't override ball color if hold timer is active
         if (ballRenderer != null && !isShowingWarning && !isInDangerPhase && !hasAppliedPenalty)
         {
             Color ballColor = currentState switch
             {
                 BallState.Free => availableColor,
                 BallState.Held => heldColor,
-                BallState.Thrown => GetThrowTypeColor(),
+                BallState.Thrown => currentThrowType == ThrowType.Ultimate ? Color.red : Color.red,
                 _ => availableColor
             };
             ballRenderer.material.color = ballColor;
         }
     }
 
-    Color GetThrowTypeColor()
+    void PlayHoldTimerSound(AudioClip clip)
     {
-        return currentThrowType switch
+        if (audioSource != null && clip != null)
         {
-            ThrowType.Ultimate => Color.red,
-            ThrowType.JumpThrow => Color.green,
-            _ => Color.red
-        };
-    }
-
-    void ShowPickupIndicator(bool show)
-    {
-        if (show && currentState == BallState.Free)
-        {
-            float scale = 1f + Mathf.Sin(Time.time * 8f) * 0.1f;
-            ballTransform.localScale = Vector3.one * scale;
+            audioSource.PlayOneShot(clip);
         }
-        else
-        {
-            ballTransform.localScale = Vector3.one;
-        }
-    }
-
-    Transform FindOpponentForThrower()
-    {
-        Transform throwerTransform = null;
-        if (thrower != null)
-        {
-            throwerTransform = thrower.transform;
-        }
-        else if (legacyThrower != null)
-        {
-            throwerTransform = legacyThrower.transform;
-        }
-
-        if (throwerTransform == null) return null;
-
-        // Find all characters and return first valid opponent
-        PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
-        foreach (PlayerCharacter player in allPlayers)
-        {
-            if (player.transform == throwerTransform) continue;
-            return player.transform;
-        }
-
-        // Legacy support
-        CharacterController[] allLegacyPlayers = FindObjectsOfType<CharacterController>();
-        foreach (CharacterController player in allLegacyPlayers)
-        {
-            if (player.transform == throwerTransform) continue;
-            PlayerHealth playerHealth = player.GetComponent<PlayerHealth>();
-            if (playerHealth == null) continue;
-            return player.transform;
-        }
-
-        // Fallback: Look for dummy opponent
-        GameObject dummy = GameObject.Find("DummyOpponent");
-        return dummy?.transform;
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // PUBLIC GETTERS AND SETTERS
+    // MISSING METHODS USED BY OTHER SCRIPTS
     // ═══════════════════════════════════════════════════════════════
 
-    public void SetThrowData(ThrowType throwType, int damage, float throwSpeed)
-    {
-        currentThrowType = throwType;
-        currentDamage = damage;
-        currentThrowSpeed = throwSpeed;
+    // Legacy support methods (for backward compatibility)
+    private CharacterController legacyHolder;
+    private CharacterController legacyThrower;
 
-        if (debugMode)
+    public bool TryPickupLegacy(CharacterController character)
+    {
+        if (!hasNetworkAuthority || currentState != BallState.Free) return false;
+
+        float distance = Vector3.Distance(ballTransform.position, character.transform.position);
+        if (distance <= pickupRange)
         {
-            Debug.Log($"Ball throw data set: {throwType}, {damage} damage, {throwSpeed} speed");
+            legacyHolder = character;
+            holder = null;
+            SetBallState(BallState.Held);
+            character.SetHasBall(true);
+            ballHoldStartTime = Time.time;
+            ResetHoldTimer();
+            return true;
         }
+        return false;
     }
 
-    /// <summary>
-    /// Set the thrower for this ball (needed for multithrow balls)
-    /// </summary>
-    public void SetThrower(PlayerCharacter newThrower)
+    public void OnCaught(CharacterController catcher)
     {
-        thrower = newThrower;
+        if (catcher == null) return;
+
+        legacyHolder = catcher;
+        holder = null;
+        SetBallState(BallState.Held);
+        catcher.SetHasBall(true);
+        velocity = Vector3.zero;
+        thrower = null;
         legacyThrower = null;
+        targetOpponent = null;
+        homingEnabled = false;
+        ballHoldStartTime = Time.time;
+        ResetHoldTimer();
     }
+
     public void OnCatchFailed()
     {
         velocity *= 0.8f;
         velocity.x += Random.Range(-2f, 2f);
         velocity.y += Random.Range(1f, 3f);
-
-        if (debugMode)
-        {
-            Debug.Log("Ball catch failed - ball deflected!");
-        }
     }
 
-    public void EnableHoming(bool enable)
+    public void ApplyUltimateBallVFX()
     {
-        homingEnabled = enable;
-        if (debugMode)
-        {
-            Debug.Log($"Ball homing {(enable ? "enabled" : "disabled")}");
-        }
+        // Placeholder for ultimate ball VFX - implement if needed
+        // This was called by PlayerCharacter but can be empty for now
     }
 
-    // Ball Hold Timer Getters
-    public bool IsInWarningPhase() => isShowingWarning;
-    public bool IsInDangerPhase() => isInDangerPhase;
-    public bool IsInPenaltyPhase() => hasAppliedPenalty;
-    public float GetMaxHoldTime() => maxHoldTime;
-    public float GetTimeUntilWarning() => Mathf.Max(0f, warningStartTime - GetHoldDuration());
-    public float GetTimeUntilDanger() => Mathf.Max(0f, dangerStartTime - GetHoldDuration());
-    public float GetTimeUntilPenalty() => Mathf.Max(0f, maxHoldTime - GetHoldDuration());
+    public void RemoveUltimateBallVFX()
+    {
+        // Placeholder for removing ultimate ball VFX - implement if needed
+        // This was called by CollisionDamageSystem but can be empty for now
+    }
 
-    // Legacy compatibility methods
+    public string GetCurrentHoldPhase()
+    {
+        if (currentState != BallState.Held) return "None";
+        if (hasAppliedPenalty) return "Penalty";
+        if (isInDangerPhase) return "Danger";
+        if (isShowingWarning) return "Warning";
+        return "Normal";
+    }
+
+    public float GetMaxHoldTime() => maxHoldTime;
+
+    // ═══════════════════════════════════════════════════════════════
+    // PUBLIC GETTERS
+    // ═══════════════════════════════════════════════════════════════
+
+    public float GetHoldDuration()
+    {
+        if (currentState != BallState.Held || ballHoldStartTime == 0f) return 0f;
+        return Time.time - ballHoldStartTime;
+    }
+
+    public float GetHoldProgress()
+    {
+        if (currentState != BallState.Held || ballHoldStartTime == 0f) return 0f;
+        return Mathf.Clamp01(GetHoldDuration() / maxHoldTime);
+    }
+
     public BallState GetBallState() => currentState;
     public bool IsHeld() => currentState == BallState.Held;
     public bool IsFree() => currentState == BallState.Free;
-    public Transform GetCurrentTarget() => targetOpponent;
     public Vector3 GetVelocity() => velocity;
     public void SetVelocity(Vector3 newVelocity) => velocity = newVelocity;
-    public void SetBallStatePublic(BallState newState) => SetBallState(newState);
     public int GetCurrentDamage() => currentDamage;
     public ThrowType GetThrowType() => currentThrowType;
     public PlayerCharacter GetHolder() => holder;
-    public CharacterController GetHolderLegacy() => legacyHolder;
     public PlayerCharacter GetThrower() => thrower;
+    public CharacterController GetHolderLegacy() => legacyHolder;
     public CharacterController GetThrowerLegacy() => legacyThrower;
-
-    // ═══════════════════════════════════════════════════════════════
-    // DEBUG VISUALIZATION
-    // ═══════════════════════════════════════════════════════════════
-
-    void OnDrawGizmosSelected()
-    {
-        // Draw pickup range
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawWireSphere(transform.position, pickupRange);
-
-        // Draw ground check
-        Gizmos.color = isGrounded ? Color.green : Color.red;
-        Gizmos.DrawRay(transform.position, Vector3.down * groundCheckDistance);
-
-        // Draw trajectory line
-        if (currentState == BallState.Thrown && useNeoGeoPhysics)
-        {
-            Gizmos.color = isJumpThrow ? Color.green : Color.cyan;
-            Vector3 trajectoryEnd = transform.position + velocity.normalized * 8f;
-            Gizmos.DrawLine(transform.position, trajectoryEnd);
-
-            if (isJumpThrow)
-            {
-                Gizmos.color = Color.green;
-                Gizmos.DrawWireCube(transform.position + Vector3.up, Vector3.one * 0.5f);
-            }
-        }
-
-        // Draw target opponent
-        if (targetOpponent != null)
-        {
-            Gizmos.color = Color.magenta;
-            Gizmos.DrawLine(transform.position, targetOpponent.position);
-            Gizmos.DrawWireSphere(targetOpponent.position, 0.5f);
-        }
-
-        // Draw hold timer info when ball is held
-        if (currentState == BallState.Held)
-        {
-            Transform holderTransform = holder?.transform ?? legacyHolder?.transform;
-            if (holderTransform != null)
-            {
-                Vector3 holdPos = CalculateHoldPosition(holderTransform);
-                Gizmos.color = Color.cyan;
-                Gizmos.DrawWireSphere(holdPos, 0.3f);
-                Gizmos.DrawLine(holderTransform.position, holdPos);
-
-                // Show hold timer phase with color
-                if (hasAppliedPenalty)
-                {
-                    Gizmos.color = corruptionColor;
-                }
-                else if (isInDangerPhase)
-                {
-                    Gizmos.color = dangerColor;
-                }
-                else if (isShowingWarning)
-                {
-                    Gizmos.color = warningColor;
-                }
-                else
-                {
-                    Gizmos.color = Color.green;
-                }
-
-                // Draw timer progress circle
-                float progress = GetHoldProgress();
-                Vector3 timerPos = transform.position + Vector3.up * 1.5f;
-                Gizmos.DrawWireSphere(timerPos, 0.5f * progress);
-            }
-        }
-
-        // Draw character info if held by a character
-        if (holder != null && holder.GetCharacterData() != null)
-        {
-            CharacterData data = holder.GetCharacterData();
-            Gizmos.color = data.characterColor;
-            Gizmos.DrawWireSphere(transform.position + Vector3.up * 2f, 0.4f);
-        }
-
-        // NEW: Draw arena bounds
-        Gizmos.color = Color.cyan;
-
-        // Left wall
-        Vector3 leftTop = new Vector3(arenaLeftBound, arenaTopBound, 0);
-        Vector3 leftBottom = new Vector3(arenaLeftBound, arenaBottomBound, 0);
-        Gizmos.DrawLine(leftTop, leftBottom);
-
-        // Right wall
-        Vector3 rightTop = new Vector3(arenaRightBound, arenaTopBound, 0);
-        Vector3 rightBottom = new Vector3(arenaRightBound, arenaBottomBound, 0);
-        Gizmos.DrawLine(rightTop, rightBottom);
-
-        // Top wall
-        Gizmos.DrawLine(leftTop, rightTop);
-
-        // Bottom wall
-        Gizmos.DrawLine(leftBottom, rightBottom);
-    }
+    public Transform GetCurrentTarget() => targetOpponent;
+    public bool IsInWarningPhase() => isShowingWarning;
+    public bool IsInDangerPhase() => isInDangerPhase;
+    public bool IsInPenaltyPhase() => hasAppliedPenalty;
 
     void OnGUI()
     {
-        if (!debugMode) return;
+        if (!Application.isPlaying) return;
 
-        // Hold Timer Debug Info
-        if (currentState == BallState.Held)
+        // Ball debug panel
+        GUI.Box(new Rect(10, 10, 400, 150), "BALL DEBUG INFO");
+
+        float y = 30;
+        GUI.Label(new Rect(20, y, 380, 20), $"Ball Owner: {photonView.Owner?.NickName ?? "NULL"}");
+        y += 20;
+        GUI.Label(new Rect(20, y, 380, 20), $"Ball IsMine: {photonView.IsMine}");
+        y += 20;
+        GUI.Label(new Rect(20, y, 380, 20), $"hasNetworkAuthority: {hasNetworkAuthority}");
+        y += 20;
+        GUI.Label(new Rect(20, y, 380, 20), $"Ball State: {currentState}");
+        y += 20;
+        GUI.Label(new Rect(20, y, 380, 20), $"Ownership Transfer: {photonView.OwnershipTransfer}");
+        y += 20;
+        GUI.Label(new Rect(20, y, 380, 20), $"Local Player: {PhotonNetwork.LocalPlayer?.NickName ?? "NULL"}");
+
+        // Player debug info
+        y = 180;
+        GUI.Box(new Rect(10, y, 400, 120), "PLAYERS DEBUG INFO");
+        y += 20;
+
+        PlayerCharacter[] players = FindObjectsOfType<PlayerCharacter>();
+        foreach (PlayerCharacter player in players)
         {
-            GUILayout.BeginArea(new Rect(10, 10, 400, 200));
-            GUILayout.BeginVertical("box");
-
-            GUILayout.Label("=== BALL HOLD TIMER DEBUG ===");
-            GUILayout.Label($"Hold Duration: {GetHoldDuration():F2}s / {maxHoldTime}s");
-            GUILayout.Label($"Progress: {GetHoldProgress():P0}");
-            GUILayout.Label($"Current Phase: {GetCurrentHoldPhase()}");
-            GUILayout.Label($"Timer Start: {ballHoldStartTime:F2}");
-            GUILayout.Label($"Current Time: {Time.time:F2}");
-
-            if (isShowingWarning)
-            {
-                GUILayout.Label($"⚠️ WARNING: {GetTimeUntilDanger():F1}s until danger");
-            }
-
-            if (isInDangerPhase)
-            {
-                GUILayout.Label($"🔶 DANGER: {GetTimeUntilPenalty():F1}s until penalty");
-            }
-
-            if (hasAppliedPenalty)
-            {
-                GUILayout.Label($"💀 PENALTY: Ball will be dropped/reset!");
-                if (ballDropCoroutine != null)
-                {
-                    GUILayout.Label($"⏱️ Ball drops in: {ballDropDelay:F1}s");
-                }
-            }
-
-            string holderName = holder?.name ?? legacyHolder?.name ?? "None";
-            GUILayout.Label($"Holder: {holderName}");
-
-            // Timer progress bar
-            Rect progressRect = GUILayoutUtility.GetRect(350, 20);
-            GUI.Box(progressRect, "");
-
-            Rect fillRect = new Rect(progressRect.x, progressRect.y,
-                progressRect.width * GetHoldProgress(), progressRect.height);
-
-            Color barColor = hasAppliedPenalty ? corruptionColor :
-                           isInDangerPhase ? dangerColor :
-                           isShowingWarning ? warningColor : Color.green;
-
-            GUI.color = barColor;
-            GUI.Box(fillRect, "");
-            GUI.color = Color.white;
-
-            GUILayout.EndVertical();
-            GUILayout.EndArea();
+            PhotonView pv = player.GetComponent<PhotonView>();
+            float dist = Vector3.Distance(transform.position, player.transform.position);
+            GUI.Label(new Rect(20, y, 380, 20),
+                $"{player.name}: IsMine={pv?.IsMine}, Dist={dist:F1}, HasBall={player.HasBall()}");
+            y += 20;
         }
     }
 }

@@ -3005,6 +3005,8 @@ MonoBehaviour:
   playerType: 1
   enableKeyboardInput: 1
   enableMobileInput: 0
+  enableInputPrediction: 1
+  inputSendRate: 30
   useCustomKeys: 1
   customLeftKey: 257
   customRightKey: 259
@@ -3019,7 +3021,8 @@ MonoBehaviour:
   customTreatKey: 111
   useDuckSystem: 1
   isPUN2Enabled: 0
-  isLocalPlayer: 1
+  autoDetectOwnership: 1
+  forceLocalControl: 0
   inputBufferTime: 0.15
   showDebugInfo: 0
   forceMobileMode: 0
@@ -3073,6 +3076,8 @@ MonoBehaviour:
   autoLoadCharacterOnStart: 1
   debugMode: 1
   showCharacterInfo: 1
+  enableNetworkSync: 1
+  sendRate: 20
   groundLayer:
     serializedVersion: 2
     m_Bits: 1024
@@ -7973,7 +7978,7 @@ MonoBehaviour:
   - {fileID: 1518670535}
   - {fileID: 1896472038}
   gameStartDelay: 3
-  debugMode: 1
+  debugMode: 0
 --- !u!4 &1397217098
 Transform:
   m_ObjectHideFlags: 0
@@ -12131,6 +12136,7 @@ GameObject:
   m_Component:
   - component: {fileID: 2083447961}
   - component: {fileID: 2083447962}
+  - component: {fileID: 2083447963}
   m_Layer: 0
   m_Name: BallManager
   m_TagString: Untagged
@@ -12172,7 +12178,28 @@ MonoBehaviour:
   enableHoldTimerUI: 1
   autoShowTimerOnPickup: 1
   autoHideTimerOnThrow: 1
-  debugMode: 0
+--- !u!114 &2083447963
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2083447960}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa584fbee541324448dd18d8409c7a41, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ObservedComponentsFoldoutOpen: 1
+  Group: 0
+  prefixField: -1
+  Synchronization: 3
+  OwnershipTransfer: 1
+  observableSearch: 2
+  ObservedComponents: []
+  sceneViewId: 3
+  InstantiationId: 0
+  isRuntimeInstantiated: 0
 --- !u!1 &2084776612
 GameObject:
   m_ObjectHideFlags: 0

@@ -1,11 +1,12 @@
 ﻿using UnityEngine;
 using System.Collections;
-
+using Photon.Pun;
+using Photon.Realtime;
 /// <summary>
 /// Clean PlayerCharacter with streamlined ability system
 /// Focuses on core movement + 9 clean abilities (3 Ultimate, 3 Trick, 3 Treat)
 /// </summary>
-public class PlayerCharacter : MonoBehaviour
+public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 {
     [Header("Character Setup")]
     [SerializeField] private CharacterData characterData;
@@ -14,6 +15,10 @@ public class PlayerCharacter : MonoBehaviour
     [Header("Debug")]
     [SerializeField] private bool debugMode = true;
     [SerializeField] private bool showCharacterInfo = true;
+
+    [Header("Network Settings")]
+    [SerializeField] private bool enableNetworkSync = true;
+    [SerializeField] private float sendRate = 20f;
 
     // Core Components
     private PlayerInputHandler inputHandler;
@@ -60,6 +65,14 @@ public class PlayerCharacter : MonoBehaviour
     [SerializeField] private LayerMask groundLayer = 1;
     [SerializeField] private float groundCheckDistance = 0.1f;
 
+    // Network sync variables
+    private Vector3 networkPosition;
+    private Vector3 networkVelocity;
+    private bool networkIsGrounded;
+    private bool networkIsDucking;
+    private bool networkHasBall;
+    private float networkLag;
+
     [Header("Movement Restriction")]
     private ArenaMovementRestrictor movementRestrictor;
 
@@ -99,6 +112,30 @@ public class PlayerCharacter : MonoBehaviour
         }
     }
 
+
+    void Start()
+    {
+        // Add this to your existing Start/Awake method:
+        if (photonView != null && photonView.IsMine)
+        {
+            // This is the local player - enable input
+            if (inputHandler != null)
+            {
+                inputHandler.isPUN2Enabled = true;
+                //inputHandler.isLocalPlayer = true;
+            }
+        }
+        else if (photonView != null)
+        {
+            // This is a remote player - disable input
+            if (inputHandler != null)
+            {
+                inputHandler.isPUN2Enabled = true;
+                //inputHandler.isLocalPlayer = false;
+            }
+        }
+    }
+
     void CacheComponents()
     {
         characterTransform = transform;
@@ -134,13 +171,115 @@ public class PlayerCharacter : MonoBehaviour
     {
         if (characterData == null) return;
 
-        HandleInput();
-        CheckGrounded();
-        HandleMovement();
-        HandleDucking();
-        HandleBallInteraction();
-        UpdateAbilityCharges();
+        // Only local player processes input and physics
+        if (photonView == null || photonView.IsMine)
+        {
+            // Local player - your existing Update code
+            HandleInput();
+            CheckGrounded();
+            HandleMovement();
+            HandleDucking();
+            HandleBallInteraction();
+            UpdateAbilityCharges();
+        }
+        else
+        {
+            // Remote player - interpolate to network position
+            InterpolateNetworkMovement();
+        }
     }
+    /// <summary>
+    /// Smooth interpolation for remote players
+    /// </summary>
+    void InterpolateNetworkMovement()
+    {
+        if (!enableNetworkSync) return;
+
+        // Position interpolation
+        float distance = Vector3.Distance(transform.position, networkPosition);
+
+        if (distance > 0.1f) // Teleport if too far (lag spike)
+        {
+            if (distance > 5f)
+            {
+                transform.position = networkPosition;
+            }
+            else
+            {
+                // Smooth interpolation
+                float lerpRate = Time.deltaTime * sendRate;
+                transform.position = Vector3.Lerp(transform.position, networkPosition, lerpRate);
+            }
+        }
+
+        // Apply network state to visuals
+        isGrounded = networkIsGrounded;
+        isDucking = networkIsDucking;
+        hasBall = networkHasBall;
+
+        // Update visual state based on network data
+        if (duckingStateChanged != networkIsDucking)
+        {
+            isDucking = networkIsDucking;
+            duckingStateChanged = true;
+            HandleDucking(); // Apply visual changes
+        }
+    }
+
+
+
+    /// <summary>
+    /// RPC for synchronized actions (abilities, jumps, etc.)
+    /// </summary>
+    [PunRPC]
+    void SyncPlayerAction(string actionType)
+    {
+        // Only apply to remote players (local player already did the action)
+        if (photonView.IsMine) return;
+
+        switch (actionType)
+        {
+            case "Jump":
+                // Play jump animation/sound for remote player
+                PlayCharacterSound(CharacterAudioType.Jump);
+                break;
+
+            case "DoubleJump":
+                PlayCharacterSound(CharacterAudioType.Jump);
+                break;
+
+            case "Dash":
+                // Start dash visual effect for remote player
+                PlayCharacterSound(CharacterAudioType.Dash);
+                if (characterData.dashEffect != null)
+                {
+                    Instantiate(characterData.dashEffect, transform.position, Quaternion.identity);
+                }
+                break;
+
+            case "ThrowBall":
+                PlayCharacterSound(CharacterAudioType.Throw);
+                break;
+
+            case "Ultimate":
+                // Trigger ultimate VFX for remote player
+                if (useVFXManager && VFXManager.Instance != null)
+                {
+                    Vector3 position = transform.position + Vector3.up * vfxSpawnHeight;
+                    VFXManager.Instance.SpawnUltimateActivationVFX(position, this);
+                }
+                break;
+
+            case "Trick":
+                // Trigger trick VFX
+                break;
+
+            case "Treat":
+                // Trigger treat VFX
+                break;
+        }
+    }
+
 
     public void LoadCharacter(CharacterData newCharacterData)
     {
@@ -321,6 +460,9 @@ public class PlayerCharacter : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Modified Jump method with network sync
+    /// </summary>
     void Jump()
     {
         if (characterData == null) return;
@@ -331,12 +473,21 @@ public class PlayerCharacter : MonoBehaviour
         // Play jump sound
         PlayCharacterSound(CharacterAudioType.Jump);
 
+        // Sync action to other players
+        if (photonView != null && photonView.IsMine)
+        {
+            photonView.RPC("SyncPlayerAction", RpcTarget.Others, "Jump");
+        }
+
         if (debugMode)
         {
             Debug.Log($"{characterData.characterName} Jumped! (Height: {characterData.jumpHeight})");
         }
     }
 
+    /// <summary>
+    /// Modified DoubleJump method with network sync
+    /// </summary>
     void DoubleJump()
     {
         if (characterData == null || hasDoubleJumped) return;
@@ -346,6 +497,12 @@ public class PlayerCharacter : MonoBehaviour
 
         // Play jump sound
         PlayCharacterSound(CharacterAudioType.Jump);
+
+        // Sync action to other players
+        if (photonView != null && photonView.IsMine)
+        {
+            photonView.RPC("SyncPlayerAction", RpcTarget.Others, "DoubleJump");
+        }
 
         if (debugMode)
         {
@@ -361,9 +518,18 @@ public class PlayerCharacter : MonoBehaviour
         return timeSinceLastDash >= characterData.GetDashCooldown();
     }
 
+    /// <summary>
+    /// Modified PerformDash method with network sync
+    /// </summary>
     void PerformDash()
     {
         if (characterData == null) return;
+
+        // Sync dash to other players immediately
+        if (photonView != null && photonView.IsMine)
+        {
+            photonView.RPC("SyncPlayerAction", RpcTarget.Others, "Dash");
+        }
 
         StartCoroutine(DashCoroutine());
     }
@@ -486,20 +652,109 @@ public class PlayerCharacter : MonoBehaviour
 
     void HandleBallInteraction()
     {
-        if (BallManager.Instance == null || inputHandler == null || characterData == null || !inputEnabled) return; // FIXED: Check inputEnabled
-
-        // Pickup ball (only if input enabled)
-        if (inputHandler.GetPickupPressed() && !hasBall)
+        if (BallManager.Instance == null || inputHandler == null || characterData == null || !inputEnabled)
         {
-            BallManager.Instance.RequestBallPickup(this);
+            if (inputHandler != null && inputHandler.GetPickupPressed())
+            {
+                Debug.LogError($"❌ PICKUP BLOCKED: BallManager={BallManager.Instance != null}, inputHandler={inputHandler != null}, characterData={characterData != null}, inputEnabled={inputEnabled}");
+            }
+            return;
         }
 
-        // Throw ball (only if input enabled)
+        // Pickup ball when D is pressed
+        if (inputHandler.GetPickupPressed() && !hasBall)
+        {
+            Debug.Log($"🎮 === PICKUP ATTEMPT START === {characterData.characterName}");
+
+            BallController ball = BallManager.Instance.GetCurrentBall();
+            if (ball == null)
+            {
+                Debug.LogError($"❌ No ball found in BallManager!");
+                return;
+            }
+
+            if (!ball.IsFree())
+            {
+                Debug.LogWarning($"❌ Ball not free - state: {ball.GetBallState()}");
+                return;
+            }
+
+            float distance = Vector3.Distance(transform.position, ball.transform.position);
+            Debug.Log($"📏 Distance to ball: {distance:F2} (pickup range: 1.2)");
+
+            if (distance <= 1.2f)
+            {
+                PhotonView ballView = ball.GetComponent<PhotonView>();
+                PhotonView myView = GetComponent<PhotonView>();
+
+                Debug.Log($"📡 PhotonView Check:");
+                Debug.Log($"  - My PhotonView: {(myView != null ? "EXISTS" : "NULL")}");
+                Debug.Log($"  - Ball PhotonView: {(ballView != null ? "EXISTS" : "NULL")}");
+
+                if (myView != null)
+                {
+                    Debug.Log($"  - My ViewID: {myView.ViewID}");
+                    Debug.Log($"  - My IsMine: {myView.IsMine}");
+                    Debug.Log($"  - My Owner: {myView.Owner?.NickName ?? "NULL"}");
+                }
+
+                if (ballView != null)
+                {
+                    Debug.Log($"  - Ball ViewID: {ballView.ViewID}");
+                    Debug.Log($"  - Ball IsMine: {ballView.IsMine}");
+                    Debug.Log($"  - Ball Owner: {ballView.Owner?.NickName ?? "NULL"}");
+                    Debug.Log($"  - Ball OwnershipTransfer: {ballView.OwnershipTransfer}");
+                }
+
+                // Check if this is MY local player
+                if (myView != null && myView.IsMine)
+                {
+                    Debug.Log($"✅ Confirmed: This is MY local player");
+
+                    // Request ownership if we don't have it
+                    if (ballView != null && !ballView.IsMine)
+                    {
+                        Debug.Log($"🔄 Ball not owned by me - requesting ownership");
+                        Debug.Log($"  - Before RequestOwnership: Ball.IsMine = {ballView.IsMine}");
+
+                        ballView.RequestOwnership();
+
+                        Debug.Log($"  - After RequestOwnership: Ball.IsMine = {ballView.IsMine}");
+                        Debug.Log($"🔄 RequestOwnership() called - checking next frame...");
+                    }
+                    else
+                    {
+                        Debug.Log($"✅ I already own the ball");
+                    }
+
+                    // Try pickup
+                    Debug.Log($"🎯 Calling BallManager.RequestBallPickup()...");
+                    bool success = BallManager.Instance.RequestBallPickup(this);
+                    Debug.Log($"🎯 Pickup result: {(success ? "SUCCESS ✅" : "FAILED ❌")}");
+                }
+                else
+                {
+                    Debug.LogWarning($"❌ NOT my local player - myView.IsMine = {myView?.IsMine}");
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"❌ Too far from ball: {distance:F2} > 1.2");
+            }
+
+            Debug.Log($"🎮 === PICKUP ATTEMPT END ===");
+        }
+
+        // Throw ball
         if (inputHandler.GetThrowPressed() && hasBall)
         {
+            Debug.Log($"🚀 {characterData.characterName} throwing ball");
             ThrowBall();
         }
     }
+
+
+
 
     void ThrowBall()
     {
@@ -1575,5 +1830,51 @@ public class PlayerCharacter : MonoBehaviour
 
         GUILayout.EndVertical();
         GUILayout.EndArea();
+    }
+    /// <summary>
+    /// PUN2 IPunObservable - sync player data across network
+    /// </summary>
+    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+    {
+        if (!enableNetworkSync) return;
+
+        if (stream.IsWriting)
+        {
+            // Local player - send data to others
+            stream.SendNext(transform.position);
+            stream.SendNext(velocity);
+            stream.SendNext(isGrounded);
+            stream.SendNext(isDucking);
+            stream.SendNext(hasBall);
+            stream.SendNext(isDashing);
+            stream.SendNext(Time.time); // Timestamp for lag compensation
+        }
+        else
+        {
+            // Remote player - receive data from others
+            networkPosition = (Vector3)stream.ReceiveNext();
+            networkVelocity = (Vector3)stream.ReceiveNext();
+            networkIsGrounded = (bool)stream.ReceiveNext();
+            networkIsDucking = (bool)stream.ReceiveNext();
+            networkHasBall = (bool)stream.ReceiveNext();
+            bool networkIsDashing = (bool)stream.ReceiveNext();
+            float timestamp = (float)stream.ReceiveNext();
+
+            // Calculate network lag for prediction
+            networkLag = Mathf.Abs((float)(PhotonNetwork.Time - timestamp));
+
+            // Apply lag compensation to position
+            if (networkVelocity.magnitude > 0.1f)
+            {
+                networkPosition += networkVelocity * networkLag;
+            }
+
+            // Update dash state for remote players
+            if (networkIsDashing != isDashing)
+            {
+                isDashing = networkIsDashing;
+                // Could trigger dash VFX here for remote players
+            }
+        }
     }
 }
