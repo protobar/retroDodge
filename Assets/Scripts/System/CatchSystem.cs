@@ -1,6 +1,12 @@
-using UnityEngine;
+﻿using UnityEngine;
+using Photon.Pun;
 
-public class CatchSystem : MonoBehaviour
+/// <summary>
+/// FIXED: CatchSystem with network multiplayer support and PlayerCharacter-only compatibility
+/// REMOVED: All legacy CharacterController support
+/// ADDED: Proper PUN2 network synchronization for catching
+/// </summary>
+public class CatchSystem : MonoBehaviourPunCallbacks
 {
     [Header("Catch Settings")]
     [SerializeField] private float catchRange = 2.5f;
@@ -8,9 +14,6 @@ public class CatchSystem : MonoBehaviour
     [SerializeField] private float goodCatchWindow = 1.2f;
     [SerializeField] private float catchCooldown = 0.5f;
     [SerializeField] private bool debugMode = true;
-
-    [Header("Input")]
-    [SerializeField] private KeyCode catchKey = KeyCode.L;
 
     [Header("Visual Feedback")]
     [SerializeField] private GameObject catchIndicator;
@@ -27,40 +30,82 @@ public class CatchSystem : MonoBehaviour
     [SerializeField] private AudioClip catchFailSound;
     [SerializeField] private AudioClip ballIncomingSound;
 
+    [Header("Network Settings")]
+    [SerializeField] private bool enableNetworkSync = true;
+    [SerializeField] private float networkSyncRate = 20f;
+
     // Catch state
     private bool isCatchingAvailable = true;
     private float lastCatchAttempt = 0f;
     private BallController nearestThrownBall = null;
     private float ballDetectionTime = 0f;
+    private float lastNetworkSync = 0f;
 
-    // References
-    private CharacterController character;
+    // References - CLEANED UP: Only PlayerCharacter support
+    private PlayerCharacter playerCharacter;
+    private PlayerInputHandler inputHandler;
     private SphereCollider catchTrigger;
 
     // Visual effects
     private LineRenderer catchRangeIndicator;
 
-    public enum CatchResult { Perfect, Good, Miss, TooEarly, TooLate }
+    // Network sync variables
+    private bool networkIsCatchingAvailable;
+    private bool networkIsBallInRange;
+    private float networkBallDetectionTime;
 
-    // Replace the Awake method in CatchSystem.cs
+    public enum CatchResult { Perfect, Good, Miss, TooEarly, TooLate }
 
     void Awake()
     {
-        // Try to get CharacterController first (legacy system)
-        character = GetComponent<CharacterController>();
+        // FIXED: Only support PlayerCharacter system
+        playerCharacter = GetComponent<PlayerCharacter>();
 
-        // If no CharacterController, we're probably using the new PlayerCharacter system
-        if (character == null)
+        if (playerCharacter == null)
         {
-            if (debugMode)
-            {
-                Debug.Log($"CatchSystem on {gameObject.name}: No CharacterController found, assuming new PlayerCharacter system");
-            }
+            Debug.LogError($"CatchSystem on {gameObject.name}: PlayerCharacter component is required!");
+            enabled = false;
+            return;
         }
 
         SetupCatchTrigger();
         SetupVisualIndicators();
         SetupAudio();
+
+        if (debugMode)
+        {
+            Debug.Log($"CatchSystem initialized for PlayerCharacter: {gameObject.name}");
+        }
+    }
+
+    void Start()
+    {
+        // FIXED: Get input handler in Start() to handle initialization order
+        if (playerCharacter != null)
+        {
+            inputHandler = playerCharacter.GetInputHandler();
+
+            if (inputHandler == null)
+            {
+                // Try to get it directly from the GameObject as fallback
+                inputHandler = GetComponent<PlayerInputHandler>();
+
+                if (inputHandler == null)
+                {
+                    Debug.LogError($"CatchSystem on {gameObject.name}: PlayerInputHandler not found! Make sure the player prefab has PlayerInputHandler component.");
+                }
+                else
+                {
+                    if (debugMode)
+                        Debug.Log($"CatchSystem found PlayerInputHandler directly on GameObject");
+                }
+            }
+            else
+            {
+                if (debugMode)
+                    Debug.Log($"CatchSystem found PlayerInputHandler via PlayerCharacter");
+            }
+        }
     }
 
     void SetupCatchTrigger()
@@ -139,41 +184,83 @@ public class CatchSystem : MonoBehaviour
 
     void Update()
     {
-        // Continuously check for thrown balls in range
-        CheckForThrownBallsInRange();
+        // FIXED: Only process input and logic for local players
+        PhotonView myPhotonView = GetComponent<PhotonView>();
+        bool isMyPlayer = myPhotonView == null || myPhotonView.IsMine;
 
-        HandleCatchInput();
-        UpdateCatchIndicator();
-        UpdateCatchCooldown();
-
-        // Debug key to force show catch indicator
-        if (debugMode && Input.GetKeyDown(KeyCode.G))
+        if (isMyPlayer)
         {
-            bool currentState = catchIndicator != null ? catchIndicator.activeSelf : false;
-            SetCatchIndicatorVisible(!currentState);
-            Debug.Log($"Force toggled catch indicator: {!currentState}");
-        }
+            // Local player - process full logic
+            CheckForThrownBallsInRange();
+            HandleCatchInput();
+            UpdateCatchCooldown();
 
-        // Debug key to test trigger manually + keep indicator on
-        if (debugMode && Input.GetKeyDown(KeyCode.H))
-        {
-            BallController ball = BallManager.Instance?.GetCurrentBall();
-            if (ball != null)
+            // Send network updates
+            if (enableNetworkSync && Time.time - lastNetworkSync >= 1f / networkSyncRate)
             {
-                OnBallEnterRange(ball);
-                Debug.Log("Manually triggered ball enter range!");
-
-                // Force keep indicator visible for testing
-                SetCatchIndicatorVisible(true);
+                SendNetworkUpdate();
+                lastNetworkSync = Time.time;
             }
         }
+        else
+        {
+            // Remote player - apply network state
+            ApplyNetworkState();
+        }
 
-        // Debug key to force clear ball range (stop indicator)
-        if (debugMode && Input.GetKeyDown(KeyCode.N))
+        // All players update visual indicators
+        UpdateCatchIndicator();
+
+        // Debug controls (local only)
+        if (isMyPlayer && debugMode)
+        {
+            HandleDebugInput();
+        }
+    }
+
+    void SendNetworkUpdate()
+    {
+        if (photonView != null && photonView.IsMine)
+        {
+            // Send catch state updates via RPC if there are significant changes
+            bool stateChanged = (networkIsCatchingAvailable != isCatchingAvailable) ||
+                               (networkIsBallInRange != (nearestThrownBall != null)) ||
+                               Mathf.Abs(networkBallDetectionTime - ballDetectionTime) > 0.1f;
+
+            if (stateChanged)
+            {
+                photonView.RPC("SyncCatchState", RpcTarget.Others,
+                              isCatchingAvailable,
+                              nearestThrownBall != null,
+                              ballDetectionTime);
+            }
+        }
+    }
+
+    [PunRPC]
+    void SyncCatchState(bool isAvailable, bool ballInRange, float detectionTime)
+    {
+        // Apply network state from remote player
+        networkIsCatchingAvailable = isAvailable;
+        networkIsBallInRange = ballInRange;
+        networkBallDetectionTime = detectionTime;
+    }
+
+    void ApplyNetworkState()
+    {
+        // Apply network state to remote player
+        isCatchingAvailable = networkIsCatchingAvailable;
+        ballDetectionTime = networkBallDetectionTime;
+
+        // Update ball reference based on network state
+        if (networkIsBallInRange && nearestThrownBall == null)
+        {
+            // Try to find the ball that should be in range
+            FindNearestThrownBall();
+        }
+        else if (!networkIsBallInRange)
         {
             nearestThrownBall = null;
-            SetCatchIndicatorVisible(false);
-            Debug.Log("Force cleared ball range!");
         }
     }
 
@@ -223,47 +310,86 @@ public class CatchSystem : MonoBehaviour
         }
     }
 
-    // In CatchSystem.cs, replace Input.GetKeyDown(catchKey) with:
-    // Replace the HandleCatchInput method in CatchSystem.cs (around line 216)
+    void FindNearestThrownBall()
+    {
+        nearestThrownBall = null;
+        float closestDistance = catchRange;
+
+        BallController[] allBalls = FindObjectsOfType<BallController>();
+        foreach (BallController ball in allBalls)
+        {
+            if (ball.GetBallState() != BallController.BallState.Thrown)
+                continue;
+
+            float distance = Vector3.Distance(transform.position, ball.transform.position);
+            if (distance <= catchRange && distance < closestDistance)
+            {
+                nearestThrownBall = ball;
+                closestDistance = distance;
+            }
+        }
+    }
 
     void HandleCatchInput()
     {
-        PlayerInputHandler inputHandler = null;
+        // FIXED: Try to get input handler if we don't have one yet
+        if (inputHandler == null && playerCharacter != null)
+        {
+            inputHandler = playerCharacter.GetInputHandler();
 
-        // Try to get input handler from both character systems
-        if (character != null)
-        {
-            // Legacy CharacterController system
-            inputHandler = character.GetInputHandler();
-        }
-        else
-        {
-            // New PlayerCharacter system - look for PlayerCharacter component
-            PlayerCharacter playerCharacter = GetComponent<PlayerCharacter>();
-            if (playerCharacter != null)
+            // Fallback: try direct component lookup
+            if (inputHandler == null)
             {
-                inputHandler = playerCharacter.GetInputHandler();
+                inputHandler = GetComponent<PlayerInputHandler>();
             }
         }
 
-        // Fallback: try to get PlayerInputHandler directly from this GameObject
+        // FIXED: Use PlayerCharacter's input handler with fallback
         if (inputHandler == null)
         {
-            inputHandler = GetComponent<PlayerInputHandler>();
+            // Don't spam the console - only log occasionally
+            if (Time.frameCount % 120 == 0 && debugMode) // Every 2 seconds at 60fps
+            {
+                Debug.LogWarning($"CatchSystem on {gameObject.name}: PlayerInputHandler still not found! Make sure your player prefab has PlayerInputHandler component.");
+            }
+            return;
         }
 
         // Check for catch input
-        if (inputHandler != null && inputHandler.GetCatchPressed() && isCatchingAvailable)
+        if (inputHandler.GetCatchPressed() && isCatchingAvailable)
         {
             AttemptCatch();
         }
-        else if (inputHandler == null && debugMode)
+    }
+
+    void HandleDebugInput()
+    {
+        // Debug key to force show catch indicator
+        if (Input.GetKeyDown(KeyCode.G))
         {
-            // Only log this once to avoid spam
-            if (Time.frameCount % 60 == 0) // Log once per second at 60fps
+            bool currentState = catchIndicator != null ? catchIndicator.activeSelf : false;
+            SetCatchIndicatorVisible(!currentState);
+            Debug.Log($"Force toggled catch indicator: {!currentState}");
+        }
+
+        // Debug key to test trigger manually + keep indicator on
+        if (Input.GetKeyDown(KeyCode.H))
+        {
+            BallController ball = BallManager.Instance?.GetCurrentBall();
+            if (ball != null)
             {
-                Debug.LogWarning($"CatchSystem on {gameObject.name}: No PlayerInputHandler found! Make sure your player has either CharacterController with GetInputHandler() or PlayerCharacter component.");
+                OnBallEnterRange(ball);
+                Debug.Log("Manually triggered ball enter range!");
+                SetCatchIndicatorVisible(true);
             }
+        }
+
+        // Debug key to force clear ball range (stop indicator)
+        if (Input.GetKeyDown(KeyCode.N))
+        {
+            nearestThrownBall = null;
+            SetCatchIndicatorVisible(false);
+            Debug.Log("Force cleared ball range!");
         }
     }
 
@@ -356,7 +482,8 @@ public class CatchSystem : MonoBehaviour
 
         if (debugMode)
         {
-            Debug.Log($"Catch attempt! Ball in range: {nearestThrownBall != null}");
+            Debug.Log($"🟢 === CATCH ATTEMPT === {playerCharacter.name}");
+            Debug.Log($"Ball in range: {nearestThrownBall != null}");
             if (nearestThrownBall != null)
             {
                 float debugBallRangeTime = Time.time - ballDetectionTime;
@@ -405,8 +532,8 @@ public class CatchSystem : MonoBehaviour
 
         if (result == CatchResult.Perfect || result == CatchResult.Good)
         {
-            // Successful catch
-            OnCatchResult(result, nearestThrownBall);
+            // FIXED: Network sync successful catch
+            ExecuteSuccessfulCatch(nearestThrownBall, result);
         }
         else
         {
@@ -456,7 +583,7 @@ public class CatchSystem : MonoBehaviour
         {
             case CatchResult.Perfect:
             case CatchResult.Good:
-                ExecuteSuccessfulCatch(ball, result);
+                // Success is handled in ExecuteSuccessfulCatch
                 break;
             case CatchResult.Miss:
             case CatchResult.TooEarly:
@@ -468,78 +595,108 @@ public class CatchSystem : MonoBehaviour
         Debug.Log($"Catch attempt: {result}");
     }
 
-    // Replace the ExecuteSuccessfulCatch method in CatchSystem.cs (around line 476)
-
+    /// <summary>
+    /// FIXED: Execute successful catch with network synchronization
+    /// </summary>
     void ExecuteSuccessfulCatch(BallController ball, CatchResult result)
     {
-        if (ball != null)
-        {
-            // Determine which character system we're using and call appropriate method
-            PlayerCharacter playerCharacter = GetComponent<PlayerCharacter>();
+        if (ball == null || playerCharacter == null) return;
 
-            if (playerCharacter != null)
+        Debug.Log($"✅ === SUCCESSFUL CATCH === {playerCharacter.name}");
+
+        // FIXED: Use PhotonView to sync catch across network
+        PhotonView ballPhotonView = ball.GetComponent<PhotonView>();
+        PhotonView myPhotonView = GetComponent<PhotonView>();
+
+        if (myPhotonView != null && myPhotonView.IsMine)
+        {
+            // Local player caught ball - sync to others
+            if (ballPhotonView != null)
             {
-                // New character system - use PlayerCharacter
-                ball.OnCaught(playerCharacter);
-                playerCharacter.SetHasBall(true);
-            }
-            else if (character != null)
-            {
-                // Legacy character system - use CharacterController
-                ball.OnCaught(character);
-                character.SetHasBall(true);
+                // Send RPC to sync catch
+                photonView.RPC("SyncCatchSuccess", RpcTarget.All,
+                              ballPhotonView.ViewID,
+                              myPhotonView.ViewID,
+                              (int)result);
             }
             else
             {
-                Debug.LogError($"CatchSystem on {gameObject.name}: No valid character component found for catch!");
-                return;
+                // Local ball - execute directly
+                ExecuteCatchLocally(ball, result);
             }
-
-            // Clear ball reference
-            nearestThrownBall = null;
         }
+        else
+        {
+            Debug.LogWarning($"Cannot execute catch - not my player");
+        }
+    }
 
+    [PunRPC]
+    void SyncCatchSuccess(int ballViewID, int catcherViewID, int catchResult)
+    {
+        // Find the ball and catcher by their PhotonView IDs
+        PhotonView ballView = PhotonView.Find(ballViewID);
+        PhotonView catcherView = PhotonView.Find(catcherViewID);
+
+        if (ballView != null && catcherView != null)
+        {
+            BallController ball = ballView.GetComponent<BallController>();
+            PlayerCharacter catcher = catcherView.GetComponent<PlayerCharacter>();
+
+            if (ball != null && catcher != null)
+            {
+                // Execute catch on all clients
+                ball.OnCaught(catcher);
+                catcher.SetHasBall(true);
+
+                // Clear ball reference on the catcher
+                CatchSystem catcherCatchSystem = catcher.GetComponent<CatchSystem>();
+                if (catcherCatchSystem != null)
+                {
+                    catcherCatchSystem.nearestThrownBall = null;
+                }
+
+                // Play success effects on all clients
+                PlayCatchSuccessEffects((CatchResult)catchResult);
+
+                if (debugMode)
+                {
+                    Debug.Log($"Network synced successful catch: {catcher.name} caught ball");
+                }
+            }
+        }
+    }
+
+    void ExecuteCatchLocally(BallController ball, CatchResult result)
+    {
+        // Execute catch locally
+        ball.OnCaught(playerCharacter);
+        playerCharacter.SetHasBall(true);
+
+        // Clear ball reference
+        nearestThrownBall = null;
+
+        // Play success effects
+        PlayCatchSuccessEffects(result);
+
+        Debug.Log($"Local successful catch! ({result})");
+    }
+
+    void PlayCatchSuccessEffects(CatchResult result)
+    {
         // Play success sound
         PlaySound(catchSuccessSound);
 
         // Visual effect for successful catch
         CreateCatchEffect(result == CatchResult.Perfect);
 
-        Debug.Log($"Successful catch! ({result})");
-    }
-
-    /// <summary>
-    /// Helper method to determine which character system we're using
-    /// </summary>
-    private bool IsUsingPlayerCharacterSystem()
-    {
-        return GetComponent<PlayerCharacter>() != null;
-    }
-
-    /// <summary>
-    /// Get the appropriate character component for ball operations
-    /// </summary>
-    private void SetHasBallOnCharacter(bool hasBall)
-    {
-        PlayerCharacter playerCharacter = GetComponent<PlayerCharacter>();
-
+        // Add ability charges for successful catch
         if (playerCharacter != null)
         {
-            // New character system
-            playerCharacter.SetHasBall(hasBall);
-        }
-        else if (character != null)
-        {
-            // Legacy character system
-            character.SetHasBall(hasBall);
-        }
-        else
-        {
-            Debug.LogError($"CatchSystem on {gameObject.name}: No valid character component found!");
+            playerCharacter.OnSuccessfulCatch();
         }
     }
 
-    // Also update the ExecuteFailedCatch method to be consistent:
     void ExecuteFailedCatch(BallController ball, CatchResult result)
     {
         // Ball continues its trajectory or bounces
@@ -636,9 +793,25 @@ public class CatchSystem : MonoBehaviour
     public bool IsBallInRange() => nearestThrownBall != null;
     public float GetCatchRange() => catchRange;
     public BallController GetNearestThrownBall() => nearestThrownBall;
+    public PlayerCharacter GetPlayerCharacter() => playerCharacter;
+
+    // Network sync methods
+    public void SetNetworkSyncEnabled(bool enabled)
+    {
+        enableNetworkSync = enabled;
+    }
+
+    public bool IsNetworkSyncEnabled() => enableNetworkSync;
+
+    // ═══════════════════════════════════════════════════════════════
+    // LEGACY SUPPORT REMOVED
+    // All CharacterController methods have been removed to clean up the code
+    // ═══════════════════════════════════════════════════════════════
 }
 
-// Helper component for trigger detection
+/// <summary>
+/// Helper component for trigger detection - UNCHANGED
+/// </summary>
 public class CatchTriggerHandler : MonoBehaviour
 {
     private CatchSystem catchSystem;

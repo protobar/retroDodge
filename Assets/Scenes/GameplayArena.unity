@@ -1745,6 +1745,77 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 196216094}
   m_CullTransparentMesh: 1
+--- !u!1 &204383336
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 204383339}
+  - component: {fileID: 204383338}
+  - component: {fileID: 204383337}
+  m_Layer: 0
+  m_Name: RoundManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &204383337
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 204383336}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa584fbee541324448dd18d8409c7a41, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ObservedComponentsFoldoutOpen: 1
+  Group: 0
+  prefixField: -1
+  Synchronization: 3
+  OwnershipTransfer: 0
+  observableSearch: 2
+  ObservedComponents: []
+  sceneViewId: 6
+  InstantiationId: 0
+  isRuntimeInstantiated: 0
+--- !u!114 &204383338
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 204383336}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: df16553c77e989443848b9d16fbe1e6b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ballSpawnDelay: 1
+  ballSpawnPosition: {x: 0, y: 2, z: 0}
+  environmentObjects: []
+  resetEnvironmentEachRound: 1
+--- !u!4 &204383339
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 204383336}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.020877263, y: -1.3864623, z: 8.062303}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &213777051
 GameObject:
   m_ObjectHideFlags: 0
@@ -2890,7 +2961,6 @@ MonoBehaviour:
   goodCatchWindow: 0.5
   catchCooldown: 0.5
   debugMode: 1
-  catchKey: 108
   catchIndicator: {fileID: 0}
   alwaysShowCatchRange: 0
   perfectZoneColor: {r: 0, g: 1, b: 0, a: 1}
@@ -2902,6 +2972,8 @@ MonoBehaviour:
   catchSuccessSound: {fileID: 0}
   catchFailSound: {fileID: 0}
   ballIncomingSound: {fileID: 0}
+  enableNetworkSync: 1
+  networkSyncRate: 20
 --- !u!136 &471351475
 CapsuleCollider:
   m_ObjectHideFlags: 0
@@ -3043,15 +3115,7 @@ MonoBehaviour:
   currentHealth: 100
   invulnerableOnSpawn: 1
   invulnerabilityDuration: 1
-  healthBarSlider: {fileID: 0}
-  healthText: {fileID: 0}
-  healthBarFill: {fileID: 0}
-  healthyColor: {r: 0, g: 1, b: 0, a: 1}
-  lowHealthColor: {r: 1, g: 0, b: 0, a: 1}
-  invulnerableColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  lowHealthThreshold: 0.3
   deathEffectPrefab: {fileID: 0}
-  respawnDelay: 3
   enableHealthRegeneration: 0
   regenRate: 5
   regenDelay: 5
@@ -3059,7 +3123,6 @@ MonoBehaviour:
   deathSound: {fileID: 0}
   healSound: {fileID: 0}
   invulnerabilitySound: {fileID: 0}
-  debugMode: 0
 --- !u!114 &471351481
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4861,14 +4924,14 @@ GameObject:
   m_Component:
   - component: {fileID: 989184901}
   - component: {fileID: 989184903}
-  - component: {fileID: 989184902}
+  - component: {fileID: 989184904}
   m_Layer: 0
   m_Name: MatchManager
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &989184901
 Transform:
   m_ObjectHideFlags: 0
@@ -4884,26 +4947,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &989184902
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 989184900}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: df16553c77e989443848b9d16fbe1e6b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  roundDuration: 90
-  preFightDelay: 3
-  postRoundDelay: 2
-  ballSpawnDelay: 1
-  ballSpawnPosition: {x: 0, y: 2, z: 0}
-  enableNetworking: 0
-  isHost: 1
-  debugMode: 0
 --- !u!114 &989184903
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4917,7 +4960,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   roundsToWin: 2
-  roundDuration: 90
+  roundDuration: 30
   preFightCountdown: 3
   postRoundDelay: 3
   matchEndDelay: 5
@@ -4926,14 +4969,34 @@ MonoBehaviour:
   characterSelectionScene: CharacterSelection
   mainMenuScene: MainMenu
   matchUI: {fileID: 1813602807}
-  enableNetworking: 0
-  isHost: 1
   audioSource: {fileID: 0}
   roundStartSound: {fileID: 0}
   roundEndSound: {fileID: 0}
   matchWinSound: {fileID: 0}
   countdownSound: {fileID: 0}
-  debugMode: 0
+--- !u!114 &989184904
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 989184900}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa584fbee541324448dd18d8409c7a41, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ObservedComponentsFoldoutOpen: 1
+  Group: 0
+  prefixField: -1
+  Synchronization: 3
+  OwnershipTransfer: 0
+  observableSearch: 2
+  ObservedComponents:
+  - {fileID: 989184903}
+  sceneViewId: 5
+  InstantiationId: 0
+  isRuntimeInstantiated: 0
 --- !u!1 &1012672491
 GameObject:
   m_ObjectHideFlags: 0
@@ -8374,99 +8437,6 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
---- !u!1 &1516665237
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1516665240}
-  - component: {fileID: 1516665239}
-  - component: {fileID: 1516665238}
-  m_Layer: 0
-  m_Name: BallHoldTest
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 0
---- !u!114 &1516665238
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1516665237}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d38052824be97e14587a49016d462bc7, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  timerCanvas: {fileID: 0}
-  timerPanel: {fileID: 0}
-  timerFillImage: {fileID: 0}
-  timerText: {fileID: 0}
-  phaseText: {fileID: 0}
-  backgroundImage: {fileID: 0}
-  normalColor: {r: 0, g: 1, b: 0, a: 1}
-  warningColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  dangerColor: {r: 1, g: 0, b: 0, a: 1}
-  penaltyColor: {r: 1, g: 0, b: 1, a: 1}
-  pulseSpeed: 2
-  shakeIntensity: 5
-  enablePulseAnimation: 1
-  enableShakeAnimation: 1
-  followPlayer: 1
-  offsetFromPlayer: {x: 0, y: 2, z: 0}
-  useScreenSpaceOverlay: 1
-  audioSource: {fileID: 0}
-  warningBeep: {fileID: 0}
-  dangerBeep: {fileID: 0}
-  penaltyAlarm: {fileID: 0}
-  debugMode: 0
---- !u!114 &1516665239
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1516665237}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1612a566b17c0fc4d869d672d023ff65, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  enableTestMode: 1
-  testMaxHoldTime: 5
-  testWarningTime: 3
-  testDangerTime: 4
-  testDamagePerSecond: 2
-  forceBallPickupKey: 112
-  forceThrowBallKey: 32
-  skipToWarningKey: 49
-  skipToDangerKey: 50
-  skipToPenaltyKey: 51
-  resetTimerKey: 48
-  toggleUIKey: 117
-  showTestInstructions: 1
-  showTimerDebugInfo: 1
---- !u!4 &1516665240
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1516665237}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -2.5242062, y: 4.369962, z: 1.0081013}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1518670534
 GameObject:
   m_ObjectHideFlags: 0
@@ -10367,13 +10337,14 @@ GameObject:
   m_Component:
   - component: {fileID: 1813602806}
   - component: {fileID: 1813602807}
+  - component: {fileID: 1813602808}
   m_Layer: 0
   m_Name: MatchUI
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &1813602806
 Transform:
   m_ObjectHideFlags: 0
@@ -10437,19 +10408,37 @@ MonoBehaviour:
   winnerName: {fileID: 174058111}
   rematchButton: {fileID: 110140369}
   mainMenuButton: {fileID: 1602076795}
+  networkStatusPanel: {fileID: 0}
+  networkStatusText: {fileID: 0}
+  connectionLostPanel: {fileID: 0}
   healthBarHealthyColor: {r: 0, g: 1, b: 0, a: 1}
   healthBarWarningColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   healthBarCriticalColor: {r: 1, g: 0, b: 0, a: 1}
-  healthBarFlashCurve:
-    serializedVersion: 2
-    m_Curve: []
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
   audioSource: {fileID: 0}
   uiUpdateSound: {fileID: 0}
   announcementSound: {fileID: 0}
-  debugMode: 0
+--- !u!114 &1813602808
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1813602805}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa584fbee541324448dd18d8409c7a41, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ObservedComponentsFoldoutOpen: 1
+  Group: 0
+  prefixField: -1
+  Synchronization: 3
+  OwnershipTransfer: 0
+  observableSearch: 2
+  ObservedComponents: []
+  sceneViewId: 4
+  InstantiationId: 0
+  isRuntimeInstantiated: 0
 --- !u!1 &1820952862
 GameObject:
   m_ObjectHideFlags: 0
@@ -12764,8 +12753,8 @@ SceneRoots:
   - {fileID: 471351478}
   - {fileID: 1613964171}
   - {fileID: 1534595909}
-  - {fileID: 1516665240}
   - {fileID: 989184901}
+  - {fileID: 204383339}
   - {fileID: 1813602806}
   - {fileID: 1836470994}
   - {fileID: 1397217098}

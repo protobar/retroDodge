@@ -132,7 +132,6 @@ MonoBehaviour:
   goodCatchWindow: 0.5
   catchCooldown: 0.5
   debugMode: 0
-  catchKey: 115
   catchIndicator: {fileID: 0}
   alwaysShowCatchRange: 0
   perfectZoneColor: {r: 0, g: 1, b: 0, a: 1}
@@ -144,6 +143,8 @@ MonoBehaviour:
   catchSuccessSound: {fileID: 0}
   catchFailSound: {fileID: 0}
   ballIncomingSound: {fileID: 0}
+  enableNetworkSync: 1
+  networkSyncRate: 20
 --- !u!114 &4564743713728784474
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -197,15 +198,7 @@ MonoBehaviour:
   currentHealth: 100
   invulnerableOnSpawn: 1
   invulnerabilityDuration: 1
-  healthBarSlider: {fileID: 0}
-  healthText: {fileID: 0}
-  healthBarFill: {fileID: 0}
-  healthyColor: {r: 0, g: 1, b: 0, a: 1}
-  lowHealthColor: {r: 1, g: 0, b: 0, a: 1}
-  invulnerableColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  lowHealthThreshold: 0.3
   deathEffectPrefab: {fileID: 0}
-  respawnDelay: 3
   enableHealthRegeneration: 0
   regenRate: 5
   regenDelay: 5
@@ -213,7 +206,6 @@ MonoBehaviour:
   deathSound: {fileID: 0}
   healSound: {fileID: 0}
   invulnerabilitySound: {fileID: 0}
-  debugMode: 0
 --- !u!114 &1815663371216282099
 MonoBehaviour:
   m_ObjectHideFlags: 0

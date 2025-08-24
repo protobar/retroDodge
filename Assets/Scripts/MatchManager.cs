@@ -2,12 +2,16 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using System.Collections;
 using System.Collections.Generic;
+using Photon.Pun;
+using Photon.Realtime;
+using Hashtable = ExitGames.Client.Photon.Hashtable;
 
 /// <summary>
-/// Match Manager - Handles Best of 3 Match System
-/// Network Ready with Local Testing Support
+/// PUN2 Multiplayer Match Manager - Handles Best of 3 Match System
+/// Fully synchronized across network with Master Client authority
+/// Fixed timer synchronization using PhotonNetwork.Time
 /// </summary>
-public class MatchManager : MonoBehaviour
+public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 {
     [Header("Match Settings")]
     [SerializeField] private int roundsToWin = 2;
@@ -27,10 +31,6 @@ public class MatchManager : MonoBehaviour
     [Header("UI References")]
     [SerializeField] private MatchUI matchUI;
 
-    [Header("Network Settings (Future)")]
-    [SerializeField] private bool enableNetworking = false;
-    [SerializeField] private bool isHost = true;
-
     [Header("Audio")]
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip roundStartSound;
@@ -38,46 +38,36 @@ public class MatchManager : MonoBehaviour
     [SerializeField] private AudioClip matchWinSound;
     [SerializeField] private AudioClip countdownSound;
 
-    [Header("Debug")]
-    [SerializeField] private bool debugMode = true;
-
     // Match state
     public enum MatchState { Initializing, PreFight, Fighting, RoundEnd, MatchEnd }
     private MatchState currentState = MatchState.Initializing;
 
-    // Match data
-    private CharacterSelectionData selectionData;
+    // Match data (synchronized)
     private int currentRound = 0;
     private int player1RoundsWon = 0;
     private int player2RoundsWon = 0;
-    private float currentRoundTime = 0f;
-    private int matchWinner = 0; // 0 = none, 1 = player1, 2 = player2
+    private int matchWinner = 0;
+
+    // Timer synchronization using PhotonNetwork.Time
+    private double roundStartTime = 0.0;
+    private double roundEndTime = 0.0;
+    private bool roundActive = false;
 
     // Player references
-    private GameObject player1GameObject;
-    private GameObject player2GameObject;
-    private PlayerCharacter player1Character;
-    private PlayerCharacter player2Character;
-    private PlayerHealth player1Health;
-    private PlayerHealth player2Health;
+    private Dictionary<int, PlayerCharacter> networkPlayers = new Dictionary<int, PlayerCharacter>();
+    private Dictionary<int, PlayerHealth> networkPlayersHealth = new Dictionary<int, PlayerHealth>();
 
-    // Round management
-    private RoundManager roundManager;
-    private bool roundActive = false;
-    private Coroutine roundTimerCoroutine;
+    // Network management - room property keys
+    private const string ROOM_MATCH_STATE = "MatchState";
+    private const string ROOM_CURRENT_ROUND = "CurrentRound";
+    private const string ROOM_P1_ROUNDS = "P1Rounds";
+    private const string ROOM_P2_ROUNDS = "P2Rounds";
+    private const string ROOM_ROUND_START_TIME = "RoundStartTime";
+    private const string ROOM_ROUND_END_TIME = "RoundEndTime";
+    private const string ROOM_ROUND_ACTIVE = "RoundActive";
 
     void Awake()
     {
-        // Get selection data from character selection
-        selectionData = CharacterSelectionManager.GetSelectionData();
-
-        if (!selectionData.IsValid())
-        {
-            Debug.LogError("Invalid character selection data! Returning to character selection.");
-            SceneManager.LoadScene(characterSelectionScene);
-            return;
-        }
-
         // Setup audio
         if (audioSource == null)
         {
@@ -86,236 +76,181 @@ public class MatchManager : MonoBehaviour
             audioSource.volume = 0.7f;
         }
 
-        // Find or create UI
+        // Find UI
         if (matchUI == null)
         {
             matchUI = FindObjectOfType<MatchUI>();
-        }
-
-        // Find or create round manager
-        roundManager = GetComponent<RoundManager>();
-        if (roundManager == null)
-        {
-            roundManager = gameObject.AddComponent<RoundManager>();
         }
     }
 
     void Start()
     {
-        StartCoroutine(InitializeMatch());
+        // Initialize match when all players are ready
+        StartCoroutine(WaitForPlayersAndInitialize());
+    }
+
+    void Update()
+    {
+        // Update timer display for all clients
+        if (roundActive && matchUI != null)
+        {
+            float remainingTime = GetRemainingTime();
+            matchUI.UpdateTimer(remainingTime);
+
+            // Master Client checks for time up
+            if (PhotonNetwork.IsMasterClient && remainingTime <= 0f)
+            {
+                EndRoundByTimeOut();
+            }
+        }
+    }
+
+    IEnumerator WaitForPlayersAndInitialize()
+    {
+        // Wait for both players to be in room
+        while (PhotonNetwork.PlayerList.Length < 2)
+        {
+            yield return new WaitForSeconds(0.1f);
+        }
+
+        // Wait for player objects to spawn
+        yield return new WaitForSeconds(1f);
+
+        // Cache network players
+        CacheNetworkPlayers();
+
+        // Only Master Client initializes the match
+        if (PhotonNetwork.IsMasterClient)
+        {
+            StartCoroutine(InitializeMatch());
+        }
+        else
+        {
+            // Non-master clients sync with room properties
+            SyncFromRoomProperties();
+            InitializeUI();
+        }
+    }
+
+    void CacheNetworkPlayers()
+    {
+        networkPlayers.Clear();
+        networkPlayersHealth.Clear();
+
+        PlayerCharacter[] players = FindObjectsOfType<PlayerCharacter>();
+        foreach (PlayerCharacter player in players)
+        {
+            PhotonView pv = player.GetComponent<PhotonView>();
+            if (pv != null)
+            {
+                int actorNumber = pv.Owner.ActorNumber;
+                networkPlayers[actorNumber] = player;
+
+                PlayerHealth health = player.GetComponent<PlayerHealth>();
+                if (health != null)
+                {
+                    networkPlayersHealth[actorNumber] = health;
+                    health.OnPlayerDeath += (controller) => OnPlayerDeath(actorNumber);
+                    health.OnHealthChanged += (current, max) => OnPlayerHealthChanged(actorNumber, current, max);
+                }
+            }
+        }
     }
 
     IEnumerator InitializeMatch()
     {
         currentState = MatchState.Initializing;
+        UpdateRoomProperties();
 
-        if (debugMode)
-        {
-            Debug.Log($"Initializing match: {selectionData.player1Character.characterName} vs {selectionData.player2Character.characterName}");
-        }
-
-        // Spawn players
-        yield return StartCoroutine(SpawnPlayers());
+        yield return new WaitForSeconds(1f);
 
         // Initialize UI
-        InitializeMatchUI();
-
-        // Wait a moment for everything to settle
-        yield return new WaitForSeconds(1f);
+        InitializeUI();
 
         // Start first round
         StartRound(1);
     }
 
-    IEnumerator SpawnPlayers()
+    void InitializeUI()
     {
-        // Destroy existing players
-        if (player1GameObject != null)
-            Destroy(player1GameObject);
-        if (player2GameObject != null)
-            Destroy(player2GameObject);
+        if (matchUI == null) return;
 
-        // Spawn Player 1
-        if (selectionData.player1Character.characterPrefab != null)
+        // Get character data from network players
+        CharacterData player1Data = null;
+        CharacterData player2Data = null;
+
+        var playerList = PhotonNetwork.PlayerList;
+        if (playerList.Length >= 2)
         {
-            Vector3 spawnPos = player1SpawnPoint != null ? player1SpawnPoint.position : new Vector3(-5f, 0f, 0f);
-            player1GameObject = Instantiate(selectionData.player1Character.characterPrefab, spawnPos, Quaternion.identity);
-            player1GameObject.name = "Player1";
+            // Player 1 (ActorNumber 1)
+            if (networkPlayers.ContainsKey(1))
+            {
+                player1Data = networkPlayers[1].GetCharacterData();
+            }
 
-            // Setup Player 1 components
-            SetupPlayer(player1GameObject, selectionData.player1Character, PlayerInputHandler.PlayerInputType.Player1);
-
-            player1Character = player1GameObject.GetComponent<PlayerCharacter>();
-            player1Health = player1GameObject.GetComponent<PlayerHealth>();
+            // Player 2 (ActorNumber 2)  
+            if (networkPlayers.ContainsKey(2))
+            {
+                player2Data = networkPlayers[2].GetCharacterData();
+            }
         }
 
-        yield return new WaitForEndOfFrame();
-
-        // Spawn Player 2
-        if (selectionData.player2Character.characterPrefab != null)
+        if (player1Data != null && player2Data != null)
         {
-            Vector3 spawnPos = player2SpawnPoint != null ? player2SpawnPoint.position : new Vector3(5f, 0f, 0f);
-            player2GameObject = Instantiate(selectionData.player2Character.characterPrefab, spawnPos, Quaternion.identity);
-            player2GameObject.name = "Player2";
-
-            // Setup Player 2 components
-            SetupPlayer(player2GameObject, selectionData.player2Character, PlayerInputHandler.PlayerInputType.Player2);
-
-            player2Character = player2GameObject.GetComponent<PlayerCharacter>();
-            player2Health = player2GameObject.GetComponent<PlayerHealth>();
-        }
-
-        yield return new WaitForEndOfFrame();
-
-        // Validate spawns
-        if (player1Character == null || player2Character == null)
-        {
-            Debug.LogError("Failed to spawn players properly!");
-            yield break;
-        }
-
-        // Load character data
-        if (player1Character != null)
-            player1Character.LoadCharacter(selectionData.player1Character);
-
-        if (player2Character != null)
-            player2Character.LoadCharacter(selectionData.player2Character);
-
-        // Setup health event listeners
-        SetupHealthEventListeners();
-
-        if (debugMode)
-        {
-            Debug.Log("Players spawned successfully");
-        }
-    }
-
-    void SetupPlayer(GameObject playerObj, CharacterData characterData, PlayerInputHandler.PlayerInputType inputType)
-    {
-        // Ensure required components exist
-        PlayerInputHandler inputHandler = playerObj.GetComponent<PlayerInputHandler>();
-        if (inputHandler == null)
-        {
-            inputHandler = playerObj.AddComponent<PlayerInputHandler>();
-        }
-        inputHandler.SetPlayerType(inputType);
-
-        PlayerCharacter playerCharacter = playerObj.GetComponent<PlayerCharacter>();
-        if (playerCharacter == null)
-        {
-            playerCharacter = playerObj.AddComponent<PlayerCharacter>();
-        }
-
-        PlayerHealth playerHealth = playerObj.GetComponent<PlayerHealth>();
-        if (playerHealth == null)
-        {
-            playerHealth = playerObj.AddComponent<PlayerHealth>();
-        }
-
-        ArenaMovementRestrictor restrictor = playerObj.GetComponent<ArenaMovementRestrictor>();
-        if (restrictor == null)
-        {
-            restrictor = playerObj.AddComponent<ArenaMovementRestrictor>();
-        }
-
-        // Set arena side based on input type
-        if (inputType == PlayerInputHandler.PlayerInputType.Player1)
-        {
-            restrictor.SetPlayerSide(ArenaMovementRestrictor.PlayerSide.Left);
-        }
-        else
-        {
-            restrictor.SetPlayerSide(ArenaMovementRestrictor.PlayerSide.Right);
-        }
-    }
-
-    void SetupHealthEventListeners()
-    {
-        if (player1Health != null)
-        {
-            player1Health.OnPlayerDeath += OnPlayer1Death;
-            player1Health.OnHealthChanged += OnPlayer1HealthChanged;
-        }
-
-        if (player2Health != null)
-        {
-            player2Health.OnPlayerDeath += OnPlayer2Death;
-            player2Health.OnHealthChanged += OnPlayer2HealthChanged;
-        }
-    }
-
-    void InitializeMatchUI()
-    {
-        if (matchUI != null)
-        {
-            matchUI.InitializeMatch(
-                selectionData.player1Character,
-                selectionData.player2Character,
-                player1RoundsWon,
-                player2RoundsWon,
-                roundsToWin
-            );
+            matchUI.InitializeMatch(player1Data, player2Data, player1RoundsWon, player2RoundsWon, roundsToWin);
         }
     }
 
     void StartRound(int roundNumber)
     {
+        if (!PhotonNetwork.IsMasterClient) return;
+
         currentRound = roundNumber;
         currentState = MatchState.PreFight;
-        currentRoundTime = roundDuration;
+        roundActive = false;
 
-        if (debugMode)
-        {
-            Debug.Log($"Starting Round {roundNumber}");
-        }
+        // Reset timer using PhotonNetwork.Time for synchronization
+        roundStartTime = 0.0;
+        roundEndTime = 0.0;
+
+        // Update room properties for synchronization
+        UpdateRoomProperties();
 
         // Reset player positions and health
-        ResetPlayersForNewRound();
-
-        // Update UI
-        if (matchUI != null)
-        {
-            matchUI.UpdateRoundInfo(currentRound, player1RoundsWon, player2RoundsWon);
-            matchUI.UpdateTimer(currentRoundTime);
-        }
+        photonView.RPC("ResetPlayersForNewRound", RpcTarget.All);
 
         // Start pre-fight sequence
-        StartCoroutine(PreFightSequence());
+        photonView.RPC("StartPreFightSequence", RpcTarget.All);
     }
 
+    [PunRPC]
     void ResetPlayersForNewRound()
     {
-        // Reset positions
-        if (player1GameObject != null && player1SpawnPoint != null)
+        // Reset positions for network players
+        foreach (var kvp in networkPlayers)
         {
-            player1GameObject.transform.position = player1SpawnPoint.position;
-        }
+            int actorNumber = kvp.Key;
+            PlayerCharacter player = kvp.Value;
 
-        if (player2GameObject != null && player2SpawnPoint != null)
-        {
-            player2GameObject.transform.position = player2SpawnPoint.position;
-        }
+            if (player != null)
+            {
+                // Position based on actor number
+                Transform spawnPoint = actorNumber == 1 ? player1SpawnPoint : player2SpawnPoint;
+                if (spawnPoint != null)
+                {
+                    player.transform.position = spawnPoint.position;
+                }
+            }
 
-        // Reset health to full
-        if (player1Health != null)
-        {
-            player1Health.SetHealth(player1Health.GetMaxHealth());
-        }
-
-        if (player2Health != null)
-        {
-            player2Health.SetHealth(player2Health.GetMaxHealth());
-        }
-
-        // Clear any effects
-        if (player1Character != null)
-        {
-            // Reset any character-specific states
-        }
-
-        if (player2Character != null)
-        {
-            // Reset any character-specific states
+            // Reset health to full
+            if (networkPlayersHealth.ContainsKey(actorNumber))
+            {
+                PlayerHealth health = networkPlayersHealth[actorNumber];
+                if (health != null)
+                {
+                    health.SetHealth(health.GetMaxHealth());
+                }
+            }
         }
 
         // Reset ball
@@ -326,11 +261,17 @@ public class MatchManager : MonoBehaviour
         }
     }
 
-    IEnumerator PreFightSequence()
+    [PunRPC]
+    void StartPreFightSequence()
+    {
+        StartCoroutine(PreFightSequenceCoroutine());
+    }
+
+    IEnumerator PreFightSequenceCoroutine()
     {
         currentState = MatchState.PreFight;
 
-        // Show "Round X" announcement
+        // Show round announcement
         if (matchUI != null)
         {
             matchUI.ShowRoundAnnouncement(currentRound);
@@ -356,105 +297,71 @@ public class MatchManager : MonoBehaviour
             matchUI.ShowFightStart();
         }
 
-        // Start the round
-        StartFightPhase();
+        // Only Master Client starts the fight phase
+        if (PhotonNetwork.IsMasterClient)
+        {
+            photonView.RPC("StartFightPhase", RpcTarget.All);
+        }
     }
 
+    [PunRPC]
     void StartFightPhase()
     {
         currentState = MatchState.Fighting;
         roundActive = true;
 
+        // Set synchronized timer start time using PhotonNetwork.Time
+        if (PhotonNetwork.IsMasterClient)
+        {
+            roundStartTime = PhotonNetwork.Time;
+            roundEndTime = roundStartTime + roundDuration;
+            UpdateRoomProperties();
+        }
+
         // Enable player input
         EnablePlayerInput(true);
-
-        // Start round timer
-        if (roundTimerCoroutine != null)
-        {
-            StopCoroutine(roundTimerCoroutine);
-        }
-        roundTimerCoroutine = StartCoroutine(RoundTimerCoroutine());
-
-        if (debugMode)
-        {
-            Debug.Log($"Round {currentRound} fight started!");
-        }
-    }
-
-    IEnumerator RoundTimerCoroutine()
-    {
-        while (currentRoundTime > 0 && roundActive)
-        {
-            currentRoundTime -= Time.deltaTime;
-
-            // Update UI
-            if (matchUI != null)
-            {
-                matchUI.UpdateTimer(currentRoundTime);
-            }
-
-            yield return null;
-        }
-
-        // Time's up!
-        if (roundActive)
-        {
-            EndRoundByTimeOut();
-        }
     }
 
     void EndRoundByTimeOut()
     {
-        if (!roundActive) return;
+        if (!PhotonNetwork.IsMasterClient || !roundActive) return;
 
-        roundActive = false;
-        currentState = MatchState.RoundEnd;
-
-        // Determine winner by health
-        int roundWinner = DetermineWinnerByHealth();
-
-        if (debugMode)
-        {
-            Debug.Log($"Round {currentRound} ended by timeout. Winner: Player {roundWinner}");
-        }
-
-        EndRound(roundWinner);
+        int winner = DetermineWinnerByHealth();
+        photonView.RPC("EndRound", RpcTarget.All, winner, "timeout");
     }
 
-    void EndRoundByKnockout(int winner)
+    void OnPlayerDeath(int deadPlayerActorNumber)
+    {
+        if (!PhotonNetwork.IsMasterClient || !roundActive) return;
+
+        int winner = deadPlayerActorNumber == 1 ? 2 : 1;
+        photonView.RPC("EndRound", RpcTarget.All, winner, "knockout");
+    }
+
+    [PunRPC]
+    void EndRound(int winner, string reason)
     {
         if (!roundActive) return;
 
         roundActive = false;
         currentState = MatchState.RoundEnd;
-
-        if (debugMode)
-        {
-            Debug.Log($"Round {currentRound} ended by knockout. Winner: Player {winner}");
-        }
-
-        EndRound(winner);
-    }
-
-    void EndRound(int winner)
-    {
-        // Stop round timer
-        if (roundTimerCoroutine != null)
-        {
-            StopCoroutine(roundTimerCoroutine);
-        }
 
         // Disable player input
         EnablePlayerInput(false);
 
-        // Update round scores
-        if (winner == 1)
+        // Update round scores (Master Client only)
+        if (PhotonNetwork.IsMasterClient)
         {
-            player1RoundsWon++;
-        }
-        else if (winner == 2)
-        {
-            player2RoundsWon++;
+            if (winner == 1)
+            {
+                player1RoundsWon++;
+            }
+            else if (winner == 2)
+            {
+                player2RoundsWon++;
+            }
+
+            UpdateRoomProperties();
         }
 
         // Update UI
@@ -483,116 +390,197 @@ public class MatchManager : MonoBehaviour
     {
         yield return new WaitForSeconds(postRoundDelay);
 
-        // Start next round
-        StartRound(currentRound + 1);
+        // Only Master Client starts next round
+        if (PhotonNetwork.IsMasterClient)
+        {
+            StartRound(currentRound + 1);
+        }
     }
 
     IEnumerator EndMatchSequence()
     {
         currentState = MatchState.MatchEnd;
 
-        if (debugMode)
+        if (PhotonNetwork.IsMasterClient)
         {
-            Debug.Log($"Match ended! Winner: Player {matchWinner}");
+            UpdateRoomProperties();
         }
 
         // Show match results
         if (matchUI != null)
         {
-            CharacterData winnerCharacter = matchWinner == 1 ? selectionData.player1Character : selectionData.player2Character;
-            matchUI.ShowMatchResult(matchWinner, winnerCharacter);
+            CharacterData winnerCharacter = null;
+
+            if (matchWinner == 1 && networkPlayers.ContainsKey(1))
+            {
+                winnerCharacter = networkPlayers[1].GetCharacterData();
+            }
+            else if (matchWinner == 2 && networkPlayers.ContainsKey(2))
+            {
+                winnerCharacter = networkPlayers[2].GetCharacterData();
+            }
+
+            if (winnerCharacter != null)
+            {
+                matchUI.ShowMatchResult(matchWinner, winnerCharacter);
+            }
         }
 
         PlaySound(matchWinSound);
 
-        // Wait for player input or timeout
         yield return new WaitForSeconds(matchEndDelay);
 
-        // Return to character selection
+        // Return to lobby/menu
         ReturnToCharacterSelection();
     }
 
     int DetermineWinnerByHealth()
     {
-        float player1HealthPercent = player1Health != null ? player1Health.GetHealthPercentage() : 0f;
-        float player2HealthPercent = player2Health != null ? player2Health.GetHealthPercentage() : 0f;
+        float player1Health = 0f;
+        float player2Health = 0f;
 
-        if (player1HealthPercent > player2HealthPercent)
+        if (networkPlayersHealth.ContainsKey(1))
+        {
+            player1Health = networkPlayersHealth[1].GetHealthPercentage();
+        }
+
+        if (networkPlayersHealth.ContainsKey(2))
+        {
+            player2Health = networkPlayersHealth[2].GetHealthPercentage();
+        }
+
+        if (player1Health > player2Health)
             return 1;
-        else if (player2HealthPercent > player1HealthPercent)
+        else if (player2Health > player1Health)
             return 2;
         else
-            return 0; // Draw - no winner
+            return 0; // Draw
     }
 
     void EnablePlayerInput(bool enable)
     {
-        if (player1Character != null)
+        foreach (var player in networkPlayers.Values)
         {
-            player1Character.SetInputEnabled(enable);
-        }
-
-        if (player2Character != null)
-        {
-            player2Character.SetInputEnabled(enable);
+            if (player != null)
+            {
+                player.SetInputEnabled(enable);
+            }
         }
     }
 
-    #region Health Event Handlers
-
-    void OnPlayer1Death(CharacterController deadPlayer)
-    {
-        if (!roundActive) return;
-        EndRoundByKnockout(2); // Player 2 wins
-    }
-
-    void OnPlayer2Death(CharacterController deadPlayer)
-    {
-        if (!roundActive) return;
-        EndRoundByKnockout(1); // Player 1 wins
-    }
-
-    void OnPlayer1HealthChanged(int currentHealth, int maxHealth)
+    void OnPlayerHealthChanged(int actorNumber, int currentHealth, int maxHealth)
     {
         if (matchUI != null)
         {
-            matchUI.UpdatePlayerHealth(1, currentHealth, maxHealth);
+            // Convert actor number to player number (1 or 2)
+            int playerNumber = actorNumber;
+            matchUI.UpdatePlayerHealth(playerNumber, currentHealth, maxHealth);
         }
     }
 
-    void OnPlayer2HealthChanged(int currentHealth, int maxHealth)
+    void UpdateRoomProperties()
     {
-        if (matchUI != null)
+        if (!PhotonNetwork.IsMasterClient) return;
+
+        Hashtable props = new Hashtable();
+        props[ROOM_MATCH_STATE] = (int)currentState;
+        props[ROOM_CURRENT_ROUND] = currentRound;
+        props[ROOM_P1_ROUNDS] = player1RoundsWon;
+        props[ROOM_P2_ROUNDS] = player2RoundsWon;
+        props[ROOM_ROUND_START_TIME] = roundStartTime;
+        props[ROOM_ROUND_END_TIME] = roundEndTime;
+        props[ROOM_ROUND_ACTIVE] = roundActive;
+
+        PhotonNetwork.CurrentRoom.SetCustomProperties(props);
+    }
+
+    void SyncFromRoomProperties()
+    {
+        if (PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(ROOM_MATCH_STATE))
         {
-            matchUI.UpdatePlayerHealth(2, currentHealth, maxHealth);
+            currentState = (MatchState)(int)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_MATCH_STATE];
+            currentRound = (int)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_CURRENT_ROUND];
+            player1RoundsWon = (int)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_P1_ROUNDS];
+            player2RoundsWon = (int)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_P2_ROUNDS];
+            roundStartTime = (double)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_ROUND_START_TIME];
+            roundEndTime = (double)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_ROUND_END_TIME];
+            roundActive = (bool)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_ROUND_ACTIVE];
         }
     }
 
-    #endregion
+    public override void OnRoomPropertiesUpdate(Hashtable propertiesThatChanged)
+    {
+        // Sync with room properties when they change
+        if (propertiesThatChanged.ContainsKey(ROOM_ROUND_START_TIME))
+        {
+            roundStartTime = (double)propertiesThatChanged[ROOM_ROUND_START_TIME];
+        }
 
-    #region Scene Management
+        if (propertiesThatChanged.ContainsKey(ROOM_ROUND_END_TIME))
+        {
+            roundEndTime = (double)propertiesThatChanged[ROOM_ROUND_END_TIME];
+        }
+
+        if (propertiesThatChanged.ContainsKey(ROOM_ROUND_ACTIVE))
+        {
+            roundActive = (bool)propertiesThatChanged[ROOM_ROUND_ACTIVE];
+        }
+
+        if (propertiesThatChanged.ContainsKey(ROOM_P1_ROUNDS) || propertiesThatChanged.ContainsKey(ROOM_P2_ROUNDS))
+        {
+            player1RoundsWon = (int)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_P1_ROUNDS];
+            player2RoundsWon = (int)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_P2_ROUNDS];
+
+            if (matchUI != null)
+            {
+                matchUI.UpdateRoundInfo(currentRound, player1RoundsWon, player2RoundsWon);
+            }
+        }
+    }
+
+    public override void OnPlayerLeftRoom(Player otherPlayer)
+    {
+        // Handle player disconnection - auto-win for remaining player
+        if (currentState == MatchState.Fighting || currentState == MatchState.PreFight)
+        {
+            if (PhotonNetwork.IsMasterClient)
+            {
+                int winnerActorNumber = PhotonNetwork.PlayerList[0].ActorNumber;
+                int winner = winnerActorNumber == 1 ? 1 : 2;
+
+                matchWinner = winner;
+                photonView.RPC("OnPlayerDisconnected", RpcTarget.All, winner);
+            }
+        }
+    }
+
+    [PunRPC]
+    void OnPlayerDisconnected(int winner)
+    {
+        matchWinner = winner;
+        StartCoroutine(EndMatchSequence());
+    }
+
+    public override void OnMasterClientSwitched(Player newMasterClient)
+    {
+        // New master client takes over match control
+        if (PhotonNetwork.IsMasterClient)
+        {
+            // Sync from room properties to ensure consistency
+            SyncFromRoomProperties();
+        }
+    }
 
     void ReturnToCharacterSelection()
     {
-        // Clear selection data
-        CharacterSelectionManager.ClearSelectionData();
+        // Leave room and return to character selection
+        PhotonNetwork.LeaveRoom();
+    }
 
-        // Load character selection scene
+    public override void OnLeftRoom()
+    {
         SceneManager.LoadScene(characterSelectionScene);
     }
-
-    void ReturnToMainMenu()
-    {
-        // Clear selection data
-        CharacterSelectionManager.ClearSelectionData();
-
-        // Load main menu scene
-        SceneManager.LoadScene(mainMenuScene);
-    }
-
-    #endregion
-
-    #region Audio
 
     void PlaySound(AudioClip clip)
     {
@@ -602,233 +590,42 @@ public class MatchManager : MonoBehaviour
         }
     }
 
-    #endregion
-
-    #region Network Ready Methods (Future)
-
-    /// <summary>
-    /// Future: Handle networked round end
-    /// </summary>
-    public void OnNetworkRoundEnd(int winner)
+    // IPunObservable for additional data synchronization (now simplified)
+    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
     {
-        if (debugMode)
+        if (stream.IsWriting)
         {
-            Debug.Log($"Network: Round ended, winner: Player {winner}");
+            // Master Client sends essential state
+            stream.SendNext(roundActive);
         }
-
-        EndRound(winner);
-    }
-
-    /// <summary>
-    /// Future: Handle network player disconnect
-    /// </summary>
-    public void OnNetworkPlayerDisconnected(int playerID)
-    {
-        if (debugMode)
+        else
         {
-            Debug.Log($"Network: Player {playerID} disconnected");
+            // Non-master clients receive state
+            roundActive = (bool)stream.ReceiveNext();
         }
-
-        // Award win to remaining player
-        int winner = playerID == 1 ? 2 : 1;
-        matchWinner = winner;
-        StartCoroutine(EndMatchSequence());
     }
 
-    /// <summary>
-    /// Future: Sync match state across network
-    /// </summary>
-    void SyncMatchState()
-    {
-        if (!enableNetworking) return;
-
-        // Future: PUN2 RPC implementation
-        // photonView.RPC("SyncMatchData", RpcTarget.Others, currentRound, player1RoundsWon, player2RoundsWon);
-    }
-
-    #endregion
-
-    #region Public API
-
-    /// <summary>
-    /// Get current match state
-    /// </summary>
+    // Public API
     public MatchState GetMatchState() => currentState;
-
-    /// <summary>
-    /// Get current round number
-    /// </summary>
     public int GetCurrentRound() => currentRound;
 
     /// <summary>
-    /// Get rounds won by each player
+    /// Get remaining time using synchronized PhotonNetwork.Time
     /// </summary>
+    public float GetRemainingTime()
+    {
+        if (!roundActive || roundEndTime <= 0.0)
+            return 0f;
+
+        double timeRemaining = roundEndTime - PhotonNetwork.Time;
+        return Mathf.Max(0f, (float)timeRemaining);
+    }
+
+    public bool IsRoundActive() => roundActive;
+
     public void GetRoundScores(out int player1Wins, out int player2Wins)
     {
         player1Wins = player1RoundsWon;
         player2Wins = player2RoundsWon;
     }
-
-    /// <summary>
-    /// Get remaining round time
-    /// </summary>
-    public float GetRemainingTime() => currentRoundTime;
-
-    /// <summary>
-    /// Check if round is currently active
-    /// </summary>
-    public bool IsRoundActive() => roundActive;
-
-    /// <summary>
-    /// Manually end round (for debug/admin)
-    /// </summary>
-    public void ForceEndRound(int winner = 0)
-    {
-        if (roundActive)
-        {
-            if (winner == 0)
-            {
-                EndRoundByTimeOut();
-            }
-            else
-            {
-                EndRoundByKnockout(winner);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Restart current round (for debug)
-    /// </summary>
-    public void RestartRound()
-    {
-        if (currentState == MatchState.Fighting || currentState == MatchState.RoundEnd)
-        {
-            roundActive = false;
-            if (roundTimerCoroutine != null)
-            {
-                StopCoroutine(roundTimerCoroutine);
-            }
-
-            StartRound(currentRound);
-        }
-    }
-
-    /// <summary>
-    /// Restart entire match (for debug)
-    /// </summary>
-    public void RestartMatch()
-    {
-        player1RoundsWon = 0;
-        player2RoundsWon = 0;
-        matchWinner = 0;
-        roundActive = false;
-
-        if (roundTimerCoroutine != null)
-        {
-            StopCoroutine(roundTimerCoroutine);
-        }
-
-        StartRound(1);
-    }
-
-    #endregion
-
-    #region Debug Methods
-
-    void Update()
-    {
-        if (!debugMode) return;
-
-        // Debug controls
-        if (Input.GetKeyDown(KeyCode.F3))
-        {
-            ForceEndRound(1); // Player 1 wins round
-        }
-
-        if (Input.GetKeyDown(KeyCode.F4))
-        {
-            ForceEndRound(2); // Player 2 wins round
-        }
-
-        if (Input.GetKeyDown(KeyCode.F5))
-        {
-            RestartRound();
-        }
-
-        if (Input.GetKeyDown(KeyCode.F6))
-        {
-            RestartMatch();
-        }
-
-        if (Input.GetKeyDown(KeyCode.F7))
-        {
-            ReturnToCharacterSelection();
-        }
-
-        if (Input.GetKeyDown(KeyCode.F8))
-        {
-            ReturnToMainMenu();
-        }
-
-        // Emergency pause/unpause
-        if (Input.GetKeyDown(KeyCode.P))
-        {
-            Time.timeScale = Time.timeScale > 0 ? 0 : 1;
-        }
-    }
-
-    void OnGUI()
-    {
-        if (!debugMode) return;
-
-        GUILayout.BeginArea(new Rect(10, 10, 350, 250));
-        GUILayout.BeginVertical("box");
-
-        GUILayout.Label("=== MATCH MANAGER DEBUG ===");
-        GUILayout.Label($"State: {currentState}");
-        GUILayout.Label($"Round: {currentRound}");
-        GUILayout.Label($"Timer: {currentRoundTime:F1}s");
-        GUILayout.Label($"P1 Rounds: {player1RoundsWon}/{roundsToWin}");
-        GUILayout.Label($"P2 Rounds: {player2RoundsWon}/{roundsToWin}");
-        GUILayout.Label($"Round Active: {roundActive}");
-        GUILayout.Label($"Match Winner: {(matchWinner == 0 ? "None" : $"Player {matchWinner}")}");
-
-        if (player1Health != null && player2Health != null)
-        {
-            GUILayout.Label($"P1 Health: {player1Health.GetCurrentHealth()}/{player1Health.GetMaxHealth()}");
-            GUILayout.Label($"P2 Health: {player2Health.GetCurrentHealth()}/{player2Health.GetMaxHealth()}");
-        }
-
-        GUILayout.Space(10);
-        GUILayout.Label("Debug Controls:");
-        GUILayout.Label("F3 - P1 Wins Round");
-        GUILayout.Label("F4 - P2 Wins Round");
-        GUILayout.Label("F5 - Restart Round");
-        GUILayout.Label("F6 - Restart Match");
-        GUILayout.Label("F7 - Character Select");
-        GUILayout.Label("F8 - Main Menu");
-        GUILayout.Label("P - Pause/Unpause");
-
-        GUILayout.EndVertical();
-        GUILayout.EndArea();
-    }
-
-    void OnDestroy()
-    {
-        // Clean up event listeners
-        if (player1Health != null)
-        {
-            player1Health.OnPlayerDeath -= OnPlayer1Death;
-            player1Health.OnHealthChanged -= OnPlayer1HealthChanged;
-        }
-
-        if (player2Health != null)
-        {
-            player2Health.OnPlayerDeath -= OnPlayer2Death;
-            player2Health.OnHealthChanged -= OnPlayer2HealthChanged;
-        }
-    }
-
-    #endregion
 }

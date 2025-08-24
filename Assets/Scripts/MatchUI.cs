@@ -2,12 +2,14 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections;
+using Photon.Pun;
+using Photon.Realtime;
 
 /// <summary>
-/// Match UI Manager - Handles all match-related UI elements
-/// Displays round info, health bars, timer, and match results
+/// PUN2 Multiplayer Match UI Manager
+/// Handles all match-related UI elements with network synchronization
 /// </summary>
-public class MatchUI : MonoBehaviour
+public class MatchUI : MonoBehaviourPunCallbacks
 {
     [Header("Player Health Bars")]
     [SerializeField] private Slider player1HealthBar;
@@ -25,8 +27,8 @@ public class MatchUI : MonoBehaviour
 
     [Header("Round Info")]
     [SerializeField] private TextMeshProUGUI roundNumberText;
-    [SerializeField] private GameObject[] player1RoundWins; // Array of round win indicators
-    [SerializeField] private GameObject[] player2RoundWins; // Array of round win indicators
+    [SerializeField] private GameObject[] player1RoundWins;
+    [SerializeField] private GameObject[] player2RoundWins;
     [SerializeField] private TextMeshProUGUI matchScoreText;
 
     [Header("Timer")]
@@ -53,26 +55,27 @@ public class MatchUI : MonoBehaviour
     [SerializeField] private Button rematchButton;
     [SerializeField] private Button mainMenuButton;
 
+    [Header("Network Status")]
+    [SerializeField] private GameObject networkStatusPanel;
+    [SerializeField] private TextMeshProUGUI networkStatusText;
+    [SerializeField] private GameObject connectionLostPanel;
+
     [Header("Visual Effects")]
     [SerializeField] private Color healthBarHealthyColor = Color.green;
     [SerializeField] private Color healthBarWarningColor = Color.yellow;
     [SerializeField] private Color healthBarCriticalColor = Color.red;
-    [SerializeField] private AnimationCurve healthBarFlashCurve;
 
     [Header("Audio")]
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip uiUpdateSound;
     [SerializeField] private AudioClip announcementSound;
 
-    [Header("Debug")]
-    [SerializeField] private bool debugMode = true;
-
     // State tracking
     private CharacterData player1Character;
     private CharacterData player2Character;
     private int roundsToWin = 2;
-    private Coroutine healthBarFlashCoroutine;
     private Coroutine timerFlashCoroutine;
+    private bool isInitialized = false;
 
     void Awake()
     {
@@ -91,6 +94,12 @@ public class MatchUI : MonoBehaviour
         SetupButtonListeners();
     }
 
+    void Start()
+    {
+        // Show network status
+        UpdateNetworkStatus();
+    }
+
     void HideAllPanels()
     {
         if (announcementPanel != null)
@@ -101,6 +110,9 @@ public class MatchUI : MonoBehaviour
 
         if (resultsPanel != null)
             resultsPanel.SetActive(false);
+
+        if (connectionLostPanel != null)
+            connectionLostPanel.SetActive(false);
     }
 
     void SetupButtonListeners()
@@ -116,6 +128,40 @@ public class MatchUI : MonoBehaviour
         }
     }
 
+    void UpdateNetworkStatus()
+    {
+        if (networkStatusPanel == null || networkStatusText == null) return;
+
+        string statusText = "";
+        if (PhotonNetwork.IsConnected)
+        {
+            statusText = $"Room: {PhotonNetwork.CurrentRoom?.Name ?? "Unknown"}\n";
+            statusText += $"Players: {PhotonNetwork.PlayerList.Length}/2\n";
+            statusText += $"Ping: {PhotonNetwork.GetPing()}ms";
+        }
+        else
+        {
+            statusText = "Disconnected";
+        }
+
+        networkStatusText.text = statusText;
+
+        // Auto-hide network status after a few seconds
+        if (PhotonNetwork.PlayerList.Length >= 2)
+        {
+            StartCoroutine(HideNetworkStatusAfterDelay(3f));
+        }
+    }
+
+    IEnumerator HideNetworkStatusAfterDelay(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        if (networkStatusPanel != null)
+        {
+            networkStatusPanel.SetActive(false);
+        }
+    }
+
     /// <summary>
     /// Initialize the match UI with character data
     /// </summary>
@@ -125,7 +171,7 @@ public class MatchUI : MonoBehaviour
         player2Character = p2Character;
         roundsToWin = totalRoundsToWin;
 
-        // Setup player portraits and names
+        // Setup player info
         SetupPlayerInfo();
 
         // Initialize health bars
@@ -137,41 +183,88 @@ public class MatchUI : MonoBehaviour
         // Update initial scores
         UpdateRoundInfo(1, p1Rounds, p2Rounds);
 
-        if (debugMode)
-        {
-            Debug.Log($"MatchUI initialized: {p1Character.characterName} vs {p2Character.characterName}");
-        }
+        isInitialized = true;
     }
 
     void SetupPlayerInfo()
     {
-        // Player 1
-        if (player1Portrait != null && player1Character.characterIcon != null)
+        // Player 1 - determine if this is local player
+        if (player1Portrait != null && player1Character != null && player1Character.characterIcon != null)
         {
             player1Portrait.sprite = player1Character.characterIcon;
         }
 
-        if (player1Name != null)
+        if (player1Name != null && player1Character != null)
         {
-            player1Name.text = player1Character.characterName;
+            string displayName = player1Character.characterName;
+
+            // Add network player info
+            if (PhotonNetwork.PlayerList.Length >= 1)
+            {
+                Player networkPlayer1 = GetPlayerByActorNumber(1);
+                if (networkPlayer1 != null)
+                {
+                    displayName += $"\n{networkPlayer1.NickName}";
+
+                    // Highlight local player
+                    if (networkPlayer1 == PhotonNetwork.LocalPlayer)
+                    {
+                        displayName += " (You)";
+                        player1Name.color = Color.cyan;
+                    }
+                }
+            }
+
+            player1Name.text = displayName;
         }
 
         // Player 2
-        if (player2Portrait != null && player2Character.characterIcon != null)
+        if (player2Portrait != null && player2Character != null && player2Character.characterIcon != null)
         {
             player2Portrait.sprite = player2Character.characterIcon;
         }
 
-        if (player2Name != null)
+        if (player2Name != null && player2Character != null)
         {
-            player2Name.text = player2Character.characterName;
+            string displayName = player2Character.characterName;
+
+            // Add network player info
+            if (PhotonNetwork.PlayerList.Length >= 2)
+            {
+                Player networkPlayer2 = GetPlayerByActorNumber(2);
+                if (networkPlayer2 != null)
+                {
+                    displayName += $"\n{networkPlayer2.NickName}";
+
+                    // Highlight local player
+                    if (networkPlayer2 == PhotonNetwork.LocalPlayer)
+                    {
+                        displayName += " (You)";
+                        player2Name.color = Color.cyan;
+                    }
+                }
+            }
+
+            player2Name.text = displayName;
         }
+    }
+
+    Player GetPlayerByActorNumber(int actorNumber)
+    {
+        foreach (Player player in PhotonNetwork.PlayerList)
+        {
+            if (player.ActorNumber == actorNumber)
+            {
+                return player;
+            }
+        }
+        return null;
     }
 
     void InitializeHealthBars()
     {
         // Player 1 health bar
-        if (player1HealthBar != null)
+        if (player1HealthBar != null && player1Character != null)
         {
             player1HealthBar.maxValue = player1Character.maxHealth;
             player1HealthBar.value = player1Character.maxHealth;
@@ -183,7 +276,7 @@ public class MatchUI : MonoBehaviour
         }
 
         // Player 2 health bar
-        if (player2HealthBar != null)
+        if (player2HealthBar != null && player2Character != null)
         {
             player2HealthBar.maxValue = player2Character.maxHealth;
             player2HealthBar.value = player2Character.maxHealth;
@@ -195,8 +288,10 @@ public class MatchUI : MonoBehaviour
         }
 
         // Update health text
-        UpdateHealthText(1, player1Character.maxHealth, player1Character.maxHealth);
-        UpdateHealthText(2, player2Character.maxHealth, player2Character.maxHealth);
+        if (player1Character != null)
+            UpdateHealthText(1, player1Character.maxHealth, player1Character.maxHealth);
+        if (player2Character != null)
+            UpdateHealthText(2, player2Character.maxHealth, player2Character.maxHealth);
     }
 
     void InitializeRoundIndicators()
@@ -226,7 +321,7 @@ public class MatchUI : MonoBehaviour
         Image indicatorImage = indicator.GetComponent<Image>();
         if (indicatorImage != null)
         {
-            indicatorImage.color = won ? Color.blue : Color.gray;
+            indicatorImage.color = won ? Color.yellow : Color.gray;
         }
     }
 
@@ -235,6 +330,8 @@ public class MatchUI : MonoBehaviour
     /// </summary>
     public void UpdatePlayerHealth(int playerNumber, int currentHealth, int maxHealth)
     {
+        if (!isInitialized) return;
+
         if (playerNumber == 1)
         {
             UpdateHealthBar(player1HealthBar, player1HealthFill, currentHealth, maxHealth);
@@ -274,12 +371,6 @@ public class MatchUI : MonoBehaviour
             }
 
             healthFill.color = targetColor;
-
-            // Flash effect for low health
-            if (healthPercentage <= 0.3f)
-            {
-                StartHealthBarFlash(healthFill);
-            }
         }
     }
 
@@ -290,28 +381,6 @@ public class MatchUI : MonoBehaviour
         if (healthText != null)
         {
             healthText.text = $"{currentHealth}/{maxHealth}";
-        }
-    }
-
-    void StartHealthBarFlash(Image healthFill)
-    {
-        if (healthBarFlashCoroutine != null)
-        {
-            StopCoroutine(healthBarFlashCoroutine);
-        }
-
-        healthBarFlashCoroutine = StartCoroutine(HealthBarFlashCoroutine(healthFill));
-    }
-
-    IEnumerator HealthBarFlashCoroutine(Image healthFill)
-    {
-        Color originalColor = healthFill.color;
-
-        while (healthFill != null)
-        {
-            float flashValue = healthBarFlashCurve.Evaluate(Time.time % 1f);
-            healthFill.color = Color.Lerp(originalColor, Color.white, flashValue * 0.3f);
-            yield return null;
         }
     }
 
@@ -382,23 +451,34 @@ public class MatchUI : MonoBehaviour
         if (timeRemaining > 30f)
         {
             targetColor = normalTimerColor;
+            // Stop flashing if it was active
+            if (timerFlashCoroutine != null)
+            {
+                StopCoroutine(timerFlashCoroutine);
+                timerFlashCoroutine = null;
+            }
         }
         else if (timeRemaining > 10f)
         {
             targetColor = warningTimerColor;
+            // Stop flashing if it was active
+            if (timerFlashCoroutine != null)
+            {
+                StopCoroutine(timerFlashCoroutine);
+                timerFlashCoroutine = null;
+            }
         }
         else
         {
             targetColor = criticalTimerColor;
-
-            // Flash timer when critical
+            // Start flashing timer when critical
             if (timerFlashCoroutine == null)
             {
                 timerFlashCoroutine = StartCoroutine(TimerFlashCoroutine());
             }
         }
 
-        if (timerText != null)
+        if (timerText != null && timerFlashCoroutine == null)
         {
             timerText.color = targetColor;
         }
@@ -420,7 +500,7 @@ public class MatchUI : MonoBehaviour
     }
 
     /// <summary>
-    /// Show round announcement
+    /// Show round announcement (synchronized)
     /// </summary>
     public void ShowRoundAnnouncement(int roundNumber)
     {
@@ -432,7 +512,7 @@ public class MatchUI : MonoBehaviour
     }
 
     /// <summary>
-    /// Show countdown number
+    /// Show countdown number (synchronized)
     /// </summary>
     public void ShowCountdown(int number)
     {
@@ -444,7 +524,7 @@ public class MatchUI : MonoBehaviour
     }
 
     /// <summary>
-    /// Show "FIGHT!" message
+    /// Show "FIGHT!" message (synchronized)
     /// </summary>
     public void ShowFightStart()
     {
@@ -456,7 +536,7 @@ public class MatchUI : MonoBehaviour
     }
 
     /// <summary>
-    /// Show round result
+    /// Show round result (synchronized)
     /// </summary>
     public void ShowRoundResult(int winner)
     {
@@ -500,7 +580,16 @@ public class MatchUI : MonoBehaviour
 
         if (winnerName != null)
         {
-            winnerName.text = winnerCharacter.characterName;
+            string displayText = winnerCharacter.characterName;
+
+            // Add network player name
+            Player networkWinner = GetPlayerByActorNumber(winner);
+            if (networkWinner != null)
+            {
+                displayText += $"\n({networkWinner.NickName})";
+            }
+
+            winnerName.text = displayText;
         }
 
         if (resultsText != null)
@@ -538,17 +627,17 @@ public class MatchUI : MonoBehaviour
 
     void OnRematchClicked()
     {
-        // Find MatchManager and restart match
-        MatchManager matchManager = FindObjectOfType<MatchManager>();
-        if (matchManager != null)
+        // Only Master Client can initiate rematch
+        if (PhotonNetwork.IsMasterClient)
         {
-            matchManager.RestartMatch();
-        }
+            // Reset room for new match
+            PhotonNetwork.CurrentRoom.SetCustomProperties(new ExitGames.Client.Photon.Hashtable());
 
-        // Hide results panel
-        if (resultsPanel != null)
-        {
-            resultsPanel.SetActive(false);
+            // Reload scene for all players
+            if (PhotonNetwork.IsMasterClient)
+            {
+                PhotonNetwork.LoadLevel(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
+            }
         }
 
         PlaySound(uiUpdateSound);
@@ -556,20 +645,45 @@ public class MatchUI : MonoBehaviour
 
     void OnMainMenuClicked()
     {
-        // Return to main menu
-        MatchManager matchManager = FindObjectOfType<MatchManager>();
-        if (matchManager != null)
-        {
-            // This will be implemented in MatchManager
-            UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
-        }
-
+        // Leave room and return to main menu
+        PhotonNetwork.LeaveRoom();
         PlaySound(uiUpdateSound);
     }
 
     #endregion
 
-    #region Audio
+    #region Network Callbacks
+
+    public override void OnPlayerEnteredRoom(Player newPlayer)
+    {
+        UpdateNetworkStatus();
+    }
+
+    public override void OnPlayerLeftRoom(Player otherPlayer)
+    {
+        UpdateNetworkStatus();
+
+        // Show connection lost if we're down to 1 player during a match
+        if (PhotonNetwork.PlayerList.Length < 2 && isInitialized)
+        {
+            ShowConnectionLost();
+        }
+    }
+
+    public override void OnDisconnected(Photon.Realtime.DisconnectCause cause)
+    {
+        ShowConnectionLost();
+    }
+
+    void ShowConnectionLost()
+    {
+        if (connectionLostPanel != null)
+        {
+            connectionLostPanel.SetActive(true);
+        }
+    }
+
+    #endregion
 
     void PlaySound(AudioClip clip)
     {
@@ -579,58 +693,12 @@ public class MatchUI : MonoBehaviour
         }
     }
 
-    #endregion
-
-    #region Debug
-
-    void Update()
+    void OnDestroy()
     {
-        if (!debugMode) return;
-
-        // Debug controls
-        if (Input.GetKeyDown(KeyCode.Alpha1))
+        // Clean up coroutines
+        if (timerFlashCoroutine != null)
         {
-            UpdatePlayerHealth(1, 50, 100); // Test P1 health
-        }
-
-        if (Input.GetKeyDown(KeyCode.Alpha2))
-        {
-            UpdatePlayerHealth(2, 25, 100); // Test P2 health
-        }
-
-        if (Input.GetKeyDown(KeyCode.Alpha3))
-        {
-            ShowRoundAnnouncement(Random.Range(1, 4)); // Test round announcement
-        }
-
-        if (Input.GetKeyDown(KeyCode.Alpha4))
-        {
-            ShowCountdown(3); // Test countdown
+            StopCoroutine(timerFlashCoroutine);
         }
     }
-
-    void OnGUI()
-    {
-        if (!debugMode) return;
-
-        GUILayout.BeginArea(new Rect(Screen.width - 320, 10, 310, 150));
-        GUILayout.BeginVertical("box");
-
-        GUILayout.Label("=== MATCH UI DEBUG ===");
-        GUILayout.Label($"P1 Character: {(player1Character?.characterName ?? "None")}");
-        GUILayout.Label($"P2 Character: {(player2Character?.characterName ?? "None")}");
-        GUILayout.Label($"Rounds to Win: {roundsToWin}");
-
-        GUILayout.Space(10);
-        GUILayout.Label("Test Controls:");
-        GUILayout.Label("1 - P1 Health 50%");
-        GUILayout.Label("2 - P2 Health 25%");
-        GUILayout.Label("3 - Round Announcement");
-        GUILayout.Label("4 - Countdown");
-
-        GUILayout.EndVertical();
-        GUILayout.EndArea();
-    }
-
-    #endregion
 }

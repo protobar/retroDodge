@@ -73,6 +73,33 @@ MonoBehaviour:
   - RequestPickupValidation
   - SyncPickupRejection
   - RegisterBallOnClients
+  - RequestThrowFromBallOwner
+  - SyncCatchState
+  - SyncCatchSuccess
+  - ActivateRound
+  - EndRound
+  - ForceRemoveInvulnerability
+  - OnDamageReceived
+  - OnHealReceived
+  - OnPlayerDied
+  - OnPlayerDisconnected
+  - OnRoundEndedRPC
+  - ResetPlayersForNewRound
+  - SetRoundPaused
+  - StartFightPhase
+  - StartPreFightSequence
+  - StartTemporaryInvulnerability
+  - SyncAbilityReset
+  - SyncInputState
+  - SyncMaxHealth
+  - SyncMovementState
+  - SyncTreatActivation
+  - SyncTreatCharge
+  - SyncTrickActivation
+  - SyncTrickCharge
+  - SyncUltimateActivation
+  - Round_StartPreFightSequence
+  - TakeDamageFromBall
   DisableAutoOpenWizard: 1
   ShowSettings: 0
   DevRegionSetOnce: 1

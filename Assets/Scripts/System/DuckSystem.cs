@@ -157,10 +157,10 @@ public class DuckSystem : MonoBehaviour
         {
             isGrounded = playerCharacter.IsGrounded();
         }
-        else if (legacyCharacter != null)
+        /*else if (legacyCharacter != null)
         {
             isGrounded = legacyCharacter.IsGrounded();
-        }
+        }*/
 
         if (!isGrounded)
         {

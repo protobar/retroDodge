@@ -1,4 +1,4 @@
-using UnityEngine;
+/*using UnityEngine;
 
 public class CharacterController : MonoBehaviour
 {
@@ -230,4 +230,4 @@ public class CharacterController : MonoBehaviour
             Gizmos.DrawWireSphere(checkPos, 0.1f);
         }
     }
-}
+}*/

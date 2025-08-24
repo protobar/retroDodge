@@ -3,8 +3,8 @@ using System.Collections;
 using Photon.Pun;
 
 /// <summary>
-/// Network BallController with Master Client Authority
-/// Clean version with PUN2 networking and hold timer system
+/// Network BallController with CLEANED UP PlayerCharacter-only support
+/// FIXED: Multiplayer throwing now works for all players
 /// </summary>
 public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 {
@@ -84,7 +84,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     private bool homingEnabled = false;
     private int currentWallBounces = 0;
 
-    // References
+    // References - CLEANED UP: Only PlayerCharacter support
     private Transform ballTransform;
     private Renderer ballRenderer;
     private CollisionDamageSystem collisionSystem;
@@ -97,7 +97,6 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     // Ground detection
     [SerializeField] private LayerMask groundLayer = 1;
     [SerializeField] private float groundCheckDistance = 0.6f;
-
 
     void Awake()
     {
@@ -266,20 +265,9 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
     void HandleHeldBall()
     {
-        Transform holderTransform = null;
-
         if (holder != null)
         {
-            holderTransform = holder.transform;
-        }
-        else if (legacyHolder != null)
-        {
-            holderTransform = legacyHolder.transform;
-        }
-
-        if (holderTransform != null)
-        {
-            Vector3 holdPosition = holderTransform.position + holdOffset;
+            Vector3 holdPosition = holder.transform.position + holdOffset;
             ballTransform.position = Vector3.Lerp(ballTransform.position, holdPosition, holdFollowSpeed * Time.deltaTime);
             velocity = Vector3.zero;
         }
@@ -425,17 +413,12 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             PlayerHealth holderHealth = holder.GetComponent<PlayerHealth>();
             if (holderHealth != null)
             {
+                Debug.Log($"Attempting damage on {holder.name}. PhotonView.IsMine: {holderHealth.photonView.IsMine}, IsDead: {holderHealth.IsDead()}, IsInvulnerable: {holderHealth.IsInvulnerable()}");
+
                 int damage = Mathf.RoundToInt(holdPenaltyDamage);
                 holderHealth.TakeDamage(damage, null);
-            }
-        }
-        else if (legacyHolder != null)
-        {
-            PlayerHealth holderHealth = legacyHolder.GetComponent<PlayerHealth>();
-            if (holderHealth != null)
-            {
-                int damage = Mathf.RoundToInt(holdPenaltyDamage);
-                holderHealth.TakeDamage(damage, legacyHolder);
+
+                Debug.Log($"Health after damage attempt: {holderHealth.GetCurrentHealth()}");
             }
         }
     }
@@ -460,11 +443,6 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         {
             holder.SetHasBall(false);
             holder = null;
-        }
-        else if (legacyHolder != null)
-        {
-            legacyHolder.SetHasBall(false);
-            legacyHolder = null;
         }
 
         velocity = new Vector3(Random.Range(-3f, 3f), Random.Range(2f, 4f), Random.Range(-3f, 3f));
@@ -565,7 +543,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     {
         if (stream.IsWriting && hasNetworkAuthority)
         {
-            // Master Client: Send ball data
+            // Ball owner: Send ball data
             stream.SendNext(ballTransform.position);
             stream.SendNext(velocity);
             stream.SendNext((int)currentState);
@@ -593,53 +571,6 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             {
                 networkPosition += networkVelocity * lag;
             }
-        }
-    }
-
-    [PunRPC]
-    void RequestPickupValidation(int playerID, float posX, float posY, float posZ)
-    {
-        // Only Master Client validates pickup requests
-        if (!hasNetworkAuthority) return;
-
-        Vector3 requestPosition = new Vector3(posX, posY, posZ);
-        PlayerCharacter player = FindPlayerByID(playerID);
-
-        if (player != null && currentState == BallState.Free)
-        {
-            // Validate pickup is still possible
-            float distance = Vector3.Distance(ballTransform.position, player.transform.position);
-            if (distance <= pickupRange * 1.2f) // Slight tolerance for network lag
-            {
-                // Master Client authorizes pickup
-                holder = player;
-                SetBallState(BallState.Held);
-                player.SetHasBall(true);
-                ballHoldStartTime = Time.time;
-                ResetHoldTimer();
-
-                // Sync successful pickup to all clients (including the requester)
-                photonView.RPC("SyncBallEvent", RpcTarget.All, "Pickup",
-                             playerID,
-                             ballTransform.position.x, ballTransform.position.y, ballTransform.position.z,
-                             0f, 0f, 0f, 0, 0);
-            }
-            else
-            {
-                // Pickup denied - sync rejection
-                photonView.RPC("SyncPickupRejection", RpcTarget.All, playerID);
-            }
-        }
-    }
-
-    [PunRPC]
-    void SyncPickupRejection(int playerID)
-    {
-        PlayerCharacter player = FindPlayerByID(playerID);
-        if (player != null)
-        {
-            player.SetHasBall(false);
-            // Reset any optimistic pickup state
         }
     }
 
@@ -731,7 +662,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // PUBLIC INTERFACE METHODS
+    // PUBLIC INTERFACE METHODS - CLEANED UP
     // ═══════════════════════════════════════════════════════════════
 
     public bool TryPickup(PlayerCharacter character)
@@ -756,7 +687,6 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             PhotonView characterView = character.GetComponent<PhotonView>();
 
             Debug.Log($"📡 BallController Network Analysis:");
-            Debug.Log($"  - PhotonNetwork.IsMasterClient: {PhotonNetwork.IsMasterClient}");
             Debug.Log($"  - Ball hasNetworkAuthority: {hasNetworkAuthority}");
             Debug.Log($"  - Ball photonView.IsMine: {photonView.IsMine}");
             Debug.Log($"  - Ball Owner: {photonView.Owner?.NickName ?? "NULL"}");
@@ -797,9 +727,6 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
                 else
                 {
                     Debug.LogWarning($"❌ BallController: No network authority yet");
-                    Debug.LogWarning($"  - hasNetworkAuthority: {hasNetworkAuthority}");
-                    Debug.LogWarning($"  - photonView.IsMine: {photonView.IsMine}");
-                    Debug.LogWarning($"  - Ball owner: {photonView.Owner?.NickName ?? "NULL"}");
                     return false;
                 }
             }
@@ -826,8 +753,6 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             else
             {
                 Debug.LogWarning($"❌ BallController: No authority and not my character");
-                Debug.LogWarning($"  - hasNetworkAuthority: {hasNetworkAuthority}");
-                Debug.LogWarning($"  - characterView?.IsMine: {characterView?.IsMine}");
             }
         }
         else
@@ -838,54 +763,6 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         Debug.Log($"⚽ === BALLCONTROLLER PICKUP END === FAILED");
         return false;
     }
-
-    private bool ExecutePickupDirectly(PlayerCharacter character)
-    {
-        holder = character;
-        SetBallState(BallState.Held);
-        character.SetHasBall(true);
-        ballHoldStartTime = Time.time;
-        ResetHoldTimer();
-
-        // Sync to other clients
-        PhotonView characterView = character.GetComponent<PhotonView>();
-        if (characterView != null)
-        {
-            photonView.RPC("SyncBallEvent", RpcTarget.Others, "Pickup",
-                         characterView.ViewID,
-                         ballTransform.position.x, ballTransform.position.y, ballTransform.position.z,
-                         0f, 0f, 0f, 0, 0);
-        }
-
-        Debug.Log($"{character.name} picked up ball (Direct)");
-        return true;
-    }
-
-    private System.Collections.IEnumerator ExecutePickupAfterOwnership(PlayerCharacter character)
-    {
-        // Wait for ownership transfer
-        float timeout = 0.5f;
-        float elapsed = 0f;
-
-        while (!photonView.IsMine && elapsed < timeout)
-        {
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        if (photonView.IsMine && currentState == BallState.Free)
-        {
-            // Ownership transferred successfully - execute pickup
-            bool success = ExecutePickupDirectly(character);
-            Debug.Log($"Pickup after ownership transfer: {(success ? "SUCCESS" : "FAILED")}");
-        }
-        else
-        {
-            Debug.LogWarning($"Ownership transfer timeout or ball no longer free for {character.name}");
-        }
-    }
-
-
 
     public void OnCaught(PlayerCharacter catcher)
     {
@@ -902,16 +779,26 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         ResetHoldTimer();
     }
 
+    // FIXED: Improved ThrowBall method for multiplayer
     public void ThrowBall(Vector3 direction, float power)
     {
         if (currentState != BallState.Held) return;
 
-        // FIXED: Only the ball owner or master client can throw
-        if (!hasNetworkAuthority)
+        Debug.Log($"🚀 === BALL THROW START ===");
+        Debug.Log($"  - hasNetworkAuthority: {hasNetworkAuthority}");
+        Debug.Log($"  - photonView.IsMine: {photonView.IsMine}");
+        Debug.Log($"  - Ball Owner: {photonView.Owner?.NickName ?? "NULL"}");
+
+        // FIXED: Allow throws if we own the ball OR if we're the holder
+        bool canThrow = hasNetworkAuthority || (holder != null && holder.GetComponent<PhotonView>()?.IsMine == true);
+
+        if (!canThrow)
         {
-            Debug.LogWarning($"Cannot throw ball - no authority. hasNetworkAuthority={hasNetworkAuthority}");
+            Debug.LogWarning($"❌ Cannot throw ball - no authority. hasNetworkAuthority={hasNetworkAuthority}");
             return;
         }
+
+        Debug.Log($"✅ Throw authorized - proceeding");
 
         StopHoldTimer();
 
@@ -947,67 +834,21 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
         SetBallState(BallState.Thrown);
 
-        // Sync to other clients
-        PhotonView throwerView = thrower?.GetComponent<PhotonView>();
-        if (throwerView != null)
+        // FIXED: Sync to other clients if we have authority
+        if (hasNetworkAuthority)
         {
-            photonView.RPC("SyncBallEvent", RpcTarget.Others, "Throw",
-                         throwerView.ViewID,
-                         ballTransform.position.x, ballTransform.position.y, ballTransform.position.z,
-                         velocity.x, velocity.y, velocity.z,
-                         currentDamage, (int)currentThrowType);
-        }
-    }
-
-
-    void CheckOwnershipChanges()
-    {
-        bool currentOwnership = photonView.IsMine;
-
-        if (currentOwnership != lastOwnershipState)
-        {
-            // Ownership changed
-            OnBallOwnershipChanged(currentOwnership);
-            lastOwnershipState = currentOwnership;
-        }
-    }
-
-    void OnBallOwnershipChanged(bool nowOwned)
-    {
-        if (nowOwned)
-        {
-            // Ball ownership transferred to this client
-            hasNetworkAuthority = true;
-
-            Debug.Log($"Ball ownership gained by {PhotonNetwork.LocalPlayer.NickName}. " +
-                     $"New authority: {hasNetworkAuthority}");
-
-            // If a local player was trying to pick up, try again now that we have authority
-            if (hasNetworkAuthority && currentState == BallState.Free)
+            PhotonView throwerView = thrower?.GetComponent<PhotonView>();
+            if (throwerView != null)
             {
-                // Check if any local player is close enough to pick up
-                PlayerCharacter[] localPlayers = FindObjectsOfType<PlayerCharacter>();
-                foreach (PlayerCharacter player in localPlayers)
-                {
-                    PhotonView playerView = player.GetComponent<PhotonView>();
-                    if (playerView != null && playerView.IsMine)
-                    {
-                        float distance = Vector3.Distance(ballTransform.position, player.transform.position);
-                        if (distance <= pickupRange)
-                        {
-                            // Try pickup again now that we have authority
-                            Debug.Log($"Retrying pickup for {player.name} after ownership transfer");
-                            TryPickup(player);
-                            break;
-                        }
-                    }
-                }
+                photonView.RPC("SyncBallEvent", RpcTarget.Others, "Throw",
+                             throwerView.ViewID,
+                             ballTransform.position.x, ballTransform.position.y, ballTransform.position.z,
+                             velocity.x, velocity.y, velocity.z,
+                             currentDamage, (int)currentThrowType);
             }
         }
-        else
-        {
-            Debug.Log($"Ball ownership lost by {PhotonNetwork.LocalPlayer.NickName}");
-        }
+
+        Debug.Log($"🚀 === BALL THROW COMPLETE ===");
     }
 
     public void ResetBall()
@@ -1025,14 +866,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             holder = null;
         }
 
-        if (legacyHolder != null)
-        {
-            legacyHolder.SetHasBall(false);
-            legacyHolder = null;
-        }
-
         thrower = null;
-        legacyThrower = null;
         targetOpponent = null;
         homingEnabled = false;
 
@@ -1190,46 +1024,19 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // MISSING METHODS USED BY OTHER SCRIPTS
+    // VFX INTEGRATION (SIMPLIFIED)
     // ═══════════════════════════════════════════════════════════════
 
-    // Legacy support methods (for backward compatibility)
-    private CharacterController legacyHolder;
-    private CharacterController legacyThrower;
-
-    public bool TryPickupLegacy(CharacterController character)
+    public void ApplyUltimateBallVFX()
     {
-        if (!hasNetworkAuthority || currentState != BallState.Free) return false;
-
-        float distance = Vector3.Distance(ballTransform.position, character.transform.position);
-        if (distance <= pickupRange)
-        {
-            legacyHolder = character;
-            holder = null;
-            SetBallState(BallState.Held);
-            character.SetHasBall(true);
-            ballHoldStartTime = Time.time;
-            ResetHoldTimer();
-            return true;
-        }
-        return false;
+        // Placeholder for ultimate ball VFX
+        Debug.Log("Ultimate ball VFX applied");
     }
 
-    public void OnCaught(CharacterController catcher)
+    public void RemoveUltimateBallVFX()
     {
-        if (catcher == null) return;
-
-        legacyHolder = catcher;
-        holder = null;
-        SetBallState(BallState.Held);
-        catcher.SetHasBall(true);
-        velocity = Vector3.zero;
-        thrower = null;
-        legacyThrower = null;
-        targetOpponent = null;
-        homingEnabled = false;
-        ballHoldStartTime = Time.time;
-        ResetHoldTimer();
+        // Placeholder for removing ultimate ball VFX
+        Debug.Log("Ultimate ball VFX removed");
     }
 
     public void OnCatchFailed()
@@ -1237,18 +1044,6 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         velocity *= 0.8f;
         velocity.x += Random.Range(-2f, 2f);
         velocity.y += Random.Range(1f, 3f);
-    }
-
-    public void ApplyUltimateBallVFX()
-    {
-        // Placeholder for ultimate ball VFX - implement if needed
-        // This was called by PlayerCharacter but can be empty for now
-    }
-
-    public void RemoveUltimateBallVFX()
-    {
-        // Placeholder for removing ultimate ball VFX - implement if needed
-        // This was called by CollisionDamageSystem but can be empty for now
     }
 
     public string GetCurrentHoldPhase()
@@ -1287,12 +1082,15 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     public ThrowType GetThrowType() => currentThrowType;
     public PlayerCharacter GetHolder() => holder;
     public PlayerCharacter GetThrower() => thrower;
-    public CharacterController GetHolderLegacy() => legacyHolder;
-    public CharacterController GetThrowerLegacy() => legacyThrower;
     public Transform GetCurrentTarget() => targetOpponent;
     public bool IsInWarningPhase() => isShowingWarning;
     public bool IsInDangerPhase() => isInDangerPhase;
     public bool IsInPenaltyPhase() => hasAppliedPenalty;
+
+    // ═══════════════════════════════════════════════════════════════
+    // REMOVED LEGACY SUPPORT METHODS
+    // All CharacterController legacy methods have been removed
+    // ═══════════════════════════════════════════════════════════════
 
     void OnGUI()
     {

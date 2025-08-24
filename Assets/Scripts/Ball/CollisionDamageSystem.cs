@@ -1,9 +1,11 @@
 ﻿using UnityEngine;
 using System.Collections;
+using Photon.Pun;
 
 /// <summary>
-/// Enhanced CollisionDamageSystem with comprehensive VFX integration
+/// Enhanced CollisionDamageSystem with CLEANED UP PlayerCharacter-only support
 /// Now uses VFXManager for all visual effects with proper variety
+/// REMOVED: All legacy CharacterController support
 /// </summary>
 public class CollisionDamageSystem : MonoBehaviour
 {
@@ -42,7 +44,7 @@ public class CollisionDamageSystem : MonoBehaviour
     [SerializeField] private AudioClip hitSound;
     [SerializeField] private AudioClip criticalHitSound;
     [SerializeField] private AudioClip deflectSound;
-    [SerializeField] private AudioClip catchFailSound; // Added missing reference
+    [SerializeField] private AudioClip catchFailSound;
 
     [Header("Debug")]
     [SerializeField] private bool debugMode = true;
@@ -56,13 +58,11 @@ public class CollisionDamageSystem : MonoBehaviour
     // Collision state
     private bool hasHitThisThrow = false;
     private PlayerCharacter lastThrower;
-    private CharacterController lastLegacyThrower;
     private float lastCollisionTime = 0f;
     private float collisionCooldown = 0.2f;
 
-    // Hit detection cache
+    // Hit detection cache - CLEANED UP: Only PlayerCharacter
     private PlayerCharacter[] allPlayers;
-    private CharacterController[] allLegacyPlayers;
     private float playerCacheTime = 0f;
     private float playerCacheInterval = 1f;
 
@@ -111,29 +111,58 @@ public class CollisionDamageSystem : MonoBehaviour
     void RefreshPlayerCache()
     {
         allPlayers = FindObjectsOfType<PlayerCharacter>();
-        allLegacyPlayers = FindObjectsOfType<CharacterController>();
         playerCacheTime = Time.time;
 
         if (debugMode)
         {
-            Debug.Log($"CollisionDamageSystem: Refreshed player cache - Found {allPlayers.Length} PlayerCharacters, {allLegacyPlayers.Length} legacy CharacterControllers");
+            Debug.Log($"CollisionDamageSystem: Refreshed player cache - Found {allPlayers.Length} PlayerCharacters");
         }
     }
 
     void CheckForCollisions()
     {
-        // Multiple prevention methods for double hits
-        if (hasHitThisThrow) return;
-        if (Time.time - lastCollisionTime < collisionCooldown) return;
-        if (Time.frameCount == lastCollisionFrame) return;
+        // Multiple prevention methods for double hits - ENHANCED
+        if (hasHitThisThrow)
+        {
+            if (debugMode) Debug.Log("CheckForCollisions: Already hit this throw, skipping");
+            return;
+        }
+
+        if (Time.time - lastCollisionTime < collisionCooldown)
+        {
+            if (debugMode) Debug.Log($"CheckForCollisions: Collision cooldown active ({Time.time - lastCollisionTime:F3}s)");
+            return;
+        }
+
+        if (Time.frameCount == lastCollisionFrame)
+        {
+            if (debugMode) Debug.Log($"CheckForCollisions: Already processed this frame ({Time.frameCount})");
+            return;
+        }
+
+        // CRITICAL: Only the ball authority should check for collisions
+        if (!ballController.photonView.IsMine)
+        {
+            if (debugMode) Debug.Log("CheckForCollisions: Not ball owner, skipping collision check");
+            return;
+        }
 
         Vector3 ballPosition = transform.position;
         Vector3 ballVelocity = ballController.velocity;
 
         // Early exit if ball is moving too slow (likely bouncing on ground)
-        if (ballVelocity.magnitude < 5f) return;
+        if (ballVelocity.magnitude < 5f)
+        {
+            if (debugMode) Debug.Log($"CheckForCollisions: Ball too slow ({ballVelocity.magnitude:F1}), skipping");
+            return;
+        }
 
-        // Check new PlayerCharacter system first
+        if (debugMode)
+        {
+            Debug.Log($"CheckForCollisions: Active check - Ball authority={ballController.photonView.IsMine}, Speed={ballVelocity.magnitude:F1}, Players={allPlayers.Length}");
+        }
+
+        // Check PlayerCharacter system only
         foreach (PlayerCharacter player in allPlayers)
         {
             if (player == null) continue;
@@ -150,33 +179,14 @@ public class CollisionDamageSystem : MonoBehaviour
 
             if (shouldCollide)
             {
+                if (debugMode)
+                {
+                    Debug.Log($"COLLISION DETECTED: {player.name} at distance {Vector3.Distance(ballPosition, player.transform.position):F2}");
+                }
+
                 // Determine hit type based on throw type and ball state
                 HitType hitType = DetermineHitType();
                 HandleCollision(player, hitType);
-                return; // Only hit one player per frame
-            }
-        }
-
-        // Check legacy CharacterController system for backward compatibility
-        foreach (CharacterController player in allLegacyPlayers)
-        {
-            if (player == null) continue;
-
-            // Skip the thrower
-            if (player == ballController.GetThrowerLegacy()) continue;
-
-            // Check if player is valid target (not knocked out, etc.)
-            PlayerHealth playerHealth = player.GetComponent<PlayerHealth>();
-            if (playerHealth != null && playerHealth.GetCurrentHealth() <= 0) continue;
-
-            // Use ducking-aware collision detection
-            bool shouldCollide = CheckLegacyPlayerCollisionWithDucking(player, ballPosition);
-
-            if (shouldCollide)
-            {
-                // Determine hit type based on throw type and ball state
-                HitType hitType = DetermineHitType();
-                HandleLegacyCollision(player, hitType);
                 return; // Only hit one player per frame
             }
         }
@@ -186,36 +196,6 @@ public class CollisionDamageSystem : MonoBehaviour
     /// Check collision with ducking pass-through logic for PlayerCharacter
     /// </summary>
     bool CheckPlayerCollisionWithDucking(PlayerCharacter player, Vector3 ballPosition)
-    {
-        Vector3 playerCenter = player.transform.position + Vector3.up * playerCollisionHeight;
-        float distanceToPlayer = Vector3.Distance(ballPosition, playerCenter);
-
-        // First check: Is ball close enough to player?
-        if (distanceToPlayer > collisionRange)
-            return false;
-
-        // Second check: If player is ducking, ball must be low enough to hit
-        if (player.IsDucking())
-        {
-            if (ballPosition.y > duckingHeightThreshold)
-            {
-                // Ball is too high - passes over ducking player
-                if (debugMode)
-                {
-                    Debug.Log($"Ball passed over ducking {player.name} (Ball Y: {ballPosition.y:F2}, Threshold: {duckingHeightThreshold})");
-                }
-                return false;
-            }
-        }
-
-        // Ball should hit the player
-        return true;
-    }
-
-    /// <summary>
-    /// Check collision with ducking pass-through logic for legacy CharacterController
-    /// </summary>
-    bool CheckLegacyPlayerCollisionWithDucking(CharacterController player, Vector3 ballPosition)
     {
         Vector3 playerCenter = player.transform.position + Vector3.up * playerCollisionHeight;
         float distanceToPlayer = Vector3.Distance(ballPosition, playerCenter);
@@ -318,64 +298,6 @@ public class CollisionDamageSystem : MonoBehaviour
         lastThrower = ballController.GetThrower();
     }
 
-    void HandleLegacyCollision(CharacterController hitPlayer, HitType hitType)
-    {
-        if (debugMode)
-        {
-            Debug.Log($"=== LEGACY ENHANCED COLLISION DAMAGE SYSTEM HIT ===");
-            Debug.Log($"Hit Player: {hitPlayer.name}");
-            Debug.Log($"Hit Type: {hitType}");
-            Debug.Log($"Ball Velocity: {ballController.velocity.magnitude:F1}");
-            Debug.Log($"Thrower: {ballController.GetThrowerLegacy()?.name}");
-            Debug.Log($"Player Ducking: {hitPlayer.IsDucking()}");
-        }
-
-        // Check if player is trying to catch
-        CatchSystem catchSystem = hitPlayer.GetComponent<CatchSystem>();
-        bool attemptedCatch = false;
-        bool successfulCatch = false;
-
-        if (catchSystem != null)
-        {
-            if (catchSystem.IsBallInRange())
-            {
-                attemptedCatch = true;
-
-                PlayerInputHandler inputHandler = hitPlayer.GetComponent<PlayerInputHandler>();
-                if (inputHandler != null && inputHandler.GetCatchPressed())
-                {
-                    // Success chance based on timing and ball speed
-                    float catchChance = CalculateCatchChance(hitType);
-                    if (Random.Range(0f, 1f) <= catchChance)
-                    {
-                        successfulCatch = true;
-                        HandleLegacySuccessfulCatch(hitPlayer, catchSystem);
-                        return;
-                    }
-                    else
-                    {
-                        // Failed catch attempt - spawn catch fail VFX
-                        HandleLegacyFailedCatch(hitPlayer, attemptedCatch);
-                    }
-                }
-            }
-        }
-
-        // If no successful catch, apply damage
-        if (!successfulCatch)
-        {
-            ApplyLegacyDamage(hitPlayer, hitType, attemptedCatch);
-            CreateLegacyEnhancedImpactEffects(hitPlayer, hitType, attemptedCatch);
-            HandleLegacyPostImpactPhysics(hitPlayer, attemptedCatch);
-        }
-
-        // Mark collision properly
-        hasHitThisThrow = true;
-        lastCollisionTime = Time.time;
-        lastCollisionFrame = Time.frameCount;
-        lastLegacyThrower = ballController.GetThrowerLegacy();
-    }
-
     float CalculateCatchChance(HitType hitType)
     {
         switch (hitType)
@@ -408,23 +330,6 @@ public class CollisionDamageSystem : MonoBehaviour
         }
     }
 
-    void HandleLegacySuccessfulCatch(CharacterController catcher, CatchSystem catchSystem)
-    {
-        // Player successfully caught the ball
-        ballController.OnCaught(catcher);
-
-        // Play catch sound
-        PlaySound(deflectSound);
-
-        // Create catch effect
-        CreateCatchEffect(catcher.transform.position);
-
-        if (debugMode)
-        {
-            Debug.Log($"Successful catch by {catcher.name}!");
-        }
-    }
-
     void HandleFailedCatch(PlayerCharacter player, bool attemptedCatch)
     {
         // VFXManager doesn't have SpawnCatchFailVFX, use fallback
@@ -436,19 +341,18 @@ public class CollisionDamageSystem : MonoBehaviour
         }
     }
 
-    void HandleLegacyFailedCatch(CharacterController player, bool attemptedCatch)
-    {
-        // For legacy system, just play sound and create basic effect
-        PlaySound(catchFailSound);
-
-        if (debugMode)
-        {
-            Debug.Log($"Failed catch attempt by {player.name}!");
-        }
-    }
-
     void ApplyDamage(PlayerCharacter hitPlayer, HitType hitType, bool attemptedCatch)
     {
+        // CRITICAL: Only ball authority should apply damage
+        if (!ballController.photonView.IsMine)
+        {
+            if (debugMode)
+            {
+                Debug.Log($"ApplyDamage: Not ball owner, skipping damage application");
+            }
+            return;
+        }
+
         // Get player health component
         PlayerHealth playerHealth = hitPlayer.GetComponent<PlayerHealth>();
         if (playerHealth == null)
@@ -477,59 +381,46 @@ public class CollisionDamageSystem : MonoBehaviour
             }
         }
 
-        // Apply damage - convert PlayerCharacter to CharacterController for PlayerHealth compatibility
-        CharacterController legacyController = hitPlayer.GetComponent<CharacterController>();
-        if (legacyController != null)
+        // Use RPC to tell the hit player's client to damage themselves
+        PhotonView hitPlayerView = hitPlayer.GetComponent<PhotonView>();
+        if (hitPlayerView != null)
         {
-            playerHealth.TakeDamage(damage, legacyController);
+            // Get the thrower's PhotonView for attacker reference
+            PlayerCharacter thrower = ballController.GetThrower();
+            int attackerViewID = -1;
+            if (thrower != null)
+            {
+                PhotonView throwerView = thrower.GetComponent<PhotonView>();
+                if (throwerView != null)
+                {
+                    attackerViewID = throwerView.ViewID;
+                }
+            }
+
+            if (debugMode)
+            {
+                Debug.Log($"DAMAGE RPC: Sending {damage} damage to {hitPlayer.name} (ViewID: {hitPlayerView.ViewID}) from thrower ViewID: {attackerViewID}");
+                Debug.Log($"  - Ball Owner: {ballController.photonView.Owner?.NickName}");
+                Debug.Log($"  - Hit Type: {hitType}");
+                Debug.Log($"  - Attempted Catch: {attemptedCatch}");
+            }
+
+            // Send RPC ONLY to the hit player's client (not RpcTarget.All)
+            hitPlayerView.RPC("TakeDamageFromBall", hitPlayerView.Owner, damage, attackerViewID);
         }
         else
         {
-            // Fallback: create a temporary reference
+            // Fallback for local damage (shouldn't happen in multiplayer)
+            Debug.LogWarning($"No PhotonView found on {hitPlayer.name}, applying local damage");
             playerHealth.TakeDamage(damage, null);
         }
 
-        // Visual feedback
+        // Visual feedback (this can run on all clients, but let's limit it to the ball owner to prevent duplication)
         StartCoroutine(DamageFlash(hitPlayer));
 
         if (debugMode)
         {
-            Debug.Log($"Applied {damage} damage to {hitPlayer.name} (Health: {playerHealth.GetCurrentHealth()})");
-        }
-    }
-
-    void ApplyLegacyDamage(CharacterController hitPlayer, HitType hitType, bool attemptedCatch)
-    {
-        // Get player health component
-        PlayerHealth playerHealth = hitPlayer.GetComponent<PlayerHealth>();
-        if (playerHealth == null)
-        {
-            // Create health component if it doesn't exist
-            playerHealth = hitPlayer.gameObject.AddComponent<PlayerHealth>();
-        }
-
-        // Get damage from ball controller (which gets it from character data)
-        int damage = ballController.GetCurrentDamage();
-
-        // Better damage reduction for attempted catches
-        if (attemptedCatch)
-        {
-            damage = Mathf.RoundToInt(damage * 0.5f); // 50% damage reduction for attempted catch
-            if (debugMode)
-            {
-                Debug.Log($"Damage reduced for attempted catch: {damage}");
-            }
-        }
-
-        // Apply damage
-        playerHealth.TakeDamage(damage, hitPlayer);
-
-        // Visual feedback
-        StartCoroutine(DamageFlashLegacy(hitPlayer));
-
-        if (debugMode)
-        {
-            Debug.Log($"Applied {damage} damage to {hitPlayer.name} (Health: {playerHealth.GetCurrentHealth()})");
+            Debug.Log($"Applied {damage} damage to {hitPlayer.name} via RPC");
         }
     }
 
@@ -540,7 +431,6 @@ public class CollisionDamageSystem : MonoBehaviour
     {
         Vector3 impactPosition = hitPlayer.transform.position + Vector3.up * 1f + Vector3.forward * vfxSpawnOffset;
 
-        // NEW: Use VFXManager for varied hit effects
         // NEW: Use VFXManager for varied hit effects
         if (useVFXManager && VFXManager.Instance != null)
         {
@@ -624,52 +514,6 @@ public class CollisionDamageSystem : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Legacy enhanced impact effects for CharacterController
-    /// </summary>
-    void CreateLegacyEnhancedImpactEffects(CharacterController hitPlayer, HitType hitType, bool attemptedCatch)
-    {
-        Vector3 impactPosition = hitPlayer.transform.position + Vector3.up * 1f;
-
-        // Spawn hit effect (legacy fallback)
-        if (hitEffectPrefab != null)
-        {
-            GameObject effect = Instantiate(hitEffectPrefab, impactPosition, Quaternion.identity);
-
-            // Scale effect based on hit type
-            float scale = hitType switch
-            {
-                HitType.Ultimate => 2f,
-                HitType.JumpThrow => 1.3f,
-                _ => 1f
-            };
-            effect.transform.localScale *= scale;
-
-            Destroy(effect, 2f);
-        }
-
-        // Screen shake
-        CameraController cameraController = FindObjectOfType<CameraController>();
-        if (cameraController != null)
-        {
-            // Scale screen shake based on hit type
-            float shakeIntensity = screenShakeIntensity;
-            if (hitType == HitType.Ultimate) shakeIntensity *= 2f;
-            else if (hitType == HitType.JumpThrow) shakeIntensity *= 1.5f;
-
-            cameraController.ShakeCamera(shakeIntensity, screenShakeDuration);
-        }
-
-        // Play hit sound
-        AudioClip soundToPlay = hitType == HitType.Ultimate ? criticalHitSound : hitSound;
-        PlaySound(soundToPlay);
-
-        if (debugMode)
-        {
-            Debug.Log($"Created legacy enhanced impact effects for {hitType} hit");
-        }
-    }
-
     void HandlePostImpactPhysics(PlayerCharacter hitPlayer, bool attemptedCatch)
     {
         if (ballController != null)
@@ -721,75 +565,20 @@ public class CollisionDamageSystem : MonoBehaviour
         StartCoroutine(ApplyKnockback(hitPlayer.transform, -bounceDirection));
 
         // Set ball physics
-       if (enableBallBounce)
-    {
-        ballController.SetVelocity(bounceVelocity);
-        // Ball becomes free immediately for faster gameplay
-        ballController.SetBallState(BallController.BallState.Free);
-    }
-    else
-    {
-        ballController.ResetBall();
-    }
-
-        if (debugMode)
-        {
-            Debug.Log($"Applied post-impact physics - Bounce: {bounceVelocity.magnitude:F1}, Direction: {bounceDirection}");
-        }
-    }
-
-    void HandleLegacyPostImpactPhysics(CharacterController hitPlayer, bool attemptedCatch)
-    {
-        // REMOVE ULTIMATE BALL VFX WHEN BALL HITS PLAYER
-        if (ballController != null)
-        {
-            ballController.RemoveUltimateBallVFX();
-        }
-        // Same physics logic as enhanced version
-        Vector3 ballPos = transform.position;
-        Vector3 playerPos = hitPlayer.transform.position;
-
-        Vector3 bounceDirection = (ballPos - playerPos).normalized;
-
-        HitType currentHitType = DetermineHitType();
-        switch (currentHitType)
-        {
-            case HitType.JumpThrow:
-                bounceDirection.y = 0.4f;
-                break;
-            case HitType.Ultimate:
-                bounceDirection.y = 0.6f;
-                break;
-            default:
-                bounceDirection.y = 0.2f;
-                break;
-        }
-
-        bounceDirection = bounceDirection.normalized;
-
-        Vector3 randomOffset = new Vector3(
-            Random.Range(-bounceRandomness * 0.1f, bounceRandomness * 0.1f),
-            0f,
-            Random.Range(-bounceRandomness * 0.1f, bounceRandomness * 0.1f)
-        );
-
-        Vector3 bounceVelocity = (bounceDirection + randomOffset) * bounceForce;
-
-        if (attemptedCatch)
-        {
-            bounceVelocity *= 0.7f;
-        }
-
-        StartCoroutine(ApplyKnockback(hitPlayer.transform, -bounceDirection));
-
         if (enableBallBounce)
         {
             ballController.SetVelocity(bounceVelocity);
+            // Ball becomes free immediately for faster gameplay
             ballController.SetBallState(BallController.BallState.Free);
         }
         else
         {
             ballController.ResetBall();
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"Applied post-impact physics - Bounce: {bounceVelocity.magnitude:F1}, Direction: {bounceDirection}");
         }
     }
 
@@ -804,25 +593,6 @@ public class CollisionDamageSystem : MonoBehaviour
     }
 
     IEnumerator DamageFlash(PlayerCharacter player)
-    {
-        Renderer playerRenderer = player.GetComponentInChildren<Renderer>();
-        if (playerRenderer == null) yield break;
-
-        Material originalMaterial = playerRenderer.material;
-        Color originalColor = originalMaterial.color;
-
-        // Flash red
-        playerRenderer.material.color = damageColor;
-        yield return new WaitForSeconds(0.1f);
-
-        // Back to normal
-        if (playerRenderer != null && playerRenderer.material != null)
-        {
-            playerRenderer.material.color = originalColor;
-        }
-    }
-
-    IEnumerator DamageFlashLegacy(CharacterController player)
     {
         Renderer playerRenderer = player.GetComponentInChildren<Renderer>();
         if (playerRenderer == null) yield break;
@@ -875,25 +645,11 @@ public class CollisionDamageSystem : MonoBehaviour
         }
     }
 
-    // Public methods for ball controller integration
+    // Public methods for ball controller integration - CLEANED UP
     public void OnBallThrown(PlayerCharacter thrower)
     {
         hasHitThisThrow = false;
         lastThrower = thrower;
-        lastLegacyThrower = null;
-        lastCollisionFrame = -1;
-
-        if (debugMode)
-        {
-            Debug.Log($"CollisionDamageSystem: Ball thrown by {thrower.name}");
-        }
-    }
-
-    public void OnBallThrownLegacy(CharacterController thrower)
-    {
-        hasHitThisThrow = false;
-        lastLegacyThrower = thrower;
-        lastThrower = null;
         lastCollisionFrame = -1;
 
         if (debugMode)
@@ -906,7 +662,6 @@ public class CollisionDamageSystem : MonoBehaviour
     {
         hasHitThisThrow = false;
         lastThrower = null;
-        lastLegacyThrower = null;
         lastCollisionTime = 0f;
         lastCollisionFrame = -1;
 
@@ -918,7 +673,6 @@ public class CollisionDamageSystem : MonoBehaviour
 
     public bool HasHitThisThrow() => hasHitThisThrow;
     public PlayerCharacter GetLastThrower() => lastThrower;
-    public CharacterController GetLastLegacyThrower() => lastLegacyThrower;
 
     // Add method to manually trigger collision (useful for testing)
     public void ForceCollisionCheck()
@@ -979,6 +733,32 @@ public class CollisionDamageSystem : MonoBehaviour
         }
     }
 
+    // Health integration helper
+    private bool IsPlayerValidTarget(PlayerCharacter player)
+    {
+        if (player == null) return false;
+
+        // Check if player is the thrower
+        if (player == ballController.GetThrower()) return false;
+
+        // Check player health
+        PlayerHealth playerHealth = player.GetComponent<PlayerHealth>();
+        if (playerHealth != null && playerHealth.GetCurrentHealth() <= 0) return false;
+
+        return true;
+    }
+
+    // Method to handle combo hits (if ball hits multiple players in sequence)
+    private void HandleComboHit(PlayerCharacter hitPlayer, HitType hitType)
+    {
+        // Future feature: Track consecutive hits for combo multipliers
+        if (useVFXManager && VFXManager.Instance != null)
+        {
+            // Could spawn special combo VFX here
+            Debug.Log($"Combo hit potential detected on {hitPlayer.name}");
+        }
+    }
+
     // Debug visualization with enhanced VFX system information
     void OnDrawGizmosSelected()
     {
@@ -1016,7 +796,7 @@ public class CollisionDamageSystem : MonoBehaviour
             Gizmos.DrawLine(transform.position, predictedPos);
         }
 
-        // Draw player collision heights
+        // Draw player collision heights - CLEANED UP: PlayerCharacter only
         PlayerCharacter[] players = FindObjectsOfType<PlayerCharacter>();
         foreach (PlayerCharacter player in players)
         {
@@ -1082,46 +862,21 @@ public class CollisionDamageSystem : MonoBehaviour
         }
     }
 
-    // Method to handle combo hits (if ball hits multiple players in sequence)
-    private void HandleComboHit(PlayerCharacter hitPlayer, HitType hitType)
-    {
-        // Future feature: Track consecutive hits for combo multipliers
-        if (useVFXManager && VFXManager.Instance != null)
-        {
-            // Could spawn special combo VFX here
-            Debug.Log($"Combo hit potential detected on {hitPlayer.name}");
-        }
-    }
-
-    // Health integration helper
-    private bool IsPlayerValidTarget(PlayerCharacter player)
-    {
-        if (player == null) return false;
-
-        // Check if player is the thrower
-        if (player == ballController.GetThrower()) return false;
-
-        // Check player health
-        PlayerHealth playerHealth = player.GetComponent<PlayerHealth>();
-        if (playerHealth != null && playerHealth.GetCurrentHealth() <= 0) return false;
-
-        // Check if player is in invulnerable state (could be added)
-        // if (player.IsInvulnerable()) return false;
-
-        return true;
-    }
-
-    private bool IsLegacyPlayerValidTarget(CharacterController player)
-    {
-        if (player == null) return false;
-
-        // Check if player is the thrower
-        if (player == ballController.GetThrowerLegacy()) return false;
-
-        // Check player health
-        PlayerHealth playerHealth = player.GetComponent<PlayerHealth>();
-        if (playerHealth != null && playerHealth.GetCurrentHealth() <= 0) return false;
-
-        return true;
-    }
+    // ═══════════════════════════════════════════════════════════════
+    // LEGACY SUPPORT REMOVED
+    // All CharacterController legacy methods have been removed to clean up the code
+    // This includes:
+    // - allLegacyPlayers cache
+    // - CheckLegacyPlayerCollisionWithDucking()
+    // - HandleLegacyCollision()
+    // - HandleLegacySuccessfulCatch()
+    // - HandleLegacyFailedCatch()
+    // - ApplyLegacyDamage()
+    // - CreateLegacyEnhancedImpactEffects()
+    // - HandleLegacyPostImpactPhysics()
+    // - DamageFlashLegacy()
+    // - OnBallThrownLegacy()
+    // - GetLastLegacyThrower()
+    // - IsLegacyPlayerValidTarget()
+    // ═══════════════════════════════════════════════════════════════
 }

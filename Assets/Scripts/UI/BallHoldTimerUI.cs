@@ -267,7 +267,7 @@ public class BallHoldTimerUI : MonoBehaviour
     {
         if (currentBall == null || timerRectTransform == null || mainCamera == null) return;
 
-        Transform ballHolder = currentBall.GetHolder()?.transform ?? currentBall.GetHolderLegacy()?.transform;
+        Transform ballHolder = currentBall.GetHolder()?.transform;
         if (ballHolder == null) return;
 
         Vector3 worldPosition = ballHolder.position + offsetFromPlayer;

@@ -4,8 +4,8 @@ using Photon.Pun;
 using Photon.Realtime;
 
 /// <summary>
-/// Network BallManager with Master Client Authority
-/// FIXED: Now properly registers ball on all clients
+/// Network BallManager with CLEANED UP PlayerCharacter-only support
+/// FIXED: Improved multiplayer throwing system for all players
 /// </summary>
 public class BallManager : MonoBehaviourPunCallbacks
 {
@@ -60,11 +60,11 @@ public class BallManager : MonoBehaviourPunCallbacks
     {
         // Wait a frame to ensure the ball has been spawned
         yield return null;
-        
+
         // Try to find the ball for up to 2 seconds
         float timeout = 2f;
         float elapsed = 0f;
-        
+
         while (currentBall == null && elapsed < timeout)
         {
             BallController[] balls = FindObjectsOfType<BallController>();
@@ -75,11 +75,11 @@ public class BallManager : MonoBehaviourPunCallbacks
                 Debug.Log($"[BallManager] Non-master client found and registered ball: {currentBall.name}");
                 break;
             }
-            
+
             yield return new WaitForSeconds(0.1f);
             elapsed += 0.1f;
         }
-        
+
         if (currentBall == null)
         {
             Debug.LogWarning("[BallManager] Non-master client could not find ball after timeout");
@@ -92,7 +92,7 @@ public class BallManager : MonoBehaviourPunCallbacks
         {
             MonitorBallHoldState();
         }
-        
+
         // FIXED: Continuously check for ball if we don't have one
         if (currentBall == null && gameActive)
         {
@@ -145,10 +145,10 @@ public class BallManager : MonoBehaviourPunCallbacks
         {
             GameObject ballObj = PhotonNetwork.Instantiate(ballPrefab.name, spawnPosition, Quaternion.identity);
             currentBall = ballObj.GetComponent<BallController>();
-            
+
             // FIXED: Notify all clients about the new ball
             photonView.RPC("RegisterBallOnClients", RpcTarget.Others, ballObj.GetPhotonView().ViewID);
-            
+
             Debug.Log($"[BallManager] Master spawned ball with ViewID: {ballObj.GetPhotonView().ViewID}");
         }
     }
@@ -173,7 +173,7 @@ public class BallManager : MonoBehaviourPunCallbacks
     }
 
     /// <summary>
-    /// FIXED: Enhanced pickup request with better null checking
+    /// FIXED: Enhanced pickup request with better null checking - PlayerCharacter only
     /// </summary>
     public bool RequestBallPickup(PlayerCharacter character)
     {
@@ -183,7 +183,7 @@ public class BallManager : MonoBehaviourPunCallbacks
         if (currentBall == null)
         {
             Debug.LogError($"❌ currentBall is NULL! Attempting to find ball...");
-            
+
             // Try to find the ball one more time
             BallController foundBall = FindObjectOfType<BallController>();
             if (foundBall != null)
@@ -268,25 +268,8 @@ public class BallManager : MonoBehaviourPunCallbacks
     }
 
     /// <summary>
-    /// Legacy support for CharacterController
-    /// </summary>
-    public void RequestBallPickup(CharacterController character)
-    {
-        if (currentBall != null && gameActive)
-        {
-            if (PhotonNetwork.IsMasterClient)
-            {
-                bool success = currentBall.TryPickupLegacy(character);
-                if (success && enableHoldTimerUI && autoShowTimerOnPickup)
-                {
-                    ShowHoldTimerUI();
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Request ball throw with character data and network authority
+    /// IMPROVED: Request ball throw with character data and FIXED network authority
+    /// This method now works for both Master Client and regular clients
     /// </summary>
     public void RequestBallThrowWithCharacterData(PlayerCharacter thrower, CharacterData characterData, ThrowType throwType, int damage)
     {
@@ -294,23 +277,76 @@ public class BallManager : MonoBehaviourPunCallbacks
 
         if (currentBall.GetHolder() != thrower) return;
 
-        if (PhotonNetwork.IsMasterClient)
+        Debug.Log($"🚀 === BALLMANAGER THROW REQUEST === {thrower.name}");
+        Debug.Log($"  - PhotonNetwork.IsMasterClient: {PhotonNetwork.IsMasterClient}");
+        Debug.Log($"  - Thrower IsMine: {thrower.GetComponent<PhotonView>()?.IsMine}");
+
+        // FIXED: Allow both Master Client and ball owner to execute throws
+        PhotonView throwerView = thrower.GetComponent<PhotonView>();
+        PhotonView ballView = currentBall.GetComponent<PhotonView>();
+
+        bool isMyPlayer = throwerView != null && throwerView.IsMine;
+        bool ownsBall = ballView != null && ballView.IsMine;
+
+        if (isMyPlayer && ownsBall)
         {
-            ExecuteThrowOnMasterClient(thrower, characterData, throwType, damage);
+            // Local player owns ball - execute throw directly
+            Debug.Log($"✅ Local player owns ball - executing throw directly");
+            ExecuteThrow(thrower, characterData, throwType, damage);
+        }
+        else if (PhotonNetwork.IsMasterClient && !isMyPlayer)
+        {
+            // Master client handling remote player throw
+            Debug.Log($"🎮 Master client handling remote player throw");
+            ExecuteThrow(thrower, characterData, throwType, damage);
+        }
+        else if (isMyPlayer && !ownsBall)
+        {
+            // My player but don't own ball - send RPC to ball owner
+            Debug.Log($"📤 Sending throw request to ball owner");
+            if (throwerView != null)
+            {
+                photonView.RPC("RequestThrowFromBallOwner", RpcTarget.All,
+                             throwerView.ViewID, (int)throwType, damage);
+            }
         }
         else
         {
-            // Non-master clients send throw request to Master Client
-            PhotonView throwerView = thrower.GetComponent<PhotonView>();
-            if (throwerView != null)
+            Debug.LogWarning($"❌ Throw rejected - invalid authority");
+        }
+    }
+
+    /// <summary>
+    /// FIXED: New RPC for handling throw requests from players who don't own the ball
+    /// </summary>
+    [PunRPC]
+    void RequestThrowFromBallOwner(int throwerViewID, int throwType, int damage)
+    {
+        // Only the ball owner should process this
+        if (currentBall == null || !currentBall.GetComponent<PhotonView>().IsMine)
+        {
+            Debug.Log($"Ignoring throw request - not ball owner");
+            return;
+        }
+
+        PhotonView throwerView = PhotonView.Find(throwerViewID);
+        PlayerCharacter thrower = throwerView?.GetComponent<PlayerCharacter>();
+
+        if (thrower != null && currentBall.GetHolder() == thrower)
+        {
+            CharacterData characterData = thrower.GetCharacterData();
+            if (characterData != null)
             {
-                photonView.RPC("RequestThrowFromMaster", RpcTarget.MasterClient,
-                             throwerView.ViewID, (int)throwType, damage);
+                Debug.Log($"🔄 Ball owner executing throw for remote player: {thrower.name}");
+                ExecuteThrow(thrower, characterData, (ThrowType)throwType, damage);
             }
         }
     }
 
-    void ExecuteThrowOnMasterClient(PlayerCharacter thrower, CharacterData characterData, ThrowType throwType, int damage)
+    /// <summary>
+    /// FIXED: Execute throw method that works for all network scenarios
+    /// </summary>
+    void ExecuteThrow(PlayerCharacter thrower, CharacterData characterData, ThrowType throwType, int damage)
     {
         if (isTimerUIShown && autoHideTimerOnThrow)
         {
@@ -318,15 +354,7 @@ public class BallManager : MonoBehaviourPunCallbacks
         }
 
         float throwSpeed = characterData.GetThrowSpeed(GetBaseThrowSpeed(throwType));
-        Vector3 direction = Vector3.right;
-
-        // Find target for direction calculation
-        PlayerCharacter opponent = FindOpponent(thrower);
-        if (opponent != null)
-        {
-            Vector3 targetDir = (opponent.transform.position - currentBall.transform.position).normalized;
-            direction = characterData.ApplyThrowAccuracy(targetDir);
-        }
+        Vector3 direction = CalculateThrowDirection(thrower);
 
         currentBall.SetThrowData(throwType, damage, throwSpeed);
         currentBall.SetThrower(thrower);
@@ -338,7 +366,29 @@ public class BallManager : MonoBehaviourPunCallbacks
             VFXManager.Instance.SpawnThrowVFX(currentBall.transform.position, thrower, throwType);
         }
 
+        Debug.Log($"✅ Ball throw executed: {thrower.name} threw {throwType} for {damage} damage");
+
         StartCoroutine(CheckForRespawn());
+    }
+
+    /// <summary>
+    /// IMPROVED: Better throw direction calculation with player side consideration
+    /// </summary>
+    Vector3 CalculateThrowDirection(PlayerCharacter thrower)
+    {
+        // Find opponent for direction calculation
+        PlayerCharacter opponent = FindOpponent(thrower);
+        if (opponent != null)
+        {
+            Vector3 targetDir = (opponent.transform.position - currentBall.transform.position).normalized;
+            return thrower.GetCharacterData().ApplyThrowAccuracy(targetDir);
+        }
+
+        // Fallback: determine direction based on player position (left side throws right, right side throws left)
+        Vector3 throwerPos = thrower.transform.position;
+        Vector3 direction = throwerPos.x < 0 ? Vector3.right : Vector3.left;
+
+        return direction;
     }
 
     PlayerCharacter FindOpponent(PlayerCharacter thrower)
@@ -355,7 +405,7 @@ public class BallManager : MonoBehaviourPunCallbacks
     }
 
     /// <summary>
-    /// Legacy throw method
+    /// SIMPLIFIED: Legacy throw method now redirects to main method
     /// </summary>
     public void RequestBallThrowSimple(PlayerCharacter thrower, float power = 1f)
     {
@@ -368,31 +418,6 @@ public class BallManager : MonoBehaviourPunCallbacks
                 int damage = characterData.GetThrowDamage(throwType);
                 RequestBallThrowWithCharacterData(thrower, characterData, throwType, damage);
             }
-            else if (PhotonNetwork.IsMasterClient)
-            {
-                if (isTimerUIShown && autoHideTimerOnThrow)
-                {
-                    HideHoldTimerUI();
-                }
-                currentBall.ThrowBall(Vector3.right, power);
-                StartCoroutine(CheckForRespawn());
-            }
-        }
-    }
-
-    /// <summary>
-    /// Legacy CharacterController throw
-    /// </summary>
-    public void RequestBallThrowSimple(CharacterController thrower, float power = 1f)
-    {
-        if (currentBall != null && currentBall.GetHolderLegacy() == thrower && PhotonNetwork.IsMasterClient)
-        {
-            if (isTimerUIShown && autoHideTimerOnThrow)
-            {
-                HideHoldTimerUI();
-            }
-            currentBall.ThrowBall(Vector3.right, power);
-            StartCoroutine(CheckForRespawn());
         }
     }
 
@@ -408,7 +433,7 @@ public class BallManager : MonoBehaviourPunCallbacks
     }
 
     /// <summary>
-    /// Handle ultimate throws
+    /// Handle ultimate throws - PlayerCharacter only
     /// </summary>
     public void RequestUltimateThrow(PlayerCharacter thrower, UltimateType ultimateType)
     {
@@ -425,10 +450,7 @@ public class BallManager : MonoBehaviourPunCallbacks
                 RequestBallThrowWithCharacterData(thrower, characterData, ThrowType.Ultimate, ultimateDamage);
                 break;
             case UltimateType.MultiThrow:
-                if (PhotonNetwork.IsMasterClient)
-                {
-                    StartCoroutine(MultiThrowCoroutine(thrower, characterData));
-                }
+                StartCoroutine(MultiThrowCoroutine(thrower, characterData));
                 break;
             case UltimateType.Curveball:
                 RequestBallThrowWithCharacterData(thrower, characterData, ThrowType.Ultimate, ultimateDamage);
@@ -464,7 +486,7 @@ public class BallManager : MonoBehaviourPunCallbacks
 
                 float spreadAngle = characterData.GetMultiThrowSpread();
                 float angleOffset = (i - (throwCount - 1) * 0.5f) * (spreadAngle / throwCount);
-                Vector3 throwDir = Quaternion.Euler(0, angleOffset, 0) * Vector3.right;
+                Vector3 throwDir = Quaternion.Euler(0, angleOffset, 0) * CalculateThrowDirection(thrower);
                 throwDir.y = 0.1f;
 
                 tempBall.ThrowBall(throwDir.normalized, 1f);
@@ -553,7 +575,7 @@ public class BallManager : MonoBehaviourPunCallbacks
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // NETWORK RPC HANDLERS
+    // NETWORK RPC HANDLERS - LEGACY REMOVED
     // ═══════════════════════════════════════════════════════════════
 
     [PunRPC]
@@ -587,13 +609,13 @@ public class BallManager : MonoBehaviourPunCallbacks
             CharacterData characterData = thrower.GetCharacterData();
             if (characterData != null)
             {
-                ExecuteThrowOnMasterClient(thrower, characterData, (ThrowType)throwType, damage);
+                ExecuteThrow(thrower, characterData, (ThrowType)throwType, damage);
             }
         }
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // PUBLIC INTERFACE
+    // PUBLIC INTERFACE - CLEANED UP
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
@@ -612,7 +634,7 @@ public class BallManager : MonoBehaviourPunCallbacks
         }
         return currentBall;
     }
-    
+
     public bool HasActiveBall() => currentBall != null;
     public Vector3 GetBallSpawnPosition() => spawnPosition;
     public bool IsHoldTimerUIEnabled() => enableHoldTimerUI;
@@ -690,11 +712,11 @@ public class BallManager : MonoBehaviourPunCallbacks
         }
         currentBall = null;
     }
-    
+
     // ═══════════════════════════════════════════════════════════════
     // DEBUG GUI
     // ═══════════════════════════════════════════════════════════════
-    
+
     void OnGUI()
     {
         if (!Application.isPlaying) return;
@@ -708,7 +730,7 @@ public class BallManager : MonoBehaviourPunCallbacks
         y += 20;
         GUI.Label(new Rect(x + 10, y, 380, 20), $"Current Ball: {(currentBall != null ? currentBall.name : "NULL")}");
         y += 20;
-        
+
         if (currentBall != null)
         {
             PhotonView ballPV = currentBall.GetComponent<PhotonView>();
@@ -722,11 +744,14 @@ public class BallManager : MonoBehaviourPunCallbacks
                 y += 20;
             }
         }
-        
+
         GUI.Label(new Rect(x + 10, y, 380, 20), $"Game Active: {gameActive}");
         y += 20;
         GUI.Label(new Rect(x + 10, y, 380, 20), $"Timer UI Shown: {isTimerUIShown}");
-
-        //GUILayout.EndArea();
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // LEGACY SUPPORT REMOVED
+    // All CharacterController methods have been removed to clean up the code
+    // ═══════════════════════════════════════════════════════════════
 }
