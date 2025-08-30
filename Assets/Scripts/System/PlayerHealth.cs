@@ -1,182 +1,118 @@
 using UnityEngine;
-using UnityEngine.UI;
 using System.Collections;
 using Photon.Pun;
-using Photon.Realtime;
 
 /// <summary>
-/// PUN2 Multiplayer Player Health System
-/// Authoritative health management with network synchronization
-/// CLEANED UP: Removed all CharacterController dependencies
+/// Optimized PlayerHealth with streamlined PUN2 networking
+/// Removed redundant features and fixed PlayerCharacter compatibility
 /// </summary>
 public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
 {
     [Header("Health Settings")]
     [SerializeField] private int maxHealth = 100;
     [SerializeField] private int currentHealth = 100;
-    [SerializeField] private bool invulnerableOnSpawn = true;
     [SerializeField] private float invulnerabilityDuration = 1f;
-
-    [Header("Visual Effects")]
-    [SerializeField] private GameObject deathEffectPrefab;
-    [SerializeField] private bool enableHealthRegeneration = false;
-    [SerializeField] private float regenRate = 5f;
-    [SerializeField] private float regenDelay = 5f;
 
     [Header("Audio")]
     [SerializeField] private AudioClip hurtSound;
     [SerializeField] private AudioClip deathSound;
-    [SerializeField] private AudioClip healSound;
     [SerializeField] private AudioClip invulnerabilitySound;
 
-    [Header("Debug")]
-    [SerializeField] private bool debugMode = true;
-
-    // State management
+    // Core state
     private bool isDead = false;
     private bool isInvulnerable = false;
     private bool hasTemporaryInvulnerability = false;
     private float lastDamageTime = 0f;
+
+    // Components - cached once
     private PlayerCharacter playerCharacter;
     private AudioSource audioSource;
+    private Renderer playerRenderer;
+    private Color originalColor;
 
-    // Network synchronization
+    // Network sync
     private int networkHealth;
     private bool networkIsDead;
-    private bool networkIsInvulnerable;
 
-    // Damage tracking
-    private int totalDamageTaken = 0;
-    private PlayerCharacter lastAttacker; // CHANGED: From CharacterController to PlayerCharacter
-
-    // Visual components
-    private Renderer playerRenderer;
-    private Color originalRendererColor;
-
-    // Events - UPDATED: Changed CharacterController to PlayerCharacter
+    // Events
     public System.Action<int, int> OnHealthChanged;
     public System.Action<PlayerCharacter> OnPlayerDeath;
-    public System.Action<PlayerCharacter> OnPlayerRespawn;
     public System.Action<int, PlayerCharacter> OnDamageTaken;
 
     void Awake()
     {
         playerCharacter = GetComponent<PlayerCharacter>();
-        audioSource = GetComponent<AudioSource>();
+        audioSource = GetComponent<AudioSource>() ?? gameObject.AddComponent<AudioSource>();
         playerRenderer = GetComponentInChildren<Renderer>();
 
-        if (audioSource == null)
-        {
-            audioSource = gameObject.AddComponent<AudioSource>();
-            audioSource.playOnAwake = false;
-            audioSource.volume = 0.7f;
-        }
+        audioSource.playOnAwake = false;
+        audioSource.volume = 0.7f;
 
-        // Store original renderer color
         if (playerRenderer != null)
         {
-            originalRendererColor = playerRenderer.material.color;
+            originalColor = playerRenderer.material.color;
         }
 
-        // Initialize health
         currentHealth = maxHealth;
         networkHealth = currentHealth;
     }
 
     void Start()
     {
-        if (invulnerableOnSpawn)
-        {
-            StartCoroutine(SpawnInvulnerability());
-        }
-
-        // Trigger initial health event
+        StartCoroutine(SpawnInvulnerability());
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
-    }
-
-    void Update()
-    {
-        // Only local player processes health regeneration
-        if (!photonView.IsMine) return;
-
-        // Handle health regeneration
-        if (enableHealthRegeneration && !isDead && currentHealth < maxHealth)
-        {
-            if (Time.time - lastDamageTime > regenDelay)
-            {
-                RegenerateHealth();
-            }
-        }
     }
 
     IEnumerator SpawnInvulnerability()
     {
         isInvulnerable = true;
 
-        // Visual feedback for invulnerability (flashing)
-        float flashInterval = 0.1f;
-        float elapsed = 0f;
-
-        while (elapsed < invulnerabilityDuration)
-        {
-            if (playerRenderer != null)
-            {
-                playerRenderer.enabled = !playerRenderer.enabled;
-            }
-
-            yield return new WaitForSeconds(flashInterval);
-            elapsed += flashInterval;
-        }
-
-        // Ensure renderer is visible at the end
+        // Simple flashing effect
         if (playerRenderer != null)
         {
+            for (float elapsed = 0f; elapsed < invulnerabilityDuration; elapsed += 0.1f)
+            {
+                playerRenderer.enabled = !playerRenderer.enabled;
+                yield return new WaitForSeconds(0.1f);
+            }
             playerRenderer.enabled = true;
+        }
+        else
+        {
+            yield return new WaitForSeconds(invulnerabilityDuration);
         }
 
         isInvulnerable = false;
     }
 
     /// <summary>
-    /// Network-ready damage method - only owner can take damage
-    /// UPDATED: Changed attacker parameter from CharacterController to PlayerCharacter
+    /// Simplified damage method - authority on owner only
     /// </summary>
     public void TakeDamage(int damage, PlayerCharacter attacker)
     {
-        // Only the owner of this player can process damage
         if (!photonView.IsMine || isDead || isInvulnerable) return;
 
-        // Process damage
         int actualDamage = Mathf.Min(damage, currentHealth);
         currentHealth -= actualDamage;
-        totalDamageTaken += actualDamage;
         lastDamageTime = Time.time;
-        lastAttacker = attacker;
 
-        // Add ultimate charge for taking damage
-        if (playerCharacter != null)
-        {
-            playerCharacter.OnDamageTaken(actualDamage);
-        }
+        // Add ability charges
+        playerCharacter?.OnDamageTaken(actualDamage);
 
-        // Sync damage across network
+        // Network sync
         photonView.RPC("OnDamageReceived", RpcTarget.Others, currentHealth, actualDamage);
 
-        // Play hurt sound
+        // Effects and events
         PlaySound(hurtSound);
-
-        // Trigger events
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
         OnDamageTaken?.Invoke(actualDamage, attacker);
 
-        // Check for death
         if (currentHealth <= 0)
         {
             Die(attacker);
         }
         else
         {
-            // Brief damage reaction
             StartCoroutine(DamageReaction());
         }
     }
@@ -184,240 +120,202 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
     [PunRPC]
     void OnDamageReceived(int newHealth, int damageAmount)
     {
-        // Update health for remote players (visual only)
         currentHealth = newHealth;
-
-        // Play hurt sound
         PlaySound(hurtSound);
-
-        // Trigger UI update
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
-
-        // Visual damage reaction
         StartCoroutine(DamageReaction());
     }
 
     /// <summary>
-    /// Ball damage RPC - UPDATED: Changed attacker handling to PlayerCharacter
+    /// Ball damage RPC - simplified
     /// </summary>
     [PunRPC]
     void TakeDamageFromBall(int damage, int attackerViewID)
     {
-        if (debugMode)
-        {
-            Debug.Log($"TakeDamageFromBall RPC received: {damage} damage");
-            Debug.Log($"  - My PhotonView.IsMine: {photonView.IsMine}");
-            Debug.Log($"  - My Owner: {photonView.Owner?.NickName ?? "NULL"}");
-            Debug.Log($"  - Local Player: {PhotonNetwork.LocalPlayer?.NickName ?? "NULL"}");
-            Debug.Log($"  - Dead: {isDead}, Invulnerable: {isInvulnerable}");
-        }
+        if (!photonView.IsMine || isDead || isInvulnerable) return;
 
-        // Only process damage on the owner of this player
-        if (!photonView.IsMine)
-        {
-            if (debugMode)
-            {
-                Debug.Log($"TakeDamageFromBall: Not my player ({photonView.Owner?.NickName}), ignoring damage");
-            }
-            return;
-        }
-
-        if (isDead || isInvulnerable)
-        {
-            if (debugMode)
-            {
-                Debug.Log($"TakeDamageFromBall: Player is dead ({isDead}) or invulnerable ({isInvulnerable}), ignoring damage");
-            }
-            return;
-        }
-
-        // Find the attacker PlayerCharacter - UPDATED: No more CharacterController lookup
         PlayerCharacter attacker = null;
         if (attackerViewID != -1)
         {
-            PhotonView attackerView = PhotonView.Find(attackerViewID);
-            if (attackerView != null)
-            {
-                attacker = attackerView.GetComponent<PlayerCharacter>();
-            }
+            var attackerView = PhotonView.Find(attackerViewID);
+            attacker = attackerView?.GetComponent<PlayerCharacter>();
         }
 
-        if (debugMode)
-        {
-            Debug.Log($"TakeDamageFromBall: Processing {damage} damage on {photonView.Owner?.NickName}");
-            Debug.Log($"  - Current Health: {currentHealth}");
-            Debug.Log($"  - Attacker ViewID: {attackerViewID}");
-        }
-
-        // Process damage using existing TakeDamage method
         TakeDamage(damage, attacker);
-
-        if (debugMode)
-        {
-            Debug.Log($"TakeDamageFromBall: Health after damage: {currentHealth}");
-        }
     }
 
-    /// <summary>
-    /// Network-ready healing method
-    /// </summary>
-    public void Heal(int healAmount)
+    public void Die(PlayerCharacter killer)
     {
-        if (!photonView.IsMine || isDead) return;
-
-        int actualHeal = Mathf.Min(healAmount, maxHealth - currentHealth);
-        currentHealth += actualHeal;
-
-        // Sync healing across network
-        photonView.RPC("OnHealReceived", RpcTarget.Others, currentHealth, actualHeal);
-
-        // Play heal sound
-        PlaySound(healSound);
-
-        // Trigger events
-        OnHealthChanged?.Invoke(currentHealth, maxHealth);
-    }
-
-    [PunRPC]
-    void OnHealReceived(int newHealth, int healAmount)
-    {
-        // Update health for remote players
-        currentHealth = newHealth;
-
-        // Play heal sound
-        PlaySound(healSound);
-
-        // Trigger UI update
-        OnHealthChanged?.Invoke(currentHealth, maxHealth);
-    }
-
-    /// <summary>
-    /// Network-ready set health method - Master Client authority
-    /// </summary>
-    public void SetHealth(int newHealth)
-    {
-        if (PhotonNetwork.IsMasterClient)
-        {
-            currentHealth = Mathf.Clamp(newHealth, 0, maxHealth);
-            photonView.RPC("SyncHealth", RpcTarget.Others, currentHealth);
-
-            OnHealthChanged?.Invoke(currentHealth, maxHealth);
-
-            if (currentHealth <= 0 && !isDead)
-            {
-                Die(null);
-            }
-        }
-    }
-
-    [PunRPC]
-    void SyncHealth(int newHealth)
-    {
-        currentHealth = newHealth;
-        OnHealthChanged?.Invoke(currentHealth, maxHealth);
-    }
-
-    /// <summary>
-    /// Death handling - UPDATED: Changed killer parameter to PlayerCharacter
-    /// </summary>
-    void Die(PlayerCharacter killer)
-    {
-        if (!photonView.IsMine || isDead) return;
+        if (isDead || !photonView.IsMine) return;
 
         isDead = true;
         currentHealth = 0;
 
-        // Stop any temporary invulnerability
-        if (hasTemporaryInvulnerability)
-        {
-            StopCoroutine(nameof(TemporaryInvulnerabilityCoroutine));
-            hasTemporaryInvulnerability = false;
-            isInvulnerable = false;
-            if (playerRenderer != null)
-            {
-                playerRenderer.material.color = originalRendererColor;
-            }
-        }
+        int killerViewID = killer?.GetComponent<PhotonView>()?.ViewID ?? -1;
 
-        // Sync death across network - UPDATED: Use PlayerCharacter ViewID instead of ActorNumber
-        int killerViewID = -1;
-        if (killer != null)
-        {
-            PhotonView killerView = killer.GetComponent<PhotonView>();
-            if (killerView != null)
-            {
-                killerViewID = killerView.ViewID;
-            }
-        }
-
+        // Sync death to other clients
         photonView.RPC("OnPlayerDied", RpcTarget.Others, killerViewID);
 
-        // Local death processing
+        // Process death locally
         ProcessDeath(killer);
+
+        // FIXED: Notify MatchManager that ANY client can trigger round end
+        MatchManager matchManager = FindObjectOfType<MatchManager>();
+        if (matchManager != null)
+        {
+            // Determine winner based on who died
+            int winnerActorNumber = 0;
+            PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
+
+            foreach (PlayerCharacter player in allPlayers)
+            {
+                if (player != playerCharacter && player.photonView != null)
+                {
+                    winnerActorNumber = player.photonView.Owner.ActorNumber;
+                    break;
+                }
+            }
+
+            if (winnerActorNumber > 0)
+            {
+                // Use the new RequestRoundEnd method that works for any client
+                matchManager.RequestRoundEnd(winnerActorNumber, "knockout");
+            }
+        }
     }
 
-    /// <summary>
-    /// Network death sync - UPDATED: Changed to use ViewID instead of ActorNumber
-    /// </summary>
     [PunRPC]
     void OnPlayerDied(int killerViewID)
     {
-        // Remote player died - update visual state
         isDead = true;
         currentHealth = 0;
 
-        // Find killer by ViewID - UPDATED: Simplified lookup
         PlayerCharacter killer = null;
         if (killerViewID != -1)
         {
-            PhotonView killerView = PhotonView.Find(killerViewID);
-            if (killerView != null)
-            {
-                killer = killerView.GetComponent<PlayerCharacter>();
-            }
+            var killerView = PhotonView.Find(killerViewID);
+            killer = killerView?.GetComponent<PlayerCharacter>();
         }
 
         ProcessDeath(killer);
     }
 
-    /// <summary>
-    /// Process death effects - UPDATED: Changed killer parameter to PlayerCharacter
-    /// </summary>
     void ProcessDeath(PlayerCharacter killer)
     {
-        // Play death sound
         PlaySound(deathSound);
-
-        // Create death effect
-        if (deathEffectPrefab != null)
-        {
-            GameObject effect = Instantiate(deathEffectPrefab, transform.position, Quaternion.identity);
-            Destroy(effect, 3f);
-        }
-
-        // Trigger events - UPDATED: Pass PlayerCharacter instead of CharacterController
         OnPlayerDeath?.Invoke(playerCharacter);
-
-        // Update UI
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
 
-        // Disable player controls - UPDATED: Disable PlayerCharacter instead of CharacterController
+        // FIXED: Don't disable PlayerCharacter component - just disable controls
         if (playerCharacter != null)
         {
-            // You might want to add a method to PlayerCharacter to disable controls
-            // For now, this is just a placeholder - adjust based on your PlayerCharacter implementation
-            playerCharacter.enabled = false;
+            playerCharacter.SetInputEnabled(false);
+            playerCharacter.SetMovementEnabled(false);
+            // Keep component enabled for round system to work properly
         }
     }
 
     /// <summary>
-    /// Set temporary invulnerability for ultimate abilities
+    /// FIXED: Add respawn/revive method for round system
+    /// </summary>
+    public void RevivePlayer()
+    {
+        if (!photonView.IsMine) return;
+
+        // Reset health and state
+        currentHealth = maxHealth;
+        isDead = false;
+        isInvulnerable = false;
+        hasTemporaryInvulnerability = false;
+
+        // Re-enable player controls
+        if (playerCharacter != null)
+        {
+            playerCharacter.SetInputEnabled(true);
+            playerCharacter.SetMovementEnabled(true);
+            playerCharacter.ResetForNewMatch(); // Reset player state
+        }
+
+        // Sync revival across network
+        photonView.RPC("OnPlayerRevived", RpcTarget.Others);
+
+        // Trigger events
+        OnHealthChanged?.Invoke(currentHealth, maxHealth);
+
+        // Brief spawn invulnerability
+        StartCoroutine(SpawnInvulnerability());
+    }
+
+    [PunRPC]
+    void OnPlayerRevived()
+    {
+        // Remote player revived
+        currentHealth = maxHealth;
+        isDead = false;
+        isInvulnerable = false;
+        hasTemporaryInvulnerability = false;
+
+        // Restore visual state
+        if (playerRenderer != null)
+        {
+            playerRenderer.material.color = originalColor;
+        }
+
+        // Trigger UI update
+        OnHealthChanged?.Invoke(currentHealth, maxHealth);
+
+        // Re-enable controls for remote players too
+        if (playerCharacter != null)
+        {
+            playerCharacter.SetInputEnabled(true);
+            playerCharacter.SetMovementEnabled(true);
+        }
+    }
+
+    /// <summary>
+    /// FIXED: Reset health for new round (called by MatchManager)
+    /// </summary>
+    public void ResetHealthForNewRound()
+    {
+        if (!photonView.IsMine) return; // Only owner can reset health
+
+        Debug.Log($"[HEALTH RESET] Resetting health for {gameObject.name}");
+
+        currentHealth = maxHealth;
+        isDead = false;
+        isInvulnerable = false;
+        hasTemporaryInvulnerability = false;
+
+        // Sync health reset to other clients
+        photonView.RPC("SyncHealthReset", RpcTarget.Others, maxHealth);
+
+        // Trigger health changed event
+        OnHealthChanged?.Invoke(currentHealth, maxHealth);
+
+        // Re-enable player if disabled
+        if (playerCharacter != null)
+        {
+            playerCharacter.SetInputEnabled(false); // Will be enabled when fight starts
+            playerCharacter.SetMovementEnabled(false);
+        }
+    }
+
+    [PunRPC]
+    void SyncHealthReset(int resetHealth)
+    {
+        currentHealth = resetHealth;
+        isDead = false;
+        OnHealthChanged?.Invoke(currentHealth, maxHealth);
+
+        Debug.Log($"[HEALTH SYNC] Health reset synced: {currentHealth}/{maxHealth}");
+    }
+
+    /// <summary>
+    /// Simplified temporary invulnerability for abilities
     /// </summary>
     public void SetTemporaryInvulnerability(float duration)
     {
         if (!photonView.IsMine) return;
-
-        // Sync invulnerability across network
         photonView.RPC("StartTemporaryInvulnerability", RpcTarget.All, duration);
     }
 
@@ -434,51 +332,33 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         isInvulnerable = true;
         hasTemporaryInvulnerability = true;
 
+        // Simple pulsing effect
         float elapsed = 0f;
-        while (elapsed < duration)
+        while (elapsed < duration && playerRenderer != null)
         {
-            // Pulsing effect to show invulnerability
-            if (playerRenderer != null)
-            {
-                float pulse = Mathf.Sin(elapsed * 10f) * 0.3f + 0.7f;
-                Color invulnerableColor = Color.yellow;
-                playerRenderer.material.color = Color.Lerp(originalRendererColor, invulnerableColor, pulse);
-            }
-
+            float pulse = Mathf.Sin(elapsed * 10f) * 0.3f + 0.7f;
+            playerRenderer.material.color = Color.Lerp(originalColor, Color.yellow, pulse);
             elapsed += Time.deltaTime;
             yield return null;
         }
 
-        // Restore original state and color
+        // Restore state
         isInvulnerable = wasInvulnerable;
         hasTemporaryInvulnerability = false;
-
         if (playerRenderer != null)
         {
-            playerRenderer.material.color = originalRendererColor;
-        }
-    }
-
-    void RegenerateHealth()
-    {
-        float regenAmount = regenRate * Time.deltaTime;
-        int regenHP = Mathf.RoundToInt(regenAmount);
-
-        if (regenHP > 0)
-        {
-            Heal(regenHP);
+            playerRenderer.material.color = originalColor;
         }
     }
 
     IEnumerator DamageReaction()
     {
-        // Brief visual reaction to being hit
         if (playerRenderer != null)
         {
-            Color originalColor = playerRenderer.material.color;
+            var originalCol = playerRenderer.material.color;
             playerRenderer.material.color = Color.red;
             yield return new WaitForSeconds(0.1f);
-            playerRenderer.material.color = originalColor;
+            playerRenderer.material.color = originalCol;
         }
     }
 
@@ -490,46 +370,19 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         }
     }
 
-    /// <summary>
-    /// Called when player successfully catches a ball - for ultimate charge
-    /// </summary>
-    public void OnSuccessfulCatch()
-    {
-        if (playerCharacter != null)
-        {
-            playerCharacter.OnSuccessfulCatch();
-        }
-    }
-
-    /// <summary>
-    /// Called when player successfully dodges - for ultimate charge
-    /// </summary>
-    public void OnSuccessfulDodge()
-    {
-        if (playerCharacter != null)
-        {
-            playerCharacter.OnSuccessfulDodge();
-        }
-    }
-
-    // IPunObservable for continuous health synchronization
+    // Network sync for health display
     public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
     {
         if (stream.IsWriting)
         {
-            // Send health data from owner
             stream.SendNext(currentHealth);
             stream.SendNext(isDead);
-            stream.SendNext(isInvulnerable);
         }
         else
         {
-            // Receive health data on non-owners
             networkHealth = (int)stream.ReceiveNext();
             networkIsDead = (bool)stream.ReceiveNext();
-            networkIsInvulnerable = (bool)stream.ReceiveNext();
 
-            // Smooth health updates for UI
             if (Mathf.Abs(networkHealth - currentHealth) > 1)
             {
                 currentHealth = networkHealth;
@@ -539,27 +392,18 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
             if (networkIsDead != isDead)
             {
                 isDead = networkIsDead;
-                if (isDead)
-                {
-                    ProcessDeath(null);
-                }
+                if (isDead) ProcessDeath(null);
             }
-
-            isInvulnerable = networkIsInvulnerable;
         }
     }
 
-    // Public getters - UPDATED: Changed return types to PlayerCharacter
+    // Simplified public API
     public int GetCurrentHealth() => currentHealth;
     public int GetMaxHealth() => maxHealth;
     public float GetHealthPercentage() => (float)currentHealth / maxHealth;
     public bool IsDead() => isDead;
     public bool IsInvulnerable() => isInvulnerable;
-    public bool HasTemporaryInvulnerability() => hasTemporaryInvulnerability;
-    public int GetTotalDamageTaken() => totalDamageTaken;
-    public PlayerCharacter GetLastAttacker() => lastAttacker; // CHANGED: Return PlayerCharacter
 
-    // Network-ready utility methods
     public void SetMaxHealth(int newMaxHealth)
     {
         if (PhotonNetwork.IsMasterClient)
@@ -579,32 +423,25 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
     }
 
-    /// <summary>
-    /// Force remove all invulnerability effects
-    /// </summary>
-    public void RemoveAllInvulnerability()
+    public void SetHealth(int newHealth)
     {
-        if (!photonView.IsMine) return;
-
-        photonView.RPC("ForceRemoveInvulnerability", RpcTarget.All);
-    }
-
-    [PunRPC]
-    void ForceRemoveInvulnerability()
-    {
-        StopCoroutine(nameof(TemporaryInvulnerabilityCoroutine));
-        isInvulnerable = false;
-        hasTemporaryInvulnerability = false;
-
-        if (playerRenderer != null)
+        if (PhotonNetwork.IsMasterClient)
         {
-            playerRenderer.material.color = originalRendererColor;
+            currentHealth = Mathf.Clamp(newHealth, 0, maxHealth);
+            photonView.RPC("SyncHealth", RpcTarget.Others, currentHealth);
+            OnHealthChanged?.Invoke(currentHealth, maxHealth);
+
+            if (currentHealth <= 0 && !isDead)
+            {
+                Die(null);
+            }
         }
     }
 
-    void OnDestroy()
+    [PunRPC]
+    void SyncHealth(int newHealth)
     {
-        // Clean up any ongoing coroutines
-        StopAllCoroutines();
+        currentHealth = newHealth;
+        OnHealthChanged?.Invoke(currentHealth, maxHealth);
     }
 }

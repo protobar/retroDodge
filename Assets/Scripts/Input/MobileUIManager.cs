@@ -372,12 +372,12 @@ public class MobileUIManager : MonoBehaviour
                 duckTimerText.gameObject.SetActive(true);
             }
 
-            if (duckCooldownOverlay != null)
+            /*if (duckCooldownOverlay != null)
             {
                 float progress = assignedDuckSystem.GetCooldownProgress();
                 duckCooldownOverlay.fillAmount = 1f - progress;
                 duckCooldownOverlay.color = Color.Lerp(duckCooldownColor, Color.clear, progress);
-            }
+            }*/
         }
         else if (!assignedDuckSystem.CanDuck())
         {

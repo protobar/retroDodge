@@ -20,6 +20,7 @@ GameObject:
   - component: {fileID: -3910053151060509909}
   - component: {fileID: 5977501817383454101}
   - component: {fileID: 103471099555658016}
+  - component: {fileID: -1065044286082195958}
   m_Layer: 8
   m_Name: Player_Nova
   m_TagString: Player
@@ -128,19 +129,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   catchRange: 2
-  perfectCatchWindow: 0.3
-  goodCatchWindow: 0.5
   catchCooldown: 0.5
   debugMode: 0
-  catchKey: 115
   catchIndicator: {fileID: 0}
-  alwaysShowCatchRange: 0
   perfectZoneColor: {r: 0, g: 1, b: 0, a: 1}
   goodZoneColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   missZoneColor: {r: 1, g: 0, b: 0, a: 1}
-  idleZoneColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
-  idleIndicatorAlpha: 0.3
-  audioSource: {fileID: 0}
   catchSuccessSound: {fileID: 0}
   catchFailSound: {fileID: 0}
   ballIncomingSound: {fileID: 0}
@@ -175,7 +169,8 @@ MonoBehaviour:
   customTreatKey: 101
   useDuckSystem: 1
   isPUN2Enabled: 1
-  isLocalPlayer: 1
+  autoDetectOwnership: 1
+  forceLocalControl: 0
   inputBufferTime: 0.15
   showDebugInfo: 0
   forceMobileMode: 0
@@ -194,25 +189,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   maxHealth: 100
   currentHealth: 100
-  invulnerableOnSpawn: 1
   invulnerabilityDuration: 1
-  healthBarSlider: {fileID: 0}
-  healthText: {fileID: 0}
-  healthBarFill: {fileID: 0}
-  healthyColor: {r: 0, g: 1, b: 0, a: 1}
-  lowHealthColor: {r: 1, g: 0, b: 0, a: 1}
-  invulnerableColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  lowHealthThreshold: 0.3
-  deathEffectPrefab: {fileID: 0}
-  respawnDelay: 3
-  enableHealthRegeneration: 0
-  regenRate: 5
-  regenDelay: 5
   hurtSound: {fileID: 0}
   deathSound: {fileID: 0}
-  healSound: {fileID: 0}
   invulnerabilitySound: {fileID: 0}
-  debugMode: 0
 --- !u!114 &595057405840706538
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -226,17 +206,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   characterData: {fileID: 11400000, guid: a46a381a78a312340977021a60875735, type: 2}
-  autoLoadCharacterOnStart: 1
-  debugMode: 0
-  showCharacterInfo: 0
   enableNetworkSync: 1
-  sendRate: 20
-  groundLayer:
+  groundLayerMask:
     serializedVersion: 2
     m_Bits: 1024
-  groundCheckDistance: 0.3
-  useVFXManager: 1
-  vfxSpawnHeight: 1.5
+  groundCheckRadius: 0.3
+  facingRight: 1
 --- !u!114 &6837583187912932837
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -255,11 +230,6 @@ MonoBehaviour:
   enableRestriction: 1
   teleportGracePeriod: 0.8
   teleportPushbackSpeed: 3
-  smoothTeleportReturn: 1
-  useSmoothClamping: 0
-  clampSmoothness: 0.1
-  debugMode: 0
-  showBounds: 1
   playerSide: 2
   autoDetectSide: 1
 --- !u!114 &-3910053151060509909
@@ -277,15 +247,9 @@ MonoBehaviour:
   maxDuckDuration: 1.5
   duckCooldown: 1.2
   enableDurationLimit: 1
-  showDuckWarning: 1
-  warningStartTime: 1
-  warningColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  exhaustedColor: {r: 1, g: 0, b: 0, a: 1}
   duckStartSound: {fileID: 0}
   duckEndSound: {fileID: 0}
   duckExhaustedSound: {fileID: 0}
-  cooldownEndSound: {fileID: 0}
-  debugMode: 0
 --- !u!114 &5977501817383454101
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -343,3 +307,99 @@ MonoBehaviour:
     InterpolateOption: 0
     InterpolateMoveTowardsSpeed: 1
     InterpolateLerpSpeed: 0
+--- !u!82 &-1065044286082195958
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_PlayOnAwake: 1
+  m_Volume: 1
+  m_Pitch: 1
+  Loop: 0
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 128
+  DopplerLevel: 1
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4

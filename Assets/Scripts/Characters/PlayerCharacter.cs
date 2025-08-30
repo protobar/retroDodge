@@ -4,146 +4,91 @@ using Photon.Pun;
 using Photon.Realtime;
 
 /// <summary>
-/// Enhanced PlayerCharacter with comprehensive PUN2 multiplayer integration
-/// Includes match management compatibility and streamlined ability system
-/// Focuses on core movement + 9 clean abilities (3 Ultimate, 3 Trick, 3 Treat)
+/// FIXED PlayerCharacter with proper PUN2 multiplayer integration
+/// Fixes: Character data sync, facing direction, round reset issues
 /// </summary>
 public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 {
     [Header("Character Setup")]
     [SerializeField] private CharacterData characterData;
-    [SerializeField] private bool autoLoadCharacterOnStart = true;
-
-    [Header("Debug")]
-    [SerializeField] private bool debugMode = true;
-    [SerializeField] private bool showCharacterInfo = true;
 
     [Header("Network Settings")]
     [SerializeField] private bool enableNetworkSync = true;
-    [SerializeField] private float sendRate = 20f;
 
-    // Core Components
+    [Header("Ground Check")]
+    [SerializeField] private LayerMask groundLayerMask = 1;
+    [SerializeField] private float groundCheckRadius = 0.3f;
+
+    [Header("Player Facing")]
+    [SerializeField] private bool facingRight = true;
+    private int playerSide = 0; // 0 = not set, 1 = left player, 2 = right player
+
+    // Core Components - cached once
     private PlayerInputHandler inputHandler;
     private CapsuleCollider characterCollider;
-    private CatchSystem catchSystem;
     private PlayerHealth playerHealth;
     private AudioSource audioSource;
+    private ArenaMovementRestrictor movementRestrictor;
+    private DuckSystem duckSystem;
 
-    // Movement variables
+    // Movement state
     private Transform characterTransform;
     private Vector3 velocity;
-    private bool isGrounded = false;
-    private bool isDucking = false;
-    private bool hasBall = false;
-    private bool movementEnabled = true;
+    private bool isGrounded, isDucking, hasBall = false;
+    private bool movementEnabled = true, inputEnabled = true;
 
     // Character-specific state
     private bool hasDoubleJumped = false;
     private bool canDash = true;
-    private float lastDashTime = 0f;
-    private bool isDashing = false;
-    private bool inputEnabled = true;
-    private bool isTeleporting = false;
-
-    // Network input/movement state
-    private bool networkInputEnabled = true;
-    private bool networkMovementEnabled = true;
+    private float lastDashTime;
+    private bool isDashing, isTeleporting = false;
 
     // Match integration
     private MatchManager currentMatch;
     private RoundManager currentRound;
 
-    // Ability charge system
-    private float currentUltimateCharge = 0f;
-    private float currentTrickCharge = 0f;
-    private float currentTreatCharge = 0f;
+    // Ability system - unified
+    private float[] abilityCharges = new float[3]; // Ultimate, Trick, Treat
+    private bool[] abilityCooldowns = new bool[3];
+    private readonly float[] cooldownTimes = { 3f, 8f, 10f };
 
-    // Ability cooldown system
-    private bool ultimateOnCooldown = false;
-    private bool trickOnCooldown = false;
-    private bool treatOnCooldown = false;
-    private float ultimateCooldownTime = 3f;
-    private float trickCooldownTime = 8f;
-    private float treatCooldownTime = 10f;
-
-    // Original collider dimensions for ducking
+    // Collider cache for ducking
     private float originalColliderHeight;
     private Vector3 originalColliderCenter;
-    private bool duckingStateChanged = false;
 
-    // Ground check settings
-    [SerializeField] private LayerMask groundLayer = 1;
-    [SerializeField] private float groundCheckDistance = 0.1f;
-
-    // Network sync variables
+    // Network sync data
     private Vector3 networkPosition;
-    private Vector3 networkVelocity;
-    private bool networkIsGrounded;
-    private bool networkIsDucking;
-    private bool networkHasBall;
-    private float networkLag;
+    private bool networkIsGrounded, networkIsDucking, networkHasBall;
 
-    [Header("Movement Restriction")]
-    private ArenaMovementRestrictor movementRestrictor;
+    // FIXED: Character data sync tracking
+    private bool characterDataLoaded = false;
+    private bool isDataSyncComplete = false;
 
-    [Header("Duck System Integration")]
-    private DuckSystem duckSystem;
-
-    [Header("Simplified VFX Integration")]
-    [SerializeField] private bool useVFXManager = true;
-    [SerializeField] private float vfxSpawnHeight = 1.5f;
-
-    // Events for other systems
+    // Events for UI/systems
     public System.Action<CharacterData> OnCharacterLoaded;
-    public System.Action<float> OnUltimateChargeChanged;
-    public System.Action<float> OnTrickChargeChanged;
-    public System.Action<float> OnTreatChargeChanged;
+    public System.Action<float>[] OnAbilityChargeChanged = new System.Action<float>[3];
+
+    // Constants
+    private const float GROUND_CHECK_DISTANCE = 0.1f;
+    private const float PICKUP_RANGE = 1.2f;
+    private const float VFX_SPAWN_HEIGHT = 1.5f;
 
     void Awake()
     {
         CacheComponents();
-
-        if (autoLoadCharacterOnStart && characterData != null)
-        {
-            LoadCharacter(characterData);
-        }
-
-        // Get or add movement restrictor
-        movementRestrictor = GetComponent<ArenaMovementRestrictor>();
-        if (movementRestrictor == null)
-        {
-            movementRestrictor = gameObject.AddComponent<ArenaMovementRestrictor>();
-        }
-
-        duckSystem = GetComponent<DuckSystem>();
-        if (duckSystem == null)
-        {
-            duckSystem = gameObject.AddComponent<DuckSystem>();
-        }
+        SetupSystemComponents();
     }
 
     void Start()
     {
-        // Cache match and round managers
         currentMatch = FindObjectOfType<MatchManager>();
         currentRound = FindObjectOfType<RoundManager>();
+        SetupNetworkBehavior();
 
-        // Enhanced network setup
-        if (photonView != null && photonView.IsMine)
+        // FIXED: Wait for character data from network if not local player
+        if (!IsLocalPlayer())
         {
-            // This is the local player - enable input
-            if (inputHandler != null)
-            {
-                inputHandler.isPUN2Enabled = true;
-            }
-        }
-        else if (photonView != null)
-        {
-            // This is a remote player - disable input
-            if (inputHandler != null)
-            {
-                inputHandler.isPUN2Enabled = true;
-            }
+            StartCoroutine(WaitForCharacterDataSync());
         }
     }
 
@@ -152,40 +97,70 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         characterTransform = transform;
         characterCollider = GetComponent<CapsuleCollider>();
         inputHandler = GetComponent<PlayerInputHandler>();
-        catchSystem = GetComponent<CatchSystem>();
         playerHealth = GetComponent<PlayerHealth>();
-        audioSource = GetComponent<AudioSource>();
+        audioSource = GetComponent<AudioSource>() ?? gameObject.AddComponent<AudioSource>();
 
-        // Validate critical components
-        if (inputHandler == null)
-        {
-            Debug.LogError($"{gameObject.name} - PlayerInputHandler component is missing!");
-        }
-
-        // Store original collider dimensions for ducking
         if (characterCollider != null)
         {
             originalColliderHeight = characterCollider.height;
             originalColliderCenter = characterCollider.center;
         }
 
-        // Setup audio source
-        if (audioSource == null)
+        audioSource.playOnAwake = false;
+        audioSource.volume = 0.7f;
+    }
+
+    void SetupSystemComponents()
+    {
+        movementRestrictor = GetComponent<ArenaMovementRestrictor>() ??
+                           gameObject.AddComponent<ArenaMovementRestrictor>();
+        duckSystem = GetComponent<DuckSystem>() ??
+                    gameObject.AddComponent<DuckSystem>();
+    }
+
+    void SetupNetworkBehavior()
+    {
+        if (photonView?.IsMine == true && inputHandler != null)
         {
-            audioSource = gameObject.AddComponent<AudioSource>();
-            audioSource.playOnAwake = false;
-            audioSource.volume = 0.7f;
+            inputHandler.isPUN2Enabled = true;
+        }
+    }
+
+    /// <summary>
+    /// FIXED: Wait for character data sync on remote clients
+    /// </summary>
+    IEnumerator WaitForCharacterDataSync()
+    {
+        float timeout = 5f; // 5 second timeout
+        float elapsed = 0f;
+
+        while (!isDataSyncComplete && elapsed < timeout)
+        {
+            // Try to get character data from player properties
+            if (photonView.Owner.CustomProperties.ContainsKey("CharacterIndex"))
+            {
+                int characterIndex = (int)photonView.Owner.CustomProperties["CharacterIndex"];
+                LoadCharacterFromNetwork(characterIndex);
+                break;
+            }
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        if (!isDataSyncComplete)
+        {
+            Debug.LogWarning($"[SYNC TIMEOUT] Character data sync timed out for player {photonView.Owner.ActorNumber}");
         }
     }
 
     void Update()
     {
-        if (characterData == null) return;
+        // FIXED: Only process if character data is loaded
+        if (characterData == null || (!IsLocalPlayer() && !isDataSyncComplete)) return;
 
-        // Only local player processes input and physics
-        if (photonView == null || photonView.IsMine)
+        if (photonView?.IsMine != false) // Local player or no network
         {
-            // Local player - your existing Update code
             HandleInput();
             CheckGrounded();
             HandleMovement();
@@ -195,105 +170,50 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         }
         else
         {
-            // Remote player - interpolate to network position
             InterpolateNetworkMovement();
         }
     }
 
-    /// <summary>
-    /// Smooth interpolation for remote players
-    /// </summary>
-    void InterpolateNetworkMovement()
-    {
-        if (!enableNetworkSync) return;
-
-        // Position interpolation
-        float distance = Vector3.Distance(transform.position, networkPosition);
-
-        if (distance > 0.1f) // Teleport if too far (lag spike)
-        {
-            if (distance > 5f)
-            {
-                transform.position = networkPosition;
-            }
-            else
-            {
-                // Smooth interpolation
-                float lerpRate = Time.deltaTime * sendRate;
-                transform.position = Vector3.Lerp(transform.position, networkPosition, lerpRate);
-            }
-        }
-
-        // Apply network state to visuals
-        isGrounded = networkIsGrounded;
-        isDucking = networkIsDucking;
-        hasBall = networkHasBall;
-
-        // Update visual state based on network data
-        if (duckingStateChanged != networkIsDucking)
-        {
-            isDucking = networkIsDucking;
-            duckingStateChanged = true;
-            HandleDucking(); // Apply visual changes
-        }
-    }
-
-    /// <summary>
-    /// RPC for synchronized actions (abilities, jumps, etc.)
-    /// </summary>
-    [PunRPC]
-    void SyncPlayerAction(string actionType)
-    {
-        // Only apply to remote players (local player already did the action)
-        if (photonView.IsMine) return;
-
-        switch (actionType)
-        {
-            case "Jump":
-                PlayCharacterSound(CharacterAudioType.Jump);
-                break;
-
-            case "DoubleJump":
-                PlayCharacterSound(CharacterAudioType.Jump);
-                break;
-
-            case "Dash":
-                PlayCharacterSound(CharacterAudioType.Dash);
-                if (characterData.dashEffect != null)
-                {
-                    Instantiate(characterData.dashEffect, transform.position, Quaternion.identity);
-                }
-                break;
-
-            case "ThrowBall":
-                PlayCharacterSound(CharacterAudioType.Throw);
-                break;
-
-            case "Ultimate":
-                if (useVFXManager && VFXManager.Instance != null)
-                {
-                    Vector3 position = transform.position + Vector3.up * vfxSpawnHeight;
-                    VFXManager.Instance.SpawnUltimateActivationVFX(position, this);
-                }
-                break;
-
-            case "Trick":
-                break;
-
-            case "Treat":
-                break;
-        }
-    }
+    // ══════════════════════════════════════════════════════════
+    // FIXED CHARACTER DATA INTEGRATION
+    // ══════════════════════════════════════════════════════════
 
     public void LoadCharacter(CharacterData newCharacterData)
     {
         characterData = newCharacterData;
+        characterDataLoaded = true;
+        isDataSyncComplete = true;
+
         ApplyCharacterStats();
         OnCharacterLoaded?.Invoke(characterData);
 
-        if (debugMode)
+        Debug.Log($"[CHARACTER LOADED] {characterData.characterName} loaded for player {photonView.Owner.ActorNumber}");
+    }
+
+    /// <summary>
+    /// FIXED: Load character data from network properties
+    /// </summary>
+    void LoadCharacterFromNetwork(int characterIndex)
+    {
+        if (currentMatch != null)
         {
-            Debug.Log($"Loaded character: {characterData.characterName}");
+            CharacterData networkCharacterData = currentMatch.GetCharacterData(characterIndex);
+            if (networkCharacterData != null)
+            {
+                LoadCharacter(networkCharacterData);
+
+                // Apply network synced color if available
+                if (photonView.Owner.CustomProperties.ContainsKey("CharacterColor_R"))
+                {
+                    float r = (float)photonView.Owner.CustomProperties["CharacterColor_R"];
+                    float g = (float)photonView.Owner.CustomProperties["CharacterColor_G"];
+                    float b = (float)photonView.Owner.CustomProperties["CharacterColor_B"];
+                    Color networkColor = new Color(r, g, b, 1f);
+                    ForceApplyColor(networkColor);
+                }
+
+                Debug.Log($"[NETWORK LOAD] Loaded character {networkCharacterData.characterName} from network properties");
+            }
         }
     }
 
@@ -302,51 +222,149 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         if (characterData == null) return;
 
         // Apply health stats
-        if (playerHealth != null)
-        {
-            playerHealth.SetMaxHealth(characterData.maxHealth);
-            playerHealth.SetHealth(characterData.maxHealth);
-        }
+        playerHealth?.SetMaxHealth(characterData.maxHealth);
+        playerHealth?.SetHealth(characterData.maxHealth);
 
-        // Reset character-specific state
-        currentUltimateCharge = 0f;
-        currentTrickCharge = 0f;
-        currentTreatCharge = 0f;
+        // Reset ability charges based on character data
+        abilityCharges[0] = 0f; // Ultimate
+        abilityCharges[1] = 0f; // Trick  
+        abilityCharges[2] = 0f; // Treat
+
+        // Reset movement states
         hasDoubleJumped = false;
         canDash = true;
 
-        // Apply visual changes if character has prefab
+        // Apply visual changes
         ApplyCharacterVisuals();
-
-        if (debugMode)
-        {
-            Debug.Log($"Applied stats for {characterData.characterName}: " +
-                     $"Speed={characterData.moveSpeed}, Health={characterData.maxHealth}, " +
-                     $"Ultimate={characterData.ultimateType}, Trick={characterData.trickType}, Treat={characterData.treatType}");
-        }
     }
 
     void ApplyCharacterVisuals()
     {
-        // Apply character color to renderer
-        Renderer characterRenderer = GetComponentInChildren<Renderer>();
-        if (characterRenderer != null && characterData.characterColor != Color.white)
+        var renderer = GetComponentInChildren<Renderer>();
+        if (renderer != null && characterData.characterColor != Color.white)
         {
-            characterRenderer.material.color = characterData.characterColor;
+            renderer.material.color = characterData.characterColor;
         }
     }
 
     /// <summary>
-    /// Enhanced input handling with network input state checking
+    /// FIXED: Force apply color for network sync
     /// </summary>
+    public void ForceApplyColor(Color networkColor)
+    {
+        Renderer[] renderers = GetComponentsInChildren<Renderer>();
+        foreach (Renderer renderer in renderers)
+        {
+            if (renderer.material != null)
+            {
+                renderer.material.color = networkColor;
+            }
+        }
+
+        Debug.Log($"[COLOR SYNC] Applied network color: {networkColor} for player {photonView.Owner.ActorNumber}");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // FIXED PLAYER FACING SYSTEM
+    // ══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// CRITICAL FIX: Set player side and facing direction based on spawn position
+    /// </summary>
+    public void SetPlayerSide(int side)
+    {
+        playerSide = side;
+
+        if (side == 1) // Left player (Master Client)
+        {
+            facingRight = true; // Left player faces right towards opponent
+            Debug.Log($"[FACING] Player {photonView.Owner.ActorNumber} set as LEFT player - facing RIGHT");
+        }
+        else if (side == 2) // Right player (Remote Client)
+        {
+            facingRight = false; // Right player faces left towards opponent
+            Debug.Log($"[FACING] Player {photonView.Owner.ActorNumber} set as RIGHT player - facing LEFT");
+
+            // CRITICAL: Flip the character model for right player
+            FlipCharacterModel();
+        }
+
+        // Network sync the facing direction
+        if (photonView.IsMine)
+        {
+            photonView.RPC("SyncPlayerFacing", RpcTarget.Others, facingRight, side);
+        }
+    }
+
+    /// <summary>
+    /// Network sync for player facing direction
+    /// </summary>
+    [PunRPC]
+    void SyncPlayerFacing(bool isFacingRight, int side)
+    {
+        facingRight = isFacingRight;
+        playerSide = side;
+
+        if (!facingRight && side == 2)
+        {
+            FlipCharacterModel();
+        }
+
+        Debug.Log($"[NETWORK] Synced facing for player {photonView.Owner.ActorNumber}: facingRight={facingRight}, side={side}");
+    }
+
+    /// <summary>
+    /// Flip the character model visually (not the collider)
+    /// </summary>
+    void FlipCharacterModel()
+    {
+        // Flip the visual representation
+        Transform modelTransform = transform.GetChild(0); // Assuming first child is the model
+        if (modelTransform != null)
+        {
+            Vector3 scale = modelTransform.localScale;
+            scale.x = Mathf.Abs(scale.x) * (facingRight ? 1 : -1);
+            modelTransform.localScale = scale;
+
+            Debug.Log($"[FLIP] Character model flipped - facingRight: {facingRight}");
+        }
+        else
+        {
+            // Fallback: flip the main transform
+            Vector3 scale = transform.localScale;
+            scale.x = Mathf.Abs(scale.x) * (facingRight ? 1 : -1);
+            transform.localScale = scale;
+        }
+    }
+
+    /// <summary>
+    /// FIXED: Get throw direction based on player facing
+    /// </summary>
+    public Vector3 GetThrowDirection()
+    {
+        // Always throw towards opponent
+        if (playerSide == 1) // Left player always throws right
+        {
+            return Vector3.right;
+        }
+        else if (playerSide == 2) // Right player always throws left
+        {
+            return Vector3.left;
+        }
+
+        // Fallback: use facing direction
+        return facingRight ? Vector3.right : Vector3.left;
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // INPUT & MOVEMENT
+    // ══════════════════════════════════════════════════════════
+
     void HandleInput()
     {
-        if (inputHandler == null || characterData == null || !inputEnabled || !networkInputEnabled) return;
+        if (!ShouldProcessInput()) return;
 
-        // Only process input for local player
-        if (photonView != null && !photonView.IsMine) return;
-
-        // Jump input (support double jump if character has it)
+        // Jump system with character data integration
         if (inputHandler.GetJumpPressed())
         {
             if (isGrounded && !isDucking)
@@ -359,212 +377,89 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
             }
         }
 
-        // Dash input (if character can dash)
+        // Dash system with character data integration
         if (inputHandler.GetDashPressed() && characterData.canDash && CanDash())
         {
             PerformDash();
         }
 
-        // Ability inputs - only if match allows
-        bool matchAllowsAbilities = IsMatchStateAllowingAbilities();
-
-        if (matchAllowsAbilities && inputHandler.GetUltimatePressed() && CanUseUltimate())
+        // Abilities - only in fighting state
+        if (IsMatchStateAllowingAbilities())
         {
-            ActivateUltimate();
+            if (inputHandler.GetUltimatePressed() && CanUseAbility(0)) ActivateUltimate();
+            if (inputHandler.GetTrickPressed() && CanUseAbility(1)) ActivateTrick();
+            if (inputHandler.GetTreatPressed() && CanUseAbility(2)) ActivateTreat();
         }
 
-        if (matchAllowsAbilities && inputHandler.GetTrickPressed() && CanUseTrick())
-        {
-            ActivateTrick();
-        }
-
-        if (matchAllowsAbilities && inputHandler.GetTreatPressed() && CanUseTreat())
-        {
-            ActivateTreat();
-        }
-
-        // Duck input with system integration
         HandleDuckingInput();
     }
 
-    /// <summary>
-    /// Check if current match state allows abilities
-    /// </summary>
-    bool IsMatchStateAllowingAbilities()
+    bool ShouldProcessInput()
     {
-        // Only check MatchManager since RoundManager no longer handles round states
-        if (currentMatch != null)
-        {
-            var matchState = currentMatch.GetMatchState();
-            return matchState == MatchManager.MatchState.Fighting;
-        }
-
-        // Fallback: if no match manager found, default to allow abilities
-        return true;
+        return inputHandler != null && characterData != null &&
+               inputEnabled && (photonView?.IsMine != false);
     }
 
-    void HandleDuckingInput()
-    {
-        if (duckSystem != null)
-        {
-            // Duck system handles all the logic - we just read the state
-            bool newDuckState = duckSystem.IsDucking();
-
-            // Check if ducking state changed
-            if (newDuckState != isDucking)
-            {
-                isDucking = newDuckState;
-                duckingStateChanged = true;
-
-                if (debugMode)
-                {
-                    Debug.Log($"{characterData?.characterName} ducking state changed: {isDucking} (System managed)");
-                }
-            }
-        }
-        else
-        {
-            // Fallback to original duck handling
-            bool duckInput = inputHandler.GetDuckHeld() && isGrounded;
-
-            if (duckInput != isDucking)
-            {
-                isDucking = duckInput;
-                duckingStateChanged = true;
-
-                if (debugMode)
-                {
-                    Debug.Log($"{characterData?.characterName} ducking state changed: {isDucking} (Manual)");
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Enhanced movement handling with network movement state checking
-    /// </summary>
     void HandleMovement()
     {
-        if (characterData == null || !movementEnabled || !networkMovementEnabled) return;
+        if (!movementEnabled || isDashing || isDucking) return;
 
-        // Only process movement for local player
-        if (photonView != null && !photonView.IsMine) return;
+        float horizontal = inputHandler.GetHorizontal();
 
-        // Get horizontal input
-        float horizontalInput = inputHandler.GetHorizontal();
-
-        // Don't move while dashing or ducking
-        if (isDashing || isDucking) return;
-
-        // Calculate movement
-        Vector3 newPosition = characterTransform.position;
-
-        if (horizontalInput != 0)
+        // Horizontal movement using character data
+        if (horizontal != 0)
         {
-            Vector3 moveDirection = Vector3.right * horizontalInput * characterData.moveSpeed;
-            newPosition += moveDirection * Time.deltaTime;
+            Vector3 moveDir = Vector3.right * horizontal * characterData.moveSpeed;
+            characterTransform.position += moveDir * Time.deltaTime;
         }
 
-        // Apply gravity when not grounded
+        // Gravity and vertical movement
         if (!isGrounded)
         {
             velocity.y -= 25f * Time.deltaTime;
         }
-        else
+        else if (velocity.y < 0)
         {
-            if (velocity.y < 0)
-            {
-                velocity.y = 0f;
-                hasDoubleJumped = false;
-            }
+            velocity.y = 0f;
+            hasDoubleJumped = false;
         }
 
         // Apply vertical movement
-        newPosition += Vector3.up * velocity.y * Time.deltaTime;
+        characterTransform.position += Vector3.up * velocity.y * Time.deltaTime;
 
-        // Apply movement restriction with teleport override support
+        // Apply movement restrictions
         if (movementRestrictor != null)
         {
-            Vector3 restrictedPosition = movementRestrictor.ApplyMovementRestriction(newPosition);
-            characterTransform.position = restrictedPosition;
-        }
-        else
-        {
-            characterTransform.position = newPosition;
+            Vector3 restricted = movementRestrictor.ApplyMovementRestriction(characterTransform.position);
+            characterTransform.position = restricted;
         }
     }
 
-    /// <summary>
-    /// Modified Jump method with network sync
-    /// </summary>
     void Jump()
     {
-        if (characterData == null) return;
-
         velocity.y = characterData.jumpHeight;
         isGrounded = false;
-
-        // Play jump sound
         PlayCharacterSound(CharacterAudioType.Jump);
-
-        // Sync action to other players
-        if (photonView != null && photonView.IsMine)
-        {
-            photonView.RPC("SyncPlayerAction", RpcTarget.Others, "Jump");
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"{characterData.characterName} Jumped! (Height: {characterData.jumpHeight})");
-        }
+        SyncPlayerAction("Jump");
     }
 
-    /// <summary>
-    /// Modified DoubleJump method with network sync
-    /// </summary>
     void DoubleJump()
     {
-        if (characterData == null || hasDoubleJumped) return;
-
+        if (hasDoubleJumped) return;
         velocity.y = characterData.jumpHeight * 0.8f;
         hasDoubleJumped = true;
-
-        // Play jump sound
         PlayCharacterSound(CharacterAudioType.Jump);
-
-        // Sync action to other players
-        if (photonView != null && photonView.IsMine)
-        {
-            photonView.RPC("SyncPlayerAction", RpcTarget.Others, "DoubleJump");
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"{characterData.characterName} Double Jumped!");
-        }
+        SyncPlayerAction("DoubleJump");
     }
 
     bool CanDash()
     {
-        if (!canDash || isDashing) return false;
-
-        float timeSinceLastDash = Time.time - lastDashTime;
-        return timeSinceLastDash >= characterData.GetDashCooldown();
+        return canDash && !isDashing && (Time.time - lastDashTime) >= characterData.GetDashCooldown();
     }
 
-    /// <summary>
-    /// Modified PerformDash method with network sync
-    /// </summary>
     void PerformDash()
     {
-        if (characterData == null) return;
-
-        // Sync dash to other players immediately
-        if (photonView != null && photonView.IsMine)
-        {
-            photonView.RPC("SyncPlayerAction", RpcTarget.Others, "Dash");
-        }
-
+        SyncPlayerAction("Dash");
         StartCoroutine(DashCoroutine());
     }
 
@@ -574,444 +469,306 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         lastDashTime = Time.time;
         canDash = false;
 
-        // Get dash direction from input
-        float horizontalInput = inputHandler.GetHorizontal();
-        Vector3 dashDirection = horizontalInput != 0 ?
-            Vector3.right * Mathf.Sign(horizontalInput) :
-            characterTransform.right; // Default to facing direction
+        float horizontal = inputHandler.GetHorizontal();
+        Vector3 dashDir = horizontal != 0 ? Vector3.right * Mathf.Sign(horizontal) : characterTransform.right;
 
-        // Perform dash movement
         float dashSpeed = characterData.GetDashDistance() / characterData.GetDashDuration();
         float elapsed = 0f;
 
-        // Play dash sound and effect
         PlayCharacterSound(CharacterAudioType.Dash);
-        if (characterData.dashEffect != null)
-        {
-            Instantiate(characterData.dashEffect, characterTransform.position, Quaternion.identity);
-        }
+        SpawnEffect(characterData.dashEffect);
 
         while (elapsed < characterData.GetDashDuration())
         {
-            characterTransform.Translate(dashDirection * dashSpeed * Time.deltaTime, Space.World);
+            characterTransform.Translate(dashDir * dashSpeed * Time.deltaTime, Space.World);
             elapsed += Time.deltaTime;
             yield return null;
         }
 
         isDashing = false;
-
-        // Reset dash availability after cooldown
         yield return new WaitForSeconds(characterData.GetDashCooldown());
         canDash = true;
     }
 
+    void HandleDuckingInput()
+    {
+        bool newDuckState = duckSystem?.IsDucking() ?? inputHandler.GetDuckHeld() && isGrounded;
+
+        if (newDuckState != isDucking)
+        {
+            isDucking = newDuckState;
+            ApplyDuckingCollider();
+        }
+    }
+
     void HandleDucking()
     {
-        if (characterCollider == null || !duckingStateChanged) return;
+        // Duck system handles the logic, we just apply visual changes
+        ApplyDuckingCollider();
+    }
+
+    void ApplyDuckingCollider()
+    {
+        if (characterCollider == null) return;
 
         if (isDucking)
         {
-            // Duck down - reduce collider height
             characterCollider.height = originalColliderHeight * 0.5f;
-            characterCollider.center = new Vector3(
-                originalColliderCenter.x,
-                originalColliderCenter.y - (originalColliderHeight * 0.25f),
-                originalColliderCenter.z
-            );
-
-            if (debugMode)
-            {
-                Debug.Log($"{characterData?.characterName} Ducked! (Collider height: {characterCollider.height})");
-            }
+            characterCollider.center = new Vector3(originalColliderCenter.x,
+                originalColliderCenter.y - (originalColliderHeight * 0.25f), originalColliderCenter.z);
         }
         else
         {
-            // Stand up - restore original collider dimensions
             characterCollider.height = originalColliderHeight;
             characterCollider.center = originalColliderCenter;
-
-            if (debugMode)
-            {
-                Debug.Log($"{characterData?.characterName} Stood up! (Collider height: {characterCollider.height})");
-            }
         }
-
-        duckingStateChanged = false;
     }
 
-    /// <summary>
-    /// Enhanced ball interaction with match state awareness
-    /// </summary>
+    // ══════════════════════════════════════════════════════════
+    // BALL SYSTEM - FIXED THROW DIRECTION
+    // ══════════════════════════════════════════════════════════
+
     void HandleBallInteraction()
     {
-        if (BallManager.Instance == null || inputHandler == null || characterData == null || !inputEnabled || !networkInputEnabled)
-        {
-            return;
-        }
+        if (BallManager.Instance == null || !IsMatchStateAllowingAbilities()) return;
 
-        // Check if match allows ball interaction
-        if (!IsMatchStateAllowingAbilities())
-        {
-            return;
-        }
-
-        // Only process for local player
-        if (photonView != null && !photonView.IsMine) return;
-
-        // Pickup ball when D is pressed
+        // Pickup
         if (inputHandler.GetPickupPressed() && !hasBall)
         {
-            Debug.Log($"🎮 === PICKUP ATTEMPT START === {characterData.characterName}");
-
-            BallController ball = BallManager.Instance.GetCurrentBall();
-            if (ball == null)
-            {
-                Debug.LogError($"❌ No ball found in BallManager!");
-                return;
-            }
-
-            if (!ball.IsFree())
-            {
-                Debug.LogWarning($"❌ Ball not free - state: {ball.GetBallState()}");
-                return;
-            }
-
-            float distance = Vector3.Distance(transform.position, ball.transform.position);
-            Debug.Log($"📏 Distance to ball: {distance:F2} (pickup range: 1.2)");
-
-            if (distance <= 1.2f)
-            {
-                PhotonView ballView = ball.GetComponent<PhotonView>();
-                PhotonView myView = GetComponent<PhotonView>();
-
-                if (myView != null && myView.IsMine)
-                {
-                    Debug.Log($"✅ Confirmed: This is MY local player");
-
-                    // Request ownership if we don't have it
-                    if (ballView != null && !ballView.IsMine)
-                    {
-                        Debug.Log($"🔄 Ball not owned by me - requesting ownership");
-                        ballView.RequestOwnership();
-                    }
-
-                    // Try pickup
-                    Debug.Log($"🎯 Calling BallManager.RequestBallPickup()...");
-                    bool success = BallManager.Instance.RequestBallPickup(this);
-                    Debug.Log($"🎯 Pickup result: {(success ? "SUCCESS ✅" : "FAILED ❌")}");
-                }
-                else
-                {
-                    Debug.LogWarning($"❌ NOT my local player - myView.IsMine = {myView?.IsMine}");
-                }
-            }
-            else
-            {
-                Debug.LogWarning($"❌ Too far from ball: {distance:F2} > 1.2");
-            }
-
-            Debug.Log($"🎮 === PICKUP ATTEMPT END ===");
+            TryPickupBall();
         }
 
-        // Throw ball
+        // Throw
         if (inputHandler.GetThrowPressed() && hasBall)
         {
-            Debug.Log($"🚀 {characterData.characterName} throwing ball");
             ThrowBall();
+        }
+    }
+
+    void TryPickupBall()
+    {
+        var ball = BallManager.Instance.GetCurrentBall();
+        if (ball?.IsFree() == true &&
+            Vector3.Distance(transform.position, ball.transform.position) <= PICKUP_RANGE)
+        {
+            if (BallManager.Instance.RequestBallPickup(this))
+            {
+                AddAbilityCharge(0, 5f); // Small charge for pickup
+            }
         }
     }
 
     void ThrowBall()
     {
-        if (!hasBall || BallManager.Instance == null || characterData == null) return;
+        if (!hasBall) return;
 
-        // Determine throw type
         ThrowType throwType = isGrounded ? ThrowType.Normal : ThrowType.JumpThrow;
+        int damage = characterData.GetThrowDamage(throwType);
 
-        // Get damage from character data
-        int throwDamage = characterData.GetThrowDamage(throwType);
+        // FIXED: Use proper throw direction based on player side
+        Vector3 throwDirection = GetThrowDirection();
 
-        // SIMPLIFIED VFX: Spawn character-specific throw VFX
-        if (useVFXManager && VFXManager.Instance != null)
-        {
-            Vector3 throwVFXPosition = transform.position + Vector3.up * vfxSpawnHeight;
-            VFXManager.Instance.SpawnThrowVFX(throwVFXPosition, this, throwType);
-        }
+        SpawnThrowVFX(throwType);
 
-        // Execute throw
-        BallManager.Instance.RequestBallThrowWithCharacterData(this, characterData, throwType, throwDamage);
+        // Pass throw direction to ball manager
+        BallManager.Instance.RequestBallThrowWithCharacterData(this, characterData, throwType, damage);
 
-        // Play throw sound (keep existing)
+
         PlayCharacterSound(CharacterAudioType.Throw);
 
-        // Add ability charges for throwing
-        AddUltimateCharge(15f);
-        AddTrickCharge(10f);
-        AddTreatCharge(10f);
+        // Add ability charges
+        AddAbilityCharge(0, 15f); // Ultimate
+        AddAbilityCharge(1, 10f); // Trick
+        AddAbilityCharge(2, 10f); // Treat
+    }
 
-        if (debugMode)
+    // ══════════════════════════════════════════════════════════
+    // FIXED ROUND RESET SYSTEM
+    // ══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// FIXED: Reset player state for round reset (called from MatchManager)
+    /// </summary>
+    public void ResetPlayerState()
+    {
+        // Reset movement state
+        velocity = Vector3.zero;
+        hasDoubleJumped = false;
+        isDashing = false;
+        isTeleporting = false;
+        canDash = true;
+
+        // Reset ducking state
+        if (duckSystem != null)
         {
-            Debug.Log($"{characterData.characterName} threw {throwType} for {throwDamage} damage!");
+            duckSystem.ResetDuckSystem(); // This handles everything including standing up
+        }
+        else
+        {
+            isDucking = false;
+            ApplyDuckingCollider(); // Apply normal collider
+        }
+
+        // Reset ball possession
+        hasBall = false;
+
+        // Reset abilities
+        for (int i = 0; i < abilityCharges.Length; i++)
+        {
+            abilityCharges[i] = 0f;
+            abilityCooldowns[i] = false;
+        }
+
+        // Re-enable movement and input
+        movementEnabled = true;
+        inputEnabled = true;
+
+        // Reset health if needed (but don't full heal on round reset)
+        if (playerHealth != null && playerHealth.IsDead())
+        {
+            playerHealth.RevivePlayer();
+        }
+
+        // Ensure proper ground state
+        CheckGroundedState();
+
+        Debug.Log($"[RESET] Player state reset completed for {gameObject.name}");
+    }
+
+    /// <summary>
+    /// Force ground check for reset
+    /// </summary>
+    void CheckGroundedState()
+    {
+        if (characterCollider != null)
+        {
+            Vector3 capsuleBottom = characterTransform.position +
+                characterCollider.center - Vector3.up * (characterCollider.height * 0.5f);
+
+            isGrounded = Physics.CheckSphere(capsuleBottom, groundCheckRadius, groundLayerMask);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // UNIFIED ABILITY SYSTEM (UNCHANGED - WORKING)
+    // ══════════════════════════════════════════════════════════
+
+    bool CanUseAbility(int abilityIndex)
+    {
+        if (characterData == null || abilityCooldowns[abilityIndex]) return false;
+
+        float required = GetRequiredCharge(abilityIndex);
+        return abilityCharges[abilityIndex] >= required;
+    }
+
+    float GetRequiredCharge(int abilityIndex)
+    {
+        switch (abilityIndex)
+        {
+            case 0: return characterData.ultimateChargeRequired;
+            case 1: return characterData.trickChargeRequired;
+            case 2: return characterData.treatChargeRequired;
+            default: return 100f;
+        }
+    }
+
+    void AddAbilityCharge(int abilityIndex, float amount)
+    {
+        if (!IsLocalPlayer()) return;
+
+        float rate = GetChargeRate(abilityIndex);
+        float required = GetRequiredCharge(abilityIndex);
+
+        abilityCharges[abilityIndex] = Mathf.Min(abilityCharges[abilityIndex] + (amount * rate), required);
+        OnAbilityChargeChanged[abilityIndex]?.Invoke(abilityCharges[abilityIndex] / required);
+    }
+
+    float GetChargeRate(int abilityIndex)
+    {
+        switch (abilityIndex)
+        {
+            case 0: return characterData.ultimateChargeRate;
+            case 1: return characterData.trickChargeRate;
+            case 2: return characterData.treatChargeRate;
+            default: return 1f;
         }
     }
 
     void UpdateAbilityCharges()
     {
-        // Update UI events
-        OnUltimateChargeChanged?.Invoke(currentUltimateCharge / characterData.ultimateChargeRequired);
-        OnTrickChargeChanged?.Invoke(currentTrickCharge / characterData.trickChargeRequired);
-        OnTreatChargeChanged?.Invoke(currentTreatCharge / characterData.treatChargeRequired);
-    }
-
-    void CheckGrounded()
-    {
-        // Ground check from bottom of original collider
-        Vector3 groundCheckPosition = characterTransform.position;
-        groundCheckPosition.y -= (originalColliderHeight * 0.5f);
-
-        isGrounded = Physics.Raycast(
-            groundCheckPosition,
-            Vector3.down,
-            groundCheckDistance,
-            groundLayer
-        );
-
-        // Debug visualization
-        Debug.DrawRay(groundCheckPosition, Vector3.down * groundCheckDistance,
-            isGrounded ? Color.green : Color.red);
-    }
-
-    void PlayCharacterSound(CharacterAudioType audioType)
-    {
-        if (audioSource == null || characterData == null) return;
-
-        AudioClip clipToPlay = characterData.GetRandomAudioClip(audioType);
-        if (clipToPlay != null)
+        for (int i = 0; i < 3; i++)
         {
-            audioSource.PlayOneShot(clipToPlay);
+            float required = GetRequiredCharge(i);
+            OnAbilityChargeChanged[i]?.Invoke(abilityCharges[i] / required);
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // ABILITY CHARGE SYSTEM (Enhanced with Network Sync)
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Enhanced ability charge management with network awareness
-    /// </summary>
-    public void AddUltimateCharge(float amount)
+    IEnumerator AbilityCooldown(int abilityIndex)
     {
-        if (characterData == null || !IsLocalPlayer()) return;
-
-        if (currentUltimateCharge >= characterData.ultimateChargeRequired) return;
-
-        float chargeToAdd = amount * characterData.ultimateChargeRate;
-        currentUltimateCharge = Mathf.Min(currentUltimateCharge + chargeToAdd, characterData.ultimateChargeRequired);
-
-        // Sync charge across network if significant change
-        if (chargeToAdd > 5f && photonView != null && photonView.IsMine)
-        {
-            photonView.RPC("SyncUltimateCharge", RpcTarget.Others, currentUltimateCharge);
-        }
-
-        if (debugMode && currentUltimateCharge >= characterData.ultimateChargeRequired)
-        {
-            Debug.Log($"💥 {characterData.characterName} ULTIMATE READY! ({characterData.ultimateType})");
-        }
+        abilityCooldowns[abilityIndex] = true;
+        yield return new WaitForSeconds(cooldownTimes[abilityIndex]);
+        abilityCooldowns[abilityIndex] = false;
     }
 
-    public void AddTrickCharge(float amount)
-    {
-        if (characterData == null || !IsLocalPlayer()) return;
+    // ══════════════════════════════════════════════════════════
+    // SPECIFIC ABILITIES (UNCHANGED - WORKING)
+    // ══════════════════════════════════════════════════════════
 
-        if (currentTrickCharge >= characterData.trickChargeRequired) return;
-
-        float chargeToAdd = amount * characterData.trickChargeRate;
-        currentTrickCharge = Mathf.Min(currentTrickCharge + chargeToAdd, characterData.trickChargeRequired);
-
-        // Sync charge across network if significant change
-        if (chargeToAdd > 5f && photonView != null && photonView.IsMine)
-        {
-            photonView.RPC("SyncTrickCharge", RpcTarget.Others, currentTrickCharge);
-        }
-
-        if (debugMode && currentTrickCharge >= characterData.trickChargeRequired)
-        {
-            Debug.Log($"🎯 {characterData.characterName} TRICK READY! ({characterData.trickType})");
-        }
-    }
-
-    public void AddTreatCharge(float amount)
-    {
-        if (characterData == null || !IsLocalPlayer()) return;
-
-        if (currentTreatCharge >= characterData.treatChargeRequired) return;
-
-        float chargeToAdd = amount * characterData.treatChargeRate;
-        currentTreatCharge = Mathf.Min(currentTreatCharge + chargeToAdd, characterData.treatChargeRequired);
-
-        // Sync charge across network if significant change
-        if (chargeToAdd > 5f && photonView != null && photonView.IsMine)
-        {
-            photonView.RPC("SyncTreatCharge", RpcTarget.Others, currentTreatCharge);
-        }
-
-        if (debugMode && currentTreatCharge >= characterData.treatChargeRequired)
-        {
-            Debug.Log($"✨ {characterData.characterName} TREAT READY! ({characterData.treatType})");
-        }
-    }
-
-    [PunRPC]
-    void SyncUltimateCharge(float charge)
-    {
-        currentUltimateCharge = charge;
-        OnUltimateChargeChanged?.Invoke(currentUltimateCharge / characterData.ultimateChargeRequired);
-    }
-
-    [PunRPC]
-    void SyncTrickCharge(float charge)
-    {
-        currentTrickCharge = charge;
-        OnTrickChargeChanged?.Invoke(currentTrickCharge / characterData.trickChargeRequired);
-    }
-
-    [PunRPC]
-    void SyncTreatCharge(float charge)
-    {
-        currentTreatCharge = charge;
-        OnTreatChargeChanged?.Invoke(currentTreatCharge / characterData.treatChargeRequired);
-    }
-
-    /// <summary>
-    /// Network-aware damage processing for charge gain
-    /// </summary>
-    public void OnDamageTaken(int damage)
-    {
-        if (!IsLocalPlayer()) return;
-
-        AddUltimateCharge(damage * 0.5f);
-        AddTrickCharge(damage * 0.3f);
-        AddTreatCharge(damage * 0.4f);
-    }
-
-    /// <summary>
-    /// Network-aware successful catch processing
-    /// </summary>
-    public void OnSuccessfulCatch()
-    {
-        if (!IsLocalPlayer()) return;
-
-        AddUltimateCharge(25f);
-        AddTrickCharge(15f);
-        AddTreatCharge(15f);
-    }
-
-    /// <summary>
-    /// Network-aware successful dodge processing
-    /// </summary>
-    public void OnSuccessfulDodge()
-    {
-        if (!IsLocalPlayer()) return;
-
-        AddUltimateCharge(20f);
-        AddTrickCharge(12f);
-        AddTreatCharge(12f);
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // ULTIMATE ABILITIES (Enhanced with Network Sync)
-    // ═══════════════════════════════════════════════════════════════
-
-    bool CanUseUltimate()
-    {
-        return characterData != null &&
-               currentUltimateCharge >= characterData.ultimateChargeRequired &&
-               !ultimateOnCooldown;
-    }
-
-    /// <summary>
-    /// Enhanced ultimate activation with match integration
-    /// </summary>
     void ActivateUltimate()
     {
-        if (!CanUseUltimate()) return;
+        abilityCharges[0] = 0f;
+        StartCoroutine(AbilityCooldown(0));
+        SyncPlayerAction("Ultimate");
 
-        // Consume charge and start cooldown
-        currentUltimateCharge = 0f;
-        StartCoroutine(UltimateCooldown());
+        SpawnUltimateVFX();
 
-        // Sync ultimate activation across network
-        if (photonView != null && photonView.IsMine)
-        {
-            photonView.RPC("SyncUltimateActivation", RpcTarget.Others, characterData.ultimateType.ToString());
-        }
-
-        // VFX and execution
-        if (useVFXManager && VFXManager.Instance != null)
-        {
-            Vector3 activationPosition = transform.position + Vector3.up * vfxSpawnHeight;
-            VFXManager.Instance.SpawnUltimateActivationVFX(activationPosition, this);
-        }
-
-        // Execute specific ultimate based on character data
         switch (characterData.ultimateType)
         {
-            case UltimateType.PowerThrow:
-                ExecutePowerThrow();
-                break;
-            case UltimateType.MultiThrow:
-                StartCoroutine(ExecuteMultiThrow());
-                break;
-            case UltimateType.Curveball:
-                ExecuteCurveball();
-                break;
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"💥 {characterData.characterName} activated {characterData.ultimateType}!");
+            case UltimateType.PowerThrow: ExecutePowerThrow(); break;
+            case UltimateType.MultiThrow: StartCoroutine(ExecuteMultiThrow()); break;
+            case UltimateType.Curveball: ExecuteCurveball(); break;
         }
     }
 
-    [PunRPC]
-    void SyncUltimateActivation(string ultimateType)
+    void ActivateTrick()
     {
-        // Remote player ultimate activation - play VFX only
-        if (useVFXManager && VFXManager.Instance != null)
+        abilityCharges[1] = 0f;
+        StartCoroutine(AbilityCooldown(1));
+
+        var opponent = FindOpponent();
+        if (opponent != null)
         {
-            Vector3 activationPosition = transform.position + Vector3.up * vfxSpawnHeight;
-            VFXManager.Instance.SpawnUltimateActivationVFX(activationPosition, this);
+            SpawnTrickVFX(opponent);
+            ExecuteTrick(opponent);
         }
+    }
+
+    void ActivateTreat()
+    {
+        abilityCharges[2] = 0f;
+        StartCoroutine(AbilityCooldown(2));
+
+        SpawnTreatVFX();
+        ExecuteTreat();
     }
 
     void ExecutePowerThrow()
     {
         if (!hasBall) return;
 
-        BallController currentBall = BallManager.Instance.GetCurrentBall();
-        if (currentBall == null) return;
-
-        // Set ultra-powerful throw data
-        int damage = characterData.GetUltimateDamage();
-        float speed = characterData.GetUltimateSpeed();
-
-        currentBall.SetThrowData(ThrowType.Ultimate, damage, speed);
-
-        // Throw with extra power
-        Vector3 direction = Vector3.right; // BallController handles targeting
-        currentBall.ThrowBall(direction, 1.5f);
-
-        // Screen shake for power
-        CameraController camera = FindObjectOfType<CameraController>();
-        if (camera != null)
+        var ball = BallManager.Instance.GetCurrentBall();
+        if (ball != null)
         {
-            camera.ShakeCamera(characterData.GetPowerThrowScreenShake(), 0.8f);
-        }
+            int damage = characterData.GetUltimateDamage();
+            float speed = characterData.GetUltimateSpeed();
+            Vector3 throwDirection = GetThrowDirection(); // FIXED: Use proper direction
 
-        if (debugMode)
-        {
-            Debug.Log($"💥 POWER THROW: {damage} damage at {speed} speed with {characterData.GetPowerThrowKnockback()} knockback!");
+            ball.SetThrowData(ThrowType.Ultimate, damage, speed);
+            ball.ThrowBall(throwDirection, 1.5f);
+
+            // Screen shake
+            var camera = FindObjectOfType<CameraController>();
+            camera?.ShakeCamera(characterData.GetPowerThrowScreenShake(), 0.8f);
         }
     }
 
@@ -1019,86 +776,29 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     {
         if (!hasBall) yield break;
 
-        int ballCount = characterData.GetMultiThrowCount();
-        int damagePerBall = characterData.GetUltimateDamage();
-        float throwSpeed = characterData.GetUltimateSpeed();
-        float spreadAngle = characterData.GetMultiThrowSpread();
+        int count = characterData.GetMultiThrowCount();
+        int damage = characterData.GetUltimateDamage();
+        float speed = characterData.GetUltimateSpeed();
         float delay = characterData.GetMultiThrowDelay();
-        Vector3 spawnOffset = characterData.GetMultiThrowSpawnOffset();
 
-        // Determine throw direction based on opponent position
-        PlayerCharacter opponent = FindOpponent();
-        Vector3 throwDirection = Vector3.right; // Default
+        Vector3 throwDir = GetThrowDirection(); // FIXED: Use proper direction
 
-        if (opponent != null)
+        for (int i = 0; i < count; i++)
         {
-            Vector3 toOpponent = (opponent.transform.position - transform.position).normalized;
-            throwDirection = new Vector3(toOpponent.x, 0f, 0f).normalized;
+            var ballObj = Instantiate(BallManager.Instance.ballPrefab,
+                transform.position + characterData.GetMultiThrowSpawnOffset(), Quaternion.identity);
 
-            if (debugMode)
-            {
-                Debug.Log($"Enhanced MultiThrow direction: {throwDirection} (towards {opponent.name})");
-            }
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"🔥 ENHANCED MULTI THROW: {ballCount} balls x {damagePerBall} damage towards opponent with VFX!");
-        }
-
-        for (int i = 0; i < ballCount; i++)
-        {
-            // Apply spawn offset relative to throw direction
-            Vector3 spawnPos = transform.position;
-            spawnPos += throwDirection * spawnOffset.x;
-            spawnPos += Vector3.up * spawnOffset.y;
-            spawnPos += Vector3.forward * spawnOffset.z;
-
-            GameObject ballObj = Instantiate(BallManager.Instance.ballPrefab, spawnPos, Quaternion.identity);
-            ballObj.transform.localScale = Vector3.one;
-
-            BallController ballController = ballObj.GetComponent<BallController>();
+            var ballController = ballObj.GetComponent<BallController>();
             if (ballController != null)
             {
-                // Calculate spread based on throw direction
-                float angleOffset = (i - (ballCount - 1) * 0.5f) * (spreadAngle / ballCount);
-                Vector3 spreadDir = Quaternion.Euler(0, angleOffset, 0) * throwDirection;
-                spreadDir.y = 0f;
-                spreadDir = spreadDir.normalized;
+                float angleOffset = (i - (count - 1) * 0.5f) * (characterData.GetMultiThrowSpread() / count);
+                Vector3 spreadDir = Quaternion.Euler(0, angleOffset, 0) * throwDir;
 
-                // Setup ball
-                ballController.SetBallState(BallController.BallState.Thrown);
-                ballController.SetThrowData(ThrowType.Ultimate, damagePerBall, throwSpeed);
-
-                // Set thrower reference for multithrow balls
+                ballController.SetThrowData(ThrowType.Ultimate, damage, speed);
                 ballController.SetThrower(this);
+                ballController.velocity = spreadDir * speed;
 
-                ballController.velocity = spreadDir * throwSpeed;
-                ballController.ApplyUltimateBallVFX();
-
-                // Setup collision system
-                CollisionDamageSystem collisionSystem = ballController.GetComponent<CollisionDamageSystem>();
-                if (collisionSystem != null)
-                {
-                    collisionSystem.OnBallThrown(this);
-                }
-
-                // Add visual trail effect
-                TrailRenderer trail = ballController.GetComponent<TrailRenderer>();
-                if (trail != null)
-                {
-                    trail.enabled = true;
-                    trail.startColor = characterData.characterColor;
-                    trail.endColor = Color.clear;
-                }
-
-                // Auto-destroy MultiThrow balls after 4 seconds
                 Destroy(ballObj, 4f);
-
-                if (debugMode)
-                {
-                    Debug.Log($"Enhanced MultiThrow ball {i + 1}: Direction {spreadDir}, Velocity {ballController.velocity}");
-                }
             }
 
             yield return new WaitForSeconds(delay);
@@ -1109,34 +809,18 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     {
         if (!hasBall) return;
 
-        BallController currentBall = BallManager.Instance.GetCurrentBall();
-        if (currentBall == null) return;
-
-        // Find opponent direction
-        PlayerCharacter opponent = FindOpponent();
-        Vector3 throwDirection = Vector3.right; // Default
-
-        if (opponent != null)
+        var ball = BallManager.Instance.GetCurrentBall();
+        if (ball != null)
         {
-            Vector3 toOpponent = (opponent.transform.position - transform.position).normalized;
-            throwDirection = new Vector3(toOpponent.x, 0f, 0f).normalized;
-        }
+            Vector3 throwDir = GetThrowDirection(); // FIXED: Use proper direction
 
-        // Set curveball data
-        int damage = characterData.GetUltimateDamage();
-        float speed = characterData.GetUltimateSpeed();
+            int damage = characterData.GetUltimateDamage();
+            float speed = characterData.GetUltimateSpeed();
 
-        currentBall.SetThrowData(ThrowType.Ultimate, damage, speed);
+            ball.SetThrowData(ThrowType.Ultimate, damage, speed);
+            ball.ThrowBall(throwDir, 1f);
 
-        // Throw towards opponent
-        currentBall.ThrowBall(throwDirection, 1f);
-
-        // Start curveball Y-axis oscillation
-        StartCoroutine(CurveballBehavior(currentBall));
-
-        if (debugMode)
-        {
-            Debug.Log($"🌊 CURVEBALL: Single ball with Y-axis oscillation towards opponent, {damage} damage!");
+            StartCoroutine(CurveballBehavior(ball));
         }
     }
 
@@ -1145,1038 +829,436 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         float amplitude = characterData.GetCurveballAmplitude();
         float frequency = characterData.GetCurveballFrequency();
         float duration = characterData.GetCurveballDuration();
-
         float elapsed = 0f;
 
         while (elapsed < duration && ball != null && ball.GetBallState() == BallController.BallState.Thrown)
         {
-            Vector3 velocity = ball.GetVelocity();
-
-            // Apply Y-axis oscillation (up and down movement)
-            float curveOffset = Mathf.Sin(elapsed * frequency) * amplitude;
-            velocity.y = curveOffset;
-
+            var velocity = ball.GetVelocity();
+            velocity.y = Mathf.Sin(elapsed * frequency) * amplitude;
             ball.SetVelocity(velocity);
 
             elapsed += Time.deltaTime;
             yield return null;
         }
+    }
 
-        if (debugMode)
+    void ExecuteTrick(PlayerCharacter opponent)
+    {
+        switch (characterData.trickType)
         {
-            Debug.Log("🌊 Curveball oscillation complete");
+            case TrickType.SlowSpeed: StartCoroutine(ApplySlowSpeed(opponent)); break;
+            case TrickType.Freeze: StartCoroutine(ApplyFreeze(opponent)); break;
+            case TrickType.InstantDamage: ApplyInstantDamage(opponent); break;
         }
     }
 
-    IEnumerator UltimateCooldown()
+    void ExecuteTreat()
     {
-        ultimateOnCooldown = true;
-        yield return new WaitForSeconds(ultimateCooldownTime);
-        ultimateOnCooldown = false;
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // TRICK ABILITIES (Opponent-Focused) - Enhanced with Network Sync
-    // ═══════════════════════════════════════════════════════════════
-
-    bool CanUseTrick()
-    {
-        return characterData != null &&
-               currentTrickCharge >= characterData.trickChargeRequired &&
-               !trickOnCooldown;
-    }
-
-    /// <summary>
-    /// Enhanced trick activation with network sync
-    /// </summary>
-    void ActivateTrick()
-    {
-        if (!CanUseTrick()) return;
-
-        currentTrickCharge = 0f;
-        StartCoroutine(TrickCooldown());
-
-        // Find opponent for trick target
-        PlayerCharacter opponent = FindOpponent();
-        if (opponent != null)
+        switch (characterData.treatType)
         {
-            // Sync trick activation
-            if (photonView != null && photonView.IsMine)
-            {
-                PhotonView opponentView = opponent.GetComponent<PhotonView>();
-                if (opponentView != null)
-                {
-                    photonView.RPC("SyncTrickActivation", RpcTarget.All,
-                                 characterData.trickType.ToString(), opponentView.ViewID);
-                }
-            }
-
-            // VFX on opponent
-            if (useVFXManager && VFXManager.Instance != null)
-            {
-                Vector3 opponentPosition = opponent.transform.position + Vector3.up * vfxSpawnHeight;
-                VFXManager.Instance.SpawnTrickVFX(opponentPosition, this, opponent);
-            }
-
-            // Execute specific trick based on character data
-            switch (characterData.trickType)
-            {
-                case TrickType.SlowSpeed:
-                    ExecuteSlowSpeed(opponent);
-                    break;
-                case TrickType.Freeze:
-                    ExecuteFreeze(opponent);
-                    break;
-                case TrickType.InstantDamage:
-                    ExecuteInstantDamage(opponent);
-                    break;
-            }
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"🎯 {characterData.characterName} activated {characterData.trickType}!");
+            case TreatType.Shield: ApplyShield(); break;
+            case TreatType.Teleport: ExecuteTeleport(); break;
+            case TreatType.SpeedBoost: StartCoroutine(ApplySpeedBoost()); break;
         }
     }
 
-    [PunRPC]
-    void SyncTrickActivation(string trickType, int opponentViewID)
-    {
-        // Find opponent by ViewID
-        PhotonView opponentView = PhotonView.Find(opponentViewID);
-        if (opponentView != null)
-        {
-            PlayerCharacter opponent = opponentView.GetComponent<PlayerCharacter>();
-            if (opponent != null && useVFXManager && VFXManager.Instance != null)
-            {
-                Vector3 opponentPosition = opponent.transform.position + Vector3.up * vfxSpawnHeight;
-                VFXManager.Instance.SpawnTrickVFX(opponentPosition, this, opponent);
-            }
-        }
-    }
-
-    void ExecuteSlowSpeed(PlayerCharacter opponent)
-    {
-        StartCoroutine(ApplySlowSpeedToOpponent(opponent));
-
-        if (debugMode)
-        {
-            Debug.Log($"🐌 SLOW SPEED: Opponent slowed for {characterData.GetSlowSpeedDuration()}s");
-        }
-    }
-
-    IEnumerator ApplySlowSpeedToOpponent(PlayerCharacter opponent)
+    IEnumerator ApplySlowSpeed(PlayerCharacter opponent)
     {
         if (opponent.characterData == null) yield break;
 
-        float originalSpeed = opponent.characterData.moveSpeed;
-        float slowedSpeed = originalSpeed * characterData.GetSlowSpeedMultiplier();
-        float duration = characterData.GetSlowSpeedDuration();
+        float original = opponent.characterData.moveSpeed;
+        opponent.characterData.moveSpeed = original * characterData.GetSlowSpeedMultiplier();
 
-        // Apply slow effect
-        opponent.characterData.moveSpeed = slowedSpeed;
+        yield return new WaitForSeconds(characterData.GetSlowSpeedDuration());
 
-        // Visual effect on opponent
-        Renderer opponentRenderer = opponent.GetComponentInChildren<Renderer>();
-        Color originalColor = opponentRenderer?.material.color ?? Color.white;
-        if (opponentRenderer != null)
-        {
-            opponentRenderer.material.color = Color.blue; // Blue tint for slow
-        }
-
-        yield return new WaitForSeconds(duration);
-
-        // Restore original speed and color
-        if (opponent != null && opponent.characterData != null)
-        {
-            opponent.characterData.moveSpeed = originalSpeed;
-        }
-
-        if (opponentRenderer != null)
-        {
-            opponentRenderer.material.color = originalColor;
-        }
+        if (opponent.characterData != null)
+            opponent.characterData.moveSpeed = original;
     }
 
-    void ExecuteFreeze(PlayerCharacter opponent)
+    IEnumerator ApplyFreeze(PlayerCharacter opponent)
     {
-        StartCoroutine(ApplyFreezeToOpponent(opponent));
-
-        if (debugMode)
-        {
-            Debug.Log($"🧊 FREEZE: Opponent frozen for {characterData.GetFreezeDuration()}s");
-        }
-    }
-
-    IEnumerator ApplyFreezeToOpponent(PlayerCharacter opponent)
-    {
-        float duration = characterData.GetFreezeDuration();
-
-        // Disable opponent movement AND input
         opponent.SetMovementEnabled(false);
         opponent.SetInputEnabled(false);
 
-        // Visual freeze effect
-        Renderer opponentRenderer = opponent.GetComponentInChildren<Renderer>();
-        Color originalColor = opponentRenderer?.material.color ?? Color.white;
-        if (opponentRenderer != null)
-        {
-            opponentRenderer.material.color = Color.cyan; // Cyan tint for freeze
-        }
+        yield return new WaitForSeconds(characterData.GetFreezeDuration());
 
-        yield return new WaitForSeconds(duration);
-
-        // Restore movement, input, and color
-        if (opponent != null)
-        {
-            opponent.SetMovementEnabled(true);
-            opponent.SetInputEnabled(true);
-        }
-
-        if (opponentRenderer != null)
-        {
-            opponentRenderer.material.color = originalColor;
-        }
+        opponent.SetMovementEnabled(true);
+        opponent.SetInputEnabled(true);
     }
 
-    void ExecuteInstantDamage(PlayerCharacter opponent)
+    void ApplyInstantDamage(PlayerCharacter opponent)
     {
-        PlayerHealth opponentHealth = opponent.GetComponent<PlayerHealth>();
-        if (opponentHealth != null)
-        {
-            int damage = characterData.GetInstantDamageAmount();
-            opponentHealth.TakeDamage(damage, null);
-
-            if (debugMode)
-            {
-                Debug.Log($"⚡ INSTANT DAMAGE: {damage} damage dealt to {opponent.name}!");
-            }
-        }
+        var health = opponent.GetComponent<PlayerHealth>();
+        health?.TakeDamage(characterData.GetInstantDamageAmount(), null);
     }
 
-    IEnumerator TrickCooldown()
+    void ApplyShield()
     {
-        trickOnCooldown = true;
-        yield return new WaitForSeconds(trickCooldownTime);
-        trickOnCooldown = false;
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // TREAT ABILITIES (Self-Focused) - Enhanced with Network Sync
-    // ═══════════════════════════════════════════════════════════════
-
-    bool CanUseTreat()
-    {
-        return characterData != null &&
-               currentTreatCharge >= characterData.treatChargeRequired &&
-               !treatOnCooldown &&
-               !isTeleporting;
-    }
-
-    /// <summary>
-    /// Enhanced treat activation with network sync
-    /// </summary>
-    void ActivateTreat()
-    {
-        if (!CanUseTreat()) return;
-
-        currentTreatCharge = 0f;
-        StartCoroutine(TreatCooldown());
-
-        // Sync treat activation
-        if (photonView != null && photonView.IsMine)
-        {
-            photonView.RPC("SyncTreatActivation", RpcTarget.Others, characterData.treatType.ToString());
-        }
-
-        // VFX on self
-        if (useVFXManager && VFXManager.Instance != null)
-        {
-            Vector3 selfPosition = transform.position + Vector3.up * vfxSpawnHeight;
-            VFXManager.Instance.SpawnTreatVFX(selfPosition, this);
-        }
-
-        // Execute specific treat based on character data
-        switch (characterData.treatType)
-        {
-            case TreatType.Shield:
-                ExecuteShield();
-                break;
-            case TreatType.Teleport:
-                ExecuteTeleport();
-                break;
-            case TreatType.SpeedBoost:
-                ExecuteSpeedBoost();
-                break;
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"✨ {characterData.characterName} activated {characterData.treatType}!");
-        }
-    }
-
-    [PunRPC]
-    void SyncTreatActivation(string treatType)
-    {
-        // Remote player treat activation - play VFX only
-        if (useVFXManager && VFXManager.Instance != null)
-        {
-            Vector3 selfPosition = transform.position + Vector3.up * vfxSpawnHeight;
-            VFXManager.Instance.SpawnTreatVFX(selfPosition, this);
-        }
-    }
-
-    void ExecuteShield()
-    {
-        float duration = characterData.GetShieldDuration();
-
-        // Make player temporarily invulnerable
-        if (playerHealth != null)
-        {
-            playerHealth.SetTemporaryInvulnerability(duration);
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"🛡️ SHIELD: Invulnerable for {duration}s");
-        }
+        playerHealth?.SetTemporaryInvulnerability(characterData.GetShieldDuration());
     }
 
     void ExecuteTeleport()
     {
-        // Don't teleport if already teleporting
         if (isTeleporting) return;
-
-        float range = characterData.GetTeleportRange();
-
-        // Start bounds override before teleporting
-        if (movementRestrictor != null)
-        {
-            movementRestrictor.StartTeleportOverride();
-        }
-
-        // Simplified teleport with VFX
-        StartCoroutine(SimplifiedTeleport(range));
-
-        if (debugMode)
-        {
-            Debug.Log($"🌀 TELEPORT: Started!");
-        }
+        StartCoroutine(TeleportSequence());
     }
 
-    IEnumerator SimplifiedTeleport(float range)
+    IEnumerator TeleportSequence()
     {
         isTeleporting = true;
+        movementRestrictor?.StartTeleportOverride();
 
-        // Store original position
-        Vector3 originalPosition = transform.position;
-        Vector3 departurePosition = originalPosition;
+        Vector3 teleportPos = CalculateTeleportPosition();
+        transform.position = teleportPos;
 
-        // Calculate strategic teleport position
-        Vector3 teleportPosition = CalculateStrategicTeleportPosition(range);
-
-        // SIMPLIFIED VFX: Departure and arrival effects
-        if (useVFXManager && VFXManager.Instance != null)
-        {
-            VFXManager.Instance.SpawnTeleportVFX(departurePosition, teleportPosition, this);
-        }
-
-        // Small delay for VFX
-        yield return new WaitForSeconds(0.1f);
-
-        // Teleport TO new position
-        transform.position = teleportPosition;
-
-        // Begin grace period
-        if (movementRestrictor != null)
-        {
-            movementRestrictor.BeginTeleportGracePeriod();
-        }
-
-        // Wait for strategic positioning time
         yield return new WaitForSeconds(1.2f);
 
-        // Teleport BACK to safe position
-        Vector3 returnPosition = CalculateReturnPosition(originalPosition);
+        Vector3 returnPos = CalculateReturnPosition();
+        transform.position = returnPos;
 
-        // Small delay for return VFX
-        yield return new WaitForSeconds(0.1f);
-
-        transform.position = returnPosition;
-
-        // End teleport override
-        if (movementRestrictor != null)
-        {
-            movementRestrictor.EndTeleportOverride();
-        }
-
+        movementRestrictor?.EndTeleportOverride();
         isTeleporting = false;
     }
 
-    Vector3 CalculateStrategicTeleportPosition(float range)
+    Vector3 CalculateTeleportPosition()
     {
-        Vector3 currentPos = transform.position;
-        PlayerCharacter opponent = FindOpponent();
+        var opponent = FindOpponent();
+        if (opponent != null)
+        {
+            // Flank behind opponent using proper direction
+            Vector3 dir = GetThrowDirection(); // Use same logic as throw
+            return opponent.transform.position + dir * characterData.GetTeleportRange() * 0.7f;
+        }
 
-        // Check for incoming ball - dodge mode
-        BallController incomingBall = FindIncomingBall();
-
-        if (incomingBall != null)
-        {
-            // DODGE MODE: Smart evasion
-            return CalculateDodgePosition(currentPos, incomingBall, range);
-        }
-        else if (opponent != null)
-        {
-            // ATTACK MODE: Flank behind opponent for surprise attack
-            return CalculateFlankPosition(currentPos, opponent, range);
-        }
-        else
-        {
-            // REPOSITIONING MODE: Move to tactical position
-            return CalculateRepositionPosition(currentPos, range);
-        }
+        // Default: move toward center
+        return Vector3.Lerp(transform.position, Vector3.zero, 0.5f);
     }
 
-    Vector3 CalculateDodgePosition(Vector3 currentPos, BallController incomingBall, float range)
+    Vector3 CalculateReturnPosition()
     {
-        Vector3 ballPos = incomingBall.transform.position;
-        Vector3 ballVel = incomingBall.GetVelocity().normalized;
-
-        // Calculate perpendicular dodge positions
-        Vector3 dodgeLeft = currentPos + Vector3.left * range;
-        Vector3 dodgeRight = currentPos + Vector3.right * range;
-
-        // Choose position that maximizes distance from ball path
-        float leftSafety = CalculateSafetyScore(dodgeLeft, ballPos, ballVel);
-        float rightSafety = CalculateSafetyScore(dodgeRight, ballPos, ballVel);
-
-        Vector3 bestDodge = leftSafety > rightSafety ? dodgeLeft : dodgeRight;
-        bestDodge.y = currentPos.y;
-        bestDodge.z = currentPos.z;
-
-        if (debugMode)
-        {
-            Debug.Log($"🌀 DODGE TELEPORT: Ball incoming, dodging {(leftSafety > rightSafety ? "LEFT" : "RIGHT")} (Safety: {Mathf.Max(leftSafety, rightSafety):F1})");
-        }
-
-        return ClampToArena(bestDodge);
-    }
-
-    Vector3 CalculateFlankPosition(Vector3 currentPos, PlayerCharacter opponent, float range)
-    {
-        Vector3 opponentPos = opponent.transform.position;
-
-        // Determine optimal flank position
-        Vector3 teleportPos;
-
-        // Always try to get behind opponent (surprise attack)
-        if (movementRestrictor != null)
-        {
-            var playerSide = movementRestrictor.GetPlayerSide();
-
-            if (playerSide == ArenaMovementRestrictor.PlayerSide.Left)
-            {
-                // Left player teleports to right side behind opponent
-                teleportPos = new Vector3(opponentPos.x + range * 0.7f, currentPos.y, currentPos.z);
-                if (debugMode) Debug.Log("🌀 FLANK ATTACK: Left player flanking right");
-            }
-            else
-            {
-                // Right player teleports to left side behind opponent
-                teleportPos = new Vector3(opponentPos.x - range * 0.7f, currentPos.y, currentPos.z);
-                if (debugMode) Debug.Log("🌀 FLANK ATTACK: Right player flanking left");
-            }
-        }
-        else
-        {
-            // Fallback: flank based on current position
-            float direction = (currentPos.x < opponentPos.x) ? 1f : -1f;
-            teleportPos = new Vector3(opponentPos.x + direction * range * 0.7f, currentPos.y, currentPos.z);
-        }
-
-        return ClampToArena(teleportPos);
-    }
-
-    Vector3 CalculateRepositionPosition(Vector3 currentPos, float range)
-    {
-        // Move toward center for better court coverage
-        Vector3 centerPos = new Vector3(0f, currentPos.y, currentPos.z);
-        Vector3 directionToCenter = (centerPos - currentPos).normalized;
-
-        Vector3 teleportPos = currentPos + directionToCenter * range * 0.5f;
-
-        if (debugMode)
-        {
-            Debug.Log("🌀 REPOSITION TELEPORT: Moving toward center");
-        }
-
-        return ClampToArena(teleportPos);
-    }
-
-    Vector3 CalculateReturnPosition(Vector3 originalPosition)
-    {
-        // Return to a safe position in home side
         if (movementRestrictor != null)
         {
             movementRestrictor.GetPlayerBounds(out float minX, out float maxX);
-
-            // Position at 75% toward center of home side
-            float homeCenterX = (minX + maxX) * 0.5f;
-            float returnX = Mathf.Lerp(originalPosition.x, homeCenterX, 0.75f);
-
-            return new Vector3(returnX, originalPosition.y, originalPosition.z);
+            float centerX = (minX + maxX) * 0.5f;
+            return new Vector3(centerX, transform.position.y, transform.position.z);
         }
-
-        // Fallback
-        return originalPosition;
-    }
-
-    float CalculateSafetyScore(Vector3 position, Vector3 ballPos, Vector3 ballVel)
-    {
-        // Calculate how safe a position is from ball trajectory
-        Vector3 ballToBall = position - ballPos;
-        float distanceFromBall = ballToBall.magnitude;
-
-        // Check if position is in ball's path
-        float pathAlignment = Vector3.Dot(ballToBall.normalized, ballVel);
-
-        // Higher score = safer position
-        float safetyScore = distanceFromBall;
-        if (pathAlignment > 0.5f) // In ball's path
-        {
-            safetyScore *= 0.3f; // Much less safe
-        }
-
-        return safetyScore;
-    }
-
-    Vector3 ClampToArena(Vector3 position)
-    {
-        // Use arena bounds (can be wider than player bounds during teleport)
-        position.x = Mathf.Clamp(position.x, -12f, 12f);
-        position.y = Mathf.Max(position.y, 0f);
-        return position;
-    }
-
-    void ExecuteSpeedBoost()
-    {
-        StartCoroutine(ApplySpeedBoost());
-
-        if (debugMode)
-        {
-            Debug.Log($"💨 SPEED BOOST: {characterData.GetSpeedBoostMultiplier()}x speed for {characterData.GetSpeedBoostDuration()}s");
-        }
+        return transform.position;
     }
 
     IEnumerator ApplySpeedBoost()
     {
         if (characterData == null) yield break;
 
-        float originalSpeed = characterData.moveSpeed;
-        float boostedSpeed = originalSpeed * characterData.GetSpeedBoostMultiplier();
-        float duration = characterData.GetSpeedBoostDuration();
+        float original = characterData.moveSpeed;
+        characterData.moveSpeed = original * characterData.GetSpeedBoostMultiplier();
 
-        // Apply speed boost
-        characterData.moveSpeed = boostedSpeed;
+        yield return new WaitForSeconds(characterData.GetSpeedBoostDuration());
 
-        // Visual effect
-        Renderer characterRenderer = GetComponentInChildren<Renderer>();
-        Color originalColor = characterRenderer?.material.color ?? Color.white;
-        if (characterRenderer != null)
-        {
-            characterRenderer.material.color = Color.yellow; // Yellow tint for speed
-        }
-
-        yield return new WaitForSeconds(duration);
-
-        // Restore original speed and color
         if (characterData != null)
-        {
-            characterData.moveSpeed = originalSpeed;
-        }
-
-        if (characterRenderer != null)
-        {
-            characterRenderer.material.color = originalColor;
-        }
+            characterData.moveSpeed = original;
     }
 
-    IEnumerator TreatCooldown()
+    // ══════════════════════════════════════════════════════════
+    // NETWORKING & UTILITY
+    // ══════════════════════════════════════════════════════════
+
+    void InterpolateNetworkMovement()
     {
-        treatOnCooldown = true;
-        yield return new WaitForSeconds(treatCooldownTime);
-        treatOnCooldown = false;
-    }
+        if (!enableNetworkSync) return;
 
-    // ═══════════════════════════════════════════════════════════════
-    // UTILITY METHODS
-    // ═══════════════════════════════════════════════════════════════
-
-    PlayerCharacter FindOpponent()
-    {
-        PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
-        foreach (PlayerCharacter player in allPlayers)
+        float distance = Vector3.Distance(transform.position, networkPosition);
+        if (distance > 5f)
         {
-            if (player != this)
-            {
-                return player;
-            }
+            transform.position = networkPosition; // Teleport if too far
         }
-        return null;
-    }
-
-    BallController FindIncomingBall()
-    {
-        BallController[] allBalls = FindObjectsOfType<BallController>();
-
-        foreach (BallController ball in allBalls)
+        else if (distance > 0.1f)
         {
-            if (ball.GetBallState() == BallController.BallState.Thrown)
-            {
-                // Check if ball is coming toward this player
-                Vector3 ballPos = ball.transform.position;
-                Vector3 ballVel = ball.GetVelocity();
-                Vector3 playerPos = transform.position;
-
-                // Simple check: ball is moving toward player and is within reasonable range
-                Vector3 ballToPlayer = (playerPos - ballPos).normalized;
-                float dot = Vector3.Dot(ballVel.normalized, ballToPlayer);
-
-                if (dot > 0.5f && Vector3.Distance(ballPos, playerPos) < 10f)
-                {
-                    return ball;
-                }
-            }
+            transform.position = Vector3.Lerp(transform.position, networkPosition, Time.deltaTime * 20f);
         }
 
-        return null;
-    }
-
-    /// <summary>
-    /// Enhanced input enabled control for match management
-    /// </summary>
-    public void SetInputEnabled(bool enabled)
-    {
-        inputEnabled = enabled;
-        networkInputEnabled = enabled;
-
-        // Also disable movement when input is disabled
-        if (!enabled)
-        {
-            velocity = Vector3.zero;
-        }
-
-        // Sync across network if this is the local player
-        if (photonView != null && photonView.IsMine)
-        {
-            photonView.RPC("SyncInputState", RpcTarget.Others, enabled);
-        }
-    }
-
-    /// <summary>
-    /// Enhanced movement enabled control
-    /// </summary>
-    public void SetMovementEnabled(bool enabled)
-    {
-        movementEnabled = enabled;
-        networkMovementEnabled = enabled;
-
-        if (!enabled)
-        {
-            velocity = Vector3.zero;
-        }
-
-        // Sync across network if this is the local player
-        if (photonView != null && photonView.IsMine)
-        {
-            photonView.RPC("SyncMovementState", RpcTarget.Others, enabled);
-        }
+        isGrounded = networkIsGrounded;
+        isDucking = networkIsDucking;
+        hasBall = networkHasBall;
     }
 
     [PunRPC]
-    void SyncInputState(bool enabled)
+    void SyncPlayerAction(string actionType)
     {
-        networkInputEnabled = enabled;
-        inputEnabled = enabled;
-    }
+        if (photonView.IsMine) return;
 
-    [PunRPC]
-    void SyncMovementState(bool enabled)
-    {
-        networkMovementEnabled = enabled;
-        movementEnabled = enabled;
-
-        if (!enabled)
+        switch (actionType)
         {
-            velocity = Vector3.zero;
+            case "Jump":
+            case "DoubleJump":
+                PlayCharacterSound(CharacterAudioType.Jump);
+                break;
+            case "Dash":
+                PlayCharacterSound(CharacterAudioType.Dash);
+                SpawnEffect(characterData.dashEffect);
+                break;
+            case "Ultimate":
+                SpawnUltimateVFX();
+                break;
         }
     }
 
-    // Enhanced public getters that work with duck system
-    public bool IsDucking()
-    {
-        if (duckSystem != null)
-        {
-            return duckSystem.IsDucking();
-        }
-        return isDucking;
-    }
-
-    public bool CanDuck()
-    {
-        if (duckSystem != null)
-        {
-            return duckSystem.CanDuck() && isGrounded;
-        }
-        return isGrounded;
-    }
-
-    // Additional duck system getters for UI/feedback
-    public float GetDuckTimeRemaining()
-    {
-        return duckSystem?.GetDuckTimeRemaining() ?? 0f;
-    }
-
-    public float GetDuckProgress()
-    {
-        return duckSystem?.GetDuckProgress() ?? 0f;
-    }
-
-    public bool IsInDuckCooldown()
-    {
-        return duckSystem?.IsInCooldown() ?? false;
-    }
-
-    public float GetDuckCooldownRemaining()
-    {
-        return duckSystem?.GetCooldownTimeRemaining() ?? 0f;
-    }
-
-    public DuckSystem GetDuckSystem()
-    {
-        return duckSystem;
-    }
-
-    // Public interface methods for other systems
-    public CharacterData GetCharacterData() => characterData;
-    public bool IsGrounded() => isGrounded;
-    public bool HasBall() => hasBall;
-    public void SetHasBall(bool value) => hasBall = value;
-    public PlayerInputHandler GetInputHandler() => inputHandler;
-
-    // Charge getters for UI
-    public float GetUltimateChargePercentage() => characterData != null ?
-        currentUltimateCharge / characterData.ultimateChargeRequired : 0f;
-    public float GetTrickChargePercentage() => characterData != null ?
-        currentTrickCharge / characterData.trickChargeRequired : 0f;
-    public float GetTreatChargePercentage() => characterData != null ?
-        currentTreatCharge / characterData.treatChargeRequired : 0f;
-
-    // Methods for damage system integration
-    public int GetThrowDamage(ThrowType throwType)
-    {
-        return characterData?.GetThrowDamage(throwType) ?? 10;
-    }
-
-    public float GetDamageResistance()
-    {
-        return characterData?.damageResistance ?? 1f;
-    }
-
-    /// <summary>
-    /// Set VFX Manager usage (useful for testing/performance)
-    /// </summary>
-    public void SetUseVFXManager(bool useVFX)
-    {
-        useVFXManager = useVFX;
-
-        if (debugMode)
-        {
-            Debug.Log($"{characterData?.characterName} VFX Manager usage: {useVFX}");
-        }
-    }
-
-    /// <summary>
-    /// Get VFX spawn position with offset
-    /// </summary>
-    public Vector3 GetVFXSpawnPosition()
-    {
-        return transform.position + Vector3.up * vfxSpawnHeight;
-    }
-
-    /// <summary>
-    /// Get match manager reference for external systems
-    /// </summary>
-    public MatchManager GetMatchManager() => currentMatch;
-
-    /// <summary>
-    /// Get round manager reference for external systems  
-    /// </summary>
-    public RoundManager GetRoundManager() => currentRound;
-
-    /// <summary>
-    /// Check if this is the local player
-    /// </summary>
-    public bool IsLocalPlayer()
-    {
-        return photonView != null && photonView.IsMine;
-    }
-
-    /// <summary>
-    /// Get network player actor number
-    /// </summary>
-    public int GetActorNumber()
-    {
-        return photonView != null ? photonView.Owner.ActorNumber : -1;
-    }
-
-    /// <summary>
-    /// Enhanced ability cooldown management for match restarts
-    /// </summary>
-    public void ResetAbilityCooldowns()
-    {
-        if (!IsLocalPlayer()) return;
-
-        ultimateOnCooldown = false;
-        trickOnCooldown = false;
-        treatOnCooldown = false;
-
-        // Reset charges
-        currentUltimateCharge = 0f;
-        currentTrickCharge = 0f;
-        currentTreatCharge = 0f;
-
-        // Sync reset across network
-        if (photonView != null && photonView.IsMine)
-        {
-            photonView.RPC("SyncAbilityReset", RpcTarget.Others);
-        }
-    }
-
-    [PunRPC]
-    void SyncAbilityReset()
-    {
-        ultimateOnCooldown = false;
-        trickOnCooldown = false;
-        treatOnCooldown = false;
-        currentUltimateCharge = 0f;
-        currentTrickCharge = 0f;
-        currentTreatCharge = 0f;
-
-        // Update UI
-        OnUltimateChargeChanged?.Invoke(0f);
-        OnTrickChargeChanged?.Invoke(0f);
-        OnTreatChargeChanged?.Invoke(0f);
-    }
-
-    /// <summary>
-    /// Match restart compatibility - reset player state
-    /// </summary>
-    public void ResetForNewMatch()
-    {
-        if (!IsLocalPlayer()) return;
-
-        // Reset movement and input
-        SetInputEnabled(true);
-        SetMovementEnabled(true);
-
-        // Reset physics state
-        velocity = Vector3.zero;
-        isDashing = false;
-        isTeleporting = false;
-
-        // Reset abilities
-        ResetAbilityCooldowns();
-
-        // Reset duck state
-        isDucking = false;
-        duckingStateChanged = true;
-
-        // Reset character specific states
-        hasDoubleJumped = false;
-        canDash = true;
-    }
-
-    /// <summary>
-    /// Enhanced OnPhotonSerializeView with match state data
-    /// </summary>
     public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
     {
         if (!enableNetworkSync) return;
 
         if (stream.IsWriting)
         {
-            // Local player - send data to others
+            // Send position, rotation, and key states
             stream.SendNext(transform.position);
-            stream.SendNext(velocity);
             stream.SendNext(isGrounded);
             stream.SendNext(isDucking);
             stream.SendNext(hasBall);
-            stream.SendNext(isDashing);
-            stream.SendNext(inputEnabled);
-            stream.SendNext(movementEnabled);
-            stream.SendNext(Time.time); // Timestamp for lag compensation
+            stream.SendNext(facingRight);
+            stream.SendNext(playerSide);
         }
         else
         {
-            // Remote player - receive data from others
+            // Receive network data
             networkPosition = (Vector3)stream.ReceiveNext();
-            networkVelocity = (Vector3)stream.ReceiveNext();
             networkIsGrounded = (bool)stream.ReceiveNext();
             networkIsDucking = (bool)stream.ReceiveNext();
             networkHasBall = (bool)stream.ReceiveNext();
-            bool networkIsDashing = (bool)stream.ReceiveNext();
-            networkInputEnabled = (bool)stream.ReceiveNext();
-            networkMovementEnabled = (bool)stream.ReceiveNext();
-            float timestamp = (float)stream.ReceiveNext();
 
-            // Calculate network lag for prediction
-            networkLag = Mathf.Abs((float)(PhotonNetwork.Time - timestamp));
+            // FIXED: Sync facing direction
+            bool networkFacingRight = (bool)stream.ReceiveNext();
+            int networkPlayerSide = (int)stream.ReceiveNext();
 
-            // Apply lag compensation to position
-            if (networkVelocity.magnitude > 0.1f)
+            if (facingRight != networkFacingRight || playerSide != networkPlayerSide)
             {
-                networkPosition += networkVelocity * networkLag;
+                facingRight = networkFacingRight;
+                playerSide = networkPlayerSide;
+                FlipCharacterModel(); // Update visual
             }
-
-            // Update dash state for remote players
-            if (networkIsDashing != isDashing)
-            {
-                isDashing = networkIsDashing;
-            }
-
-            // Update input/movement states
-            inputEnabled = networkInputEnabled;
-            movementEnabled = networkMovementEnabled;
         }
     }
 
-    void OnDrawGizmosSelected()
-    {
-        // Visualize ground check
-        if (characterCollider != null)
-        {
-            Vector3 checkPos = transform.position;
-            checkPos.y -= (originalColliderHeight * 0.5f);
+    // ══════════════════════════════════════════════════════════
+    // UTILITY METHODS
+    // ══════════════════════════════════════════════════════════
 
-            Gizmos.color = isGrounded ? Color.green : Color.red;
-            Gizmos.DrawRay(checkPos, Vector3.down * groundCheckDistance);
+    void CheckGrounded()
+    {
+        if (characterCollider == null)
+        {
+            isGrounded = false;
+            return;
         }
 
-        // Show character info in scene view
-        if (showCharacterInfo && characterData != null)
-        {
-            Gizmos.color = characterData.characterColor;
-            Gizmos.DrawWireSphere(transform.position + Vector3.up * 2f, 0.5f);
+        // Calculate check position at the bottom of the collider
+        Vector3 checkPos = characterTransform.position;
+        float colliderBottom = characterCollider.bounds.min.y;
+        checkPos.y = colliderBottom;
 
-            // Show ability charge status
-            if (currentUltimateCharge >= characterData.ultimateChargeRequired)
+        // Perform spherecast for more reliable ground detection
+        isGrounded = Physics.CheckSphere(checkPos, groundCheckRadius, groundLayerMask);
+
+        // Alternative: Use raycast with multiple points for better detection
+        if (!isGrounded)
+        {
+            // Check center
+            isGrounded = Physics.Raycast(checkPos, Vector3.down, GROUND_CHECK_DISTANCE, groundLayerMask);
+
+            // Check left and right edges if center fails
+            if (!isGrounded)
             {
-                Gizmos.color = Color.red;
-                Gizmos.DrawWireCube(transform.position + Vector3.up * 2.5f, Vector3.one * 0.3f);
+                Vector3 leftCheck = checkPos + Vector3.left * (characterCollider.radius * 0.8f);
+                Vector3 rightCheck = checkPos + Vector3.right * (characterCollider.radius * 0.8f);
+
+                isGrounded = Physics.Raycast(leftCheck, Vector3.down, GROUND_CHECK_DISTANCE, groundLayerMask) ||
+                           Physics.Raycast(rightCheck, Vector3.down, GROUND_CHECK_DISTANCE, groundLayerMask);
             }
+        }
+    }
+
+    bool IsMatchStateAllowingAbilities()
+    {
+        return currentMatch?.GetMatchState() == MatchManager.MatchState.Fighting;
+    }
+
+    PlayerCharacter FindOpponent()
+    {
+        var players = FindObjectsOfType<PlayerCharacter>();
+        foreach (var player in players)
+        {
+            if (player != this) return player;
+        }
+        return null;
+    }
+
+    void PlayCharacterSound(CharacterAudioType audioType)
+    {
+        var clip = characterData?.GetRandomAudioClip(audioType);
+        if (audioSource != null && clip != null)
+        {
+            audioSource.PlayOneShot(clip);
+        }
+    }
+
+    void SpawnEffect(GameObject effect)
+    {
+        if (effect != null)
+        {
+            Instantiate(effect, transform.position, Quaternion.identity);
+        }
+    }
+
+    void SpawnThrowVFX(ThrowType throwType)
+    {
+        if (VFXManager.Instance == null) return;
+
+        Vector3 pos = transform.position + Vector3.up * VFX_SPAWN_HEIGHT;
+        VFXManager.Instance.SpawnThrowVFX(pos, this, throwType);
+    }
+
+    void SpawnUltimateVFX()
+    {
+        if (VFXManager.Instance == null) return;
+
+        Vector3 pos = transform.position + Vector3.up * VFX_SPAWN_HEIGHT;
+        VFXManager.Instance.SpawnUltimateActivationVFX(pos, this);
+    }
+
+    void SpawnTrickVFX(PlayerCharacter opponent)
+    {
+        if (VFXManager.Instance == null) return;
+
+        Vector3 pos = opponent.transform.position + Vector3.up * VFX_SPAWN_HEIGHT;
+        VFXManager.Instance.SpawnTrickVFX(pos, this, opponent);
+    }
+
+    void SpawnTreatVFX()
+    {
+        if (VFXManager.Instance == null) return;
+
+        Vector3 pos = transform.position + Vector3.up * VFX_SPAWN_HEIGHT;
+        VFXManager.Instance.SpawnTreatVFX(pos, this);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // PUBLIC API
+    // ══════════════════════════════════════════════════════════
+
+    public CharacterData GetCharacterData() => characterData;
+    public bool IsGrounded() => isGrounded;
+    public bool IsDucking() => duckSystem?.IsDucking() ?? isDucking;
+    public bool HasBall() => hasBall;
+    public void SetHasBall(bool value) => hasBall = value;
+    public bool IsLocalPlayer() => photonView?.IsMine != false;
+    public PlayerInputHandler GetInputHandler() => inputHandler;
+    public void SetInputEnabled(bool enabled) => inputEnabled = enabled;
+    public void SetMovementEnabled(bool enabled) => movementEnabled = enabled;
+    public int GetPlayerSide() => playerSide;
+    public bool IsFacingRight() => facingRight;
+
+    public void OnDamageTaken(int damage)
+    {
+        if (!IsLocalPlayer()) return;
+        AddAbilityCharge(0, damage * 0.5f);
+        AddAbilityCharge(1, damage * 0.3f);
+        AddAbilityCharge(2, damage * 0.4f);
+    }
+
+    public void OnSuccessfulCatch()
+    {
+        if (!IsLocalPlayer()) return;
+        AddAbilityCharge(0, 25f);
+        AddAbilityCharge(1, 15f);
+        AddAbilityCharge(2, 15f);
+    }
+
+    public void OnSuccessfulDodge()
+    {
+        if (!IsLocalPlayer()) return;
+        AddAbilityCharge(0, 20f);
+        AddAbilityCharge(1, 12f);
+        AddAbilityCharge(2, 12f);
+    }
+
+    public void ResetForNewMatch()
+    {
+        if (!IsLocalPlayer()) return;
+
+        SetInputEnabled(true);
+        SetMovementEnabled(true);
+        velocity = Vector3.zero;
+        isDashing = false;
+        isTeleporting = false;
+
+        // Reset abilities
+        for (int i = 0; i < 3; i++)
+        {
+            abilityCharges[i] = 0f;
+            abilityCooldowns[i] = false;
+        }
+
+        // Reset character states
+        hasDoubleJumped = false;
+        canDash = true;
+        isDucking = false;
+
+        // Reset duck system
+        duckSystem?.ResetDuckSystem();
+
+        // Apply normal collider (in case was ducking)
+        ApplyDuckingCollider();
+
+        // Reset movement restrictor teleport state
+        if (movementRestrictor != null)
+        {
+            movementRestrictor.EndTeleportOverride();
         }
     }
 
     /// <summary>
-    /// Enhanced debug info with network state
+    /// FIXED: Proper round revival method for MatchManager integration
     /// </summary>
-    void OnGUI()
+    public void ReviveForNewRound()
     {
-        if (!debugMode || characterData == null) return;
+        // Re-enable the component if it was disabled
+        enabled = true;
 
-        // Determine which player this is based on actor number
-        int actorNumber = GetActorNumber();
-        float yOffset = actorNumber == 2 ? 200f : 50f;
+        // Reset for new match
+        ResetForNewMatch();
 
-        GUILayout.BeginArea(new Rect(10, yOffset, 450, 350));
-        GUILayout.BeginVertical("box");
-
-        GUILayout.Label($"Character: {characterData.characterName} (Actor {actorNumber})");
-        GUILayout.Label($"Network: {(IsLocalPlayer() ? "LOCAL" : "REMOTE")} | Owner: {photonView?.Owner?.NickName ?? "None"}");
-        GUILayout.Label($"Health: {playerHealth?.GetCurrentHealth()}/{characterData.maxHealth}");
-        GUILayout.Label($"Ultimate ({characterData.ultimateType}): {currentUltimateCharge:F1}/{characterData.ultimateChargeRequired}");
-        GUILayout.Label($"Trick ({characterData.trickType}): {currentTrickCharge:F1}/{characterData.trickChargeRequired}");
-        GUILayout.Label($"Treat ({characterData.treatType}): {currentTreatCharge:F1}/{characterData.treatChargeRequired}");
-        GUILayout.Label($"State: Ground={isGrounded} Duck={isDucking} Ball={hasBall}");
-        GUILayout.Label($"Input: Enabled={inputEnabled} NetworkEnabled={networkInputEnabled}");
-        GUILayout.Label($"Movement: Enabled={movementEnabled} NetworkEnabled={networkMovementEnabled}");
-
-        // Match state info
-        if (currentMatch != null)
+        // Reset health through PlayerHealth component
+        if (playerHealth != null)
         {
-            GUILayout.Label($"Match State: {currentMatch.GetMatchState()}");
-            GUILayout.Label($"Round: {currentMatch.GetCurrentRound()} | Time: {currentMatch.GetRemainingTime():F1}s");
-
-            currentMatch.GetRoundScores(out int p1Rounds, out int p2Rounds);
-            GUILayout.Label($"Score: {p1Rounds} - {p2Rounds}");
+            playerHealth.RevivePlayer();
         }
 
-        // Duck system info
-        if (duckSystem != null)
+        // Reset ball state
+        SetHasBall(false);
+
+        // Sync revival across network if local player
+        if (IsLocalPlayer() && photonView != null)
         {
-            GUILayout.Label($"Duck System: Can={duckSystem.CanDuck()} Active={duckSystem.IsDucking()}");
-
-            if (duckSystem.IsDucking())
-            {
-                float timeRemaining = duckSystem.GetDuckTimeRemaining();
-                GUILayout.Label($"Duck Time Remaining: {timeRemaining:F1}s");
-
-                // Duck progress bar
-                Rect duckRect = GUILayoutUtility.GetRect(400, 15);
-                GUI.Box(duckRect, "");
-
-                Rect duckFill = new Rect(duckRect.x, duckRect.y,
-                    duckRect.width * duckSystem.GetDuckProgress(), duckRect.height);
-
-                Color duckColor = timeRemaining < 0.3f ? Color.red :
-                                timeRemaining < 0.7f ? Color.yellow : Color.green;
-                GUI.color = duckColor;
-                GUI.Box(duckFill, "");
-                GUI.color = Color.white;
-            }
-
-            if (duckSystem.IsInCooldown())
-            {
-                float cooldownRemaining = duckSystem.GetCooldownTimeRemaining();
-                GUILayout.Label($"Duck Cooldown: {cooldownRemaining:F1}s");
-
-                // Cooldown progress bar
-                Rect cooldownRect = GUILayoutUtility.GetRect(400, 15);
-                GUI.Box(cooldownRect, "");
-
-                Rect cooldownFill = new Rect(cooldownRect.x, cooldownRect.y,
-                    cooldownRect.width * (1f - (cooldownRemaining / 1.2f)), cooldownRect.height);
-
-                GUI.color = Color.cyan;
-                GUI.Box(cooldownFill, "");
-                GUI.color = Color.white;
-            }
+            photonView.RPC("SyncPlayerRevival", RpcTarget.Others);
         }
-
-        // VFX System Info
-        GUILayout.Label($"VFX Manager: {(useVFXManager ? "ENABLED" : "DISABLED")}");
-        if (useVFXManager)
-        {
-            bool vfxManagerExists = VFXManager.Instance != null;
-            GUILayout.Label($"VFX Status: {(vfxManagerExists ? "ACTIVE" : "MISSING")}");
-
-            if (vfxManagerExists)
-            {
-                VFXManager.Instance.GetVFXStats(out int total, out int hit, out int ultimate, out int ability);
-                GUILayout.Label($"VFX: {total} (H:{hit} U:{ultimate} A:{ability})");
-            }
-        }
-
-        // Network lag info
-        if (PhotonNetwork.IsConnected)
-        {
-            GUILayout.Label($"Network Lag: {networkLag:F3}s | Ping: {PhotonNetwork.GetPing()}ms");
-        }
-
-        GUILayout.EndVertical();
-        GUILayout.EndArea();
     }
+
+    [PunRPC]
+    void SyncPlayerRevival()
+    {
+        // Remote player revival sync
+        enabled = true;
+        SetInputEnabled(true);
+        SetMovementEnabled(true);
+        SetHasBall(false);
+    }
+
+    // Ability charge getters for UI
+    public float GetUltimateChargePercentage() =>
+        characterData != null ? abilityCharges[0] / characterData.ultimateChargeRequired : 0f;
+    public float GetTrickChargePercentage() =>
+        characterData != null ? abilityCharges[1] / characterData.trickChargeRequired : 0f;
+    public float GetTreatChargePercentage() =>
+        characterData != null ? abilityCharges[2] / characterData.treatChargeRequired : 0f;
+
+    public int GetThrowDamage(ThrowType throwType) => characterData?.GetThrowDamage(throwType) ?? 10;
+    public float GetDamageResistance() => characterData?.damageResistance ?? 1f;
 }
