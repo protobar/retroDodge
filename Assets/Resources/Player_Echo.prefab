@@ -15,8 +15,8 @@ GameObject:
   - component: {fileID: 3667315414432333416}
   - component: {fileID: 9052510062586592443}
   - component: {fileID: 1995584895154269699}
-  - component: {fileID: 6943191436126091719}
   - component: {fileID: 260223873277560957}
+  - component: {fileID: 6775468570612763314}
   - component: {fileID: -4712692354100272889}
   - component: {fileID: 42158451035458712}
   - component: {fileID: 6229285461073875422}
@@ -193,25 +193,6 @@ MonoBehaviour:
   hurtSound: {fileID: 0}
   deathSound: {fileID: 0}
   invulnerabilitySound: {fileID: 0}
---- !u!114 &6943191436126091719
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3775798883431776970}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f9be914ea63b9d3428d6274eeb6066fc, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  characterData: {fileID: 11400000, guid: e48ab9b4c18d6d74c97b2e2524fbe3de, type: 2}
-  enableNetworkSync: 1
-  groundLayerMask:
-    serializedVersion: 2
-    m_Bits: 1024
-  groundCheckRadius: 0.3
-  facingRight: 1
 --- !u!114 &260223873277560957
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -232,6 +213,34 @@ MonoBehaviour:
   teleportPushbackSpeed: 3
   playerSide: 2
   autoDetectSide: 1
+--- !u!114 &6775468570612763314
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3775798883431776970}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f9be914ea63b9d3428d6274eeb6066fc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  characterData: {fileID: 11400000, guid: e48ab9b4c18d6d74c97b2e2524fbe3de, type: 2}
+  enableNetworkSync: 1
+  debugMode: 0
+  groundLayerMask:
+    serializedVersion: 2
+    m_Bits: 1024
+  groundCheckRadius: 0.3
+  facingRight: 1
+  isGrounded: 0
+  isDucking: 0
+  hasBall: 0
+  movementEnabled: 1
+  inputEnabled: 1
+  hasDoubleJumped: 0
+  isDashing: 0
+  isTeleporting: 0
 --- !u!114 &-4712692354100272889
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -270,7 +279,7 @@ MonoBehaviour:
   observableSearch: 2
   ObservedComponents:
   - {fileID: 1995584895154269699}
-  - {fileID: 6943191436126091719}
+  - {fileID: 6775468570612763314}
   - {fileID: 6229285461073875422}
   sceneViewId: 0
   InstantiationId: 0

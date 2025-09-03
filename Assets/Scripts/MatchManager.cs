@@ -71,18 +71,10 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     private bool isInitialSpawn = true;
     private List<GameObject> spawnedPlayers = new List<GameObject>();
 
-    // Network management - room property keys
-    private const string ROOM_MATCH_STATE = "MatchState";
-    private const string ROOM_CURRENT_ROUND = "CurrentRound";
-    private const string ROOM_P1_ROUNDS = "P1Rounds";
-    private const string ROOM_P2_ROUNDS = "P2Rounds";
-    private const string ROOM_ROUND_START_TIME = "RoundStartTime";
-    private const string ROOM_ROUND_END_TIME = "RoundEndTime";
-    private const string ROOM_ROUND_ACTIVE = "RoundActive";
-    private const string PLAYERS_SPAWNED_KEY = "PlayersSpawned";
-    private const string PLAYER_CHARACTER_KEY = "SelectedCharacter";
+    // FIXED: Use centralized room state manager
+    // Room property constants are now in RoomStateManager
 
-        void Awake()
+    void Awake()
     {
         // Setup audio
         if (audioSource == null)
@@ -219,9 +211,9 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             // Non-master clients wait for spawn signal
             while (!playersSpawned)
             {
-                if (PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(PLAYERS_SPAWNED_KEY))
+                if (PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.PLAYERS_SPAWNED_KEY))
                 {
-                    bool shouldSpawn = (bool)PhotonNetwork.CurrentRoom.CustomProperties[PLAYERS_SPAWNED_KEY];
+                    bool shouldSpawn = (bool)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.PLAYERS_SPAWNED_KEY];
                     if (shouldSpawn)
                     {
                         SpawnMyPlayer();
@@ -241,7 +233,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         Debug.Log("[MASTER] Starting controlled spawn sequence...");
 
         // Set spawn flag to false initially
-        Hashtable roomProps = new Hashtable { [PLAYERS_SPAWNED_KEY] = false };
+        Hashtable roomProps = new Hashtable { [RoomStateManager.PLAYERS_SPAWNED_KEY] = false };
         SafeSetRoomProperties(roomProps);
         yield return new WaitForSeconds(0.2f);
 
@@ -254,7 +246,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         yield return new WaitForSeconds(1f);
 
         // Mark spawning complete
-        roomProps[PLAYERS_SPAWNED_KEY] = true;
+        roomProps[RoomStateManager.PLAYERS_SPAWNED_KEY] = true;
         SafeSetRoomProperties(roomProps);
 
         playersSpawned = true;
@@ -333,11 +325,12 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             ["CharacterColor_G"] = character.characterColor.g,
             ["CharacterColor_B"] = character.characterColor.b
         };
-        // FIXED: Safe player property update with guards
-        if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom && !isReturningToMenu)
-        {
-            PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
-        }
+        // FIXED: Use centralized room state manager with fallback
+        RoomStateManager.GetOrCreateInstance()?.SetPlayerCharacterData(
+            characterIndex,
+            character.characterName,
+            character.characterColor
+        );
 
         Debug.Log($"[DATA STORED] Character data stored for {character.characterName}");
     }
@@ -1212,9 +1205,11 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     // Helper methods
     int GetSelectedCharacterIndex()
     {
-        if (PhotonNetwork.LocalPlayer.CustomProperties.ContainsKey(PLAYER_CHARACTER_KEY))
-            return (int)PhotonNetwork.LocalPlayer.CustomProperties[PLAYER_CHARACTER_KEY];
-        return 0;
+        return RoomStateManager.GetOrCreateInstance()?.GetPlayerProperty<int>(
+            PhotonNetwork.LocalPlayer,
+            RoomStateManager.PLAYER_CHARACTER_KEY,
+            0
+        ) ?? 0;
     }
 
     public CharacterData GetCharacterData(int characterIndex)
@@ -1262,26 +1257,24 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     {
         // FIXED: Don't update room properties if we're leaving
         if (isReturningToMenu) return;
-        
-        Hashtable props = new Hashtable
-        {
-            [ROOM_MATCH_STATE] = (int)currentState,
-            [ROOM_CURRENT_ROUND] = currentRound,
-            [ROOM_P1_ROUNDS] = player1RoundsWon,
-            [ROOM_P2_ROUNDS] = player2RoundsWon,
-            [ROOM_ROUND_START_TIME] = roundStartTime,
-            [ROOM_ROUND_END_TIME] = roundEndTime,
-            [ROOM_ROUND_ACTIVE] = roundActive
-        };
 
-        SafeSetRoomProperties(props);
+        // FIXED: Use centralized room state manager with fallback
+        RoomStateManager.GetOrCreateInstance()?.SetMatchState(
+            (int)currentState,
+            currentRound,
+            player1RoundsWon,
+            player2RoundsWon,
+            roundStartTime,
+            roundEndTime,
+            roundActive
+        );
     }
 
     void SyncFromRoomProperties()
     {
         // FIXED: Don't sync room properties if we're leaving
         if (isReturningToMenu) return;
-        
+
         // Simple null check - if any of these are null, just return
         if (PhotonNetwork.CurrentRoom?.CustomProperties == null) return;
 
@@ -1291,53 +1284,45 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         bool changed = false;
         bool timerChanged = false;
 
-        if (room.CustomProperties.ContainsKey(ROOM_MATCH_STATE))
+        // FIXED: Use centralized room state manager for reading properties with fallback
+        MatchState newState = (MatchState)RoomStateManager.GetOrCreateInstance().GetRoomProperty<int>(RoomStateManager.ROOM_MATCH_STATE, (int)currentState);
+        int newRound = RoomStateManager.GetOrCreateInstance().GetRoomProperty<int>(RoomStateManager.ROOM_CURRENT_ROUND, currentRound);
+        int newP1Rounds = RoomStateManager.GetOrCreateInstance().GetRoomProperty<int>(RoomStateManager.ROOM_P1_ROUNDS, player1RoundsWon);
+        int newP2Rounds = RoomStateManager.GetOrCreateInstance().GetRoomProperty<int>(RoomStateManager.ROOM_P2_ROUNDS, player2RoundsWon);
+        bool newRoundActive = RoomStateManager.GetOrCreateInstance().GetRoomProperty<bool>(RoomStateManager.ROOM_ROUND_ACTIVE, roundActive);
+
+        // FIXED: Also sync timer values
+        double newRoundStartTime = RoomStateManager.GetOrCreateInstance().GetRoomProperty<double>(RoomStateManager.ROOM_ROUND_START_TIME, roundStartTime);
+        double newRoundEndTime = RoomStateManager.GetOrCreateInstance().GetRoomProperty<double>(RoomStateManager.ROOM_ROUND_END_TIME, roundEndTime);
+
+        // Check if anything changed
+        if (currentState != newState || currentRound != newRound ||
+            player1RoundsWon != newP1Rounds || player2RoundsWon != newP2Rounds ||
+            roundActive != newRoundActive)
         {
-            MatchState newState = (MatchState)(int)room.CustomProperties[ROOM_MATCH_STATE];
-            int newRound = (int)room.CustomProperties[ROOM_CURRENT_ROUND];
-            int newP1Rounds = (int)room.CustomProperties[ROOM_P1_ROUNDS];
-            int newP2Rounds = (int)room.CustomProperties[ROOM_P2_ROUNDS];
-            bool newRoundActive = (bool)room.CustomProperties[ROOM_ROUND_ACTIVE];
+            currentState = newState;
+            currentRound = newRound;
+            player1RoundsWon = newP1Rounds;
+            player2RoundsWon = newP2Rounds;
+            roundActive = newRoundActive;
+            changed = true;
+        }
 
-            // FIXED: Also sync timer values
-            double newRoundStartTime = 0.0;
-            double newRoundEndTime = 0.0;
+        // Check if timer changed
+        if (System.Math.Abs(roundStartTime - newRoundStartTime) > 0.1 ||
+            System.Math.Abs(roundEndTime - newRoundEndTime) > 0.1)
+        {
+            roundStartTime = newRoundStartTime;
+            roundEndTime = newRoundEndTime;
+            timerChanged = true;
+        }
 
-            if (room.CustomProperties.ContainsKey(ROOM_ROUND_START_TIME))
-                newRoundStartTime = (double)room.CustomProperties[ROOM_ROUND_START_TIME];
-            if (room.CustomProperties.ContainsKey(ROOM_ROUND_END_TIME))
-                newRoundEndTime = (double)room.CustomProperties[ROOM_ROUND_END_TIME];
-
-            // Check if anything changed
-            if (currentState != newState || currentRound != newRound ||
-                player1RoundsWon != newP1Rounds || player2RoundsWon != newP2Rounds ||
-                roundActive != newRoundActive)
-            {
-                currentState = newState;
-                currentRound = newRound;
-                player1RoundsWon = newP1Rounds;
-                player2RoundsWon = newP2Rounds;
-                roundActive = newRoundActive;
-                changed = true;
-            }
-
-            // Check if timer changed
-            if (System.Math.Abs(roundStartTime - newRoundStartTime) > 0.1 ||
-                System.Math.Abs(roundEndTime - newRoundEndTime) > 0.1)
-            {
-                roundStartTime = newRoundStartTime;
-                roundEndTime = newRoundEndTime;
-                timerChanged = true;
-            }
-
-            // Update UI if anything changed
-            if (changed || timerChanged)
-            {
-                SyncUIToAllClients();
-            }
+        // Update UI if anything changed
+        if (changed || timerChanged)
+        {
+            SyncUIToAllClients();
         }
     }
-
     // Debug method
     void DebugSpawnIssues()
     {
@@ -1413,3 +1398,4 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     }
     public CharacterData[] GetAvailableCharacters() => availableCharacters;
 }
+

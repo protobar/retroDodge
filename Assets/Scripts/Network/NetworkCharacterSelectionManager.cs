@@ -61,11 +61,8 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
     private bool isTransitioning = false;
     private double selectionStartTime = 0;
 
-    // Room properties keys
-    private const string PLAYER_CHARACTER_KEY = "SelectedCharacter";
-    private const string PLAYER_LOCKED_KEY = "CharacterLocked";
-    private const string TIMER_STARTED_KEY = "TimerStarted";
-    private const string SELECTION_START_TIME_KEY = "SelectionStartTime";
+    // FIXED: Use centralized room state manager
+    // Room property constants are now in RoomStateManager
 
     // UI References
     private Button[] characterButtons;
@@ -125,14 +122,8 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         timeRemaining = selectionTimeLimit;
         UpdateTimerDisplay();
 
-        Hashtable playerProps = new Hashtable();
-        playerProps[PLAYER_CHARACTER_KEY] = -1;
-        playerProps[PLAYER_LOCKED_KEY] = false;
-        // FIXED: Safe player property update with guards
-        if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom && !isLeavingRoom)
-        {
-            PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
-        }
+        // FIXED: Use centralized room state manager with fallback
+        RoomStateManager.GetOrCreateInstance()?.SetPlayerSelectionState(-1, false);
 
         SetupButtonListeners();
     }
@@ -289,13 +280,8 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         UpdateCharacterDisplay(selectedCharacter);
         UpdateCharacterButtons();
 
-        Hashtable playerProps = new Hashtable();
-        playerProps[PLAYER_CHARACTER_KEY] = characterIndex;
-        // FIXED: Safe player property update with guards
-        if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom && !isLeavingRoom)
-        {
-            PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
-        }
+        // FIXED: Use centralized room state manager with fallback
+        RoomStateManager.GetOrCreateInstance()?.SetPlayerProperty(RoomStateManager.PLAYER_CHARACTER_KEY, characterIndex);
 
         PlaySound(characterSelectSound);
 
@@ -368,13 +354,8 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         SetPanelActive(selectedCharacterPanel, false);
         selectedCharacterIndex = -1;
 
-        Hashtable playerProps = new Hashtable();
-        playerProps[PLAYER_CHARACTER_KEY] = -1;
-        // FIXED: Safe player property update with guards
-        if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom && !isLeavingRoom)
-        {
-            PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
-        }
+        // FIXED: Use centralized room state manager with fallback
+        RoomStateManager.GetOrCreateInstance()?.SetPlayerProperty(RoomStateManager.PLAYER_CHARACTER_KEY, -1);
 
         UpdateCharacterButtons();
         UpdatePlayerStatus();
@@ -387,14 +368,8 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         isCharacterLocked = true;
         CharacterData lockedCharacter = availableCharacters[selectedCharacterIndex];
 
-        Hashtable playerProps = new Hashtable();
-        playerProps[PLAYER_CHARACTER_KEY] = selectedCharacterIndex;
-        playerProps[PLAYER_LOCKED_KEY] = true;
-        // FIXED: Safe player property update with guards
-        if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom && !isLeavingRoom)
-        {
-            PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
-        }
+        // FIXED: Use centralized room state manager with fallback
+        RoomStateManager.GetOrCreateInstance()?.SetPlayerSelectionState(selectedCharacterIndex, true);
 
         if (lockInButton != null)
             lockInButton.interactable = false;
@@ -426,14 +401,8 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             if (PhotonNetwork.IsConnected && PhotonNetwork.InRoom && 
                 PhotonNetwork.NetworkClientState == Photon.Realtime.ClientState.Joined)
             {
-                Hashtable roomProps = new Hashtable();
-                roomProps[TIMER_STARTED_KEY] = true;
-                roomProps[SELECTION_START_TIME_KEY] = selectionStartTime;
-                // FIXED: Safe room property update with guards
-                if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom && !isLeavingRoom)
-                {
-                    PhotonNetwork.CurrentRoom.SetCustomProperties(roomProps);
-                }
+                // FIXED: Use centralized room state manager with fallback
+                RoomStateManager.GetOrCreateInstance()?.SetCharacterSelectionState(true, selectionStartTime);
             }
         }
     }
@@ -533,8 +502,8 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     bool IsPlayerReady(Player player)
     {
-        if (player.CustomProperties.TryGetValue(PLAYER_LOCKED_KEY, out object lockedObj) &&
-            player.CustomProperties.TryGetValue(PLAYER_CHARACTER_KEY, out object characterObj))
+        if (player.CustomProperties.TryGetValue(RoomStateManager.PLAYER_LOCKED_KEY, out object lockedObj) &&
+            player.CustomProperties.TryGetValue(RoomStateManager.PLAYER_CHARACTER_KEY, out object characterObj))
         {
             bool isLocked = (bool)lockedObj;
             int characterIndex = (int)characterObj;
@@ -573,8 +542,8 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
     {
         string playerName = player.NickName;
 
-        if (player.CustomProperties.TryGetValue(PLAYER_LOCKED_KEY, out object lockedObj) &&
-            player.CustomProperties.TryGetValue(PLAYER_CHARACTER_KEY, out object characterObj))
+        if (player.CustomProperties.TryGetValue(RoomStateManager.PLAYER_LOCKED_KEY, out object lockedObj) &&
+            player.CustomProperties.TryGetValue(RoomStateManager.PLAYER_CHARACTER_KEY, out object characterObj))
         {
             bool isLocked = (bool)lockedObj;
             int characterIndex = (int)characterObj;
@@ -623,7 +592,7 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         for (int i = 0; i < sortedPlayers.Length && i < 2; i++)
         {
             Player player = sortedPlayers[i];
-            if (player.CustomProperties.TryGetValue(PLAYER_CHARACTER_KEY, out object characterObj))
+            if (player.CustomProperties.TryGetValue(RoomStateManager.PLAYER_CHARACTER_KEY, out object characterObj))
             {
                 int characterIndex = (int)characterObj;
                 if (characterIndex >= 0 && characterIndex < availableCharacters.Length)
@@ -735,11 +704,11 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     public override void OnRoomPropertiesUpdate(Hashtable propertiesThatChanged)
     {
-        if (propertiesThatChanged.ContainsKey(TIMER_STARTED_KEY) &&
-            propertiesThatChanged.ContainsKey(SELECTION_START_TIME_KEY))
+        if (propertiesThatChanged.ContainsKey(RoomStateManager.TIMER_STARTED_KEY) &&
+            propertiesThatChanged.ContainsKey(RoomStateManager.SELECTION_START_TIME_KEY))
         {
-            bool timerActive = (bool)propertiesThatChanged[TIMER_STARTED_KEY];
-            double startTime = (double)propertiesThatChanged[SELECTION_START_TIME_KEY];
+            bool timerActive = (bool)propertiesThatChanged[RoomStateManager.TIMER_STARTED_KEY];
+            double startTime = (double)propertiesThatChanged[RoomStateManager.SELECTION_START_TIME_KEY];
 
             if (timerActive && !timerStarted)
             {

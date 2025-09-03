@@ -15,12 +15,12 @@ GameObject:
   - component: {fileID: 4797442697267393684}
   - component: {fileID: 4564743713728784474}
   - component: {fileID: 2795373992541480716}
-  - component: {fileID: 1815663371216282099}
   - component: {fileID: 2194072730587793859}
   - component: {fileID: -2602709676357483726}
   - component: {fileID: 3171496574075786320}
   - component: {fileID: 1504208963714581354}
   - component: {fileID: -379046048538752417}
+  - component: {fileID: 7411436999334466731}
   m_Layer: 8
   m_Name: Player_Grudge
   m_TagString: Player
@@ -193,25 +193,6 @@ MonoBehaviour:
   hurtSound: {fileID: 0}
   deathSound: {fileID: 0}
   invulnerabilitySound: {fileID: 0}
---- !u!114 &1815663371216282099
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 990030946171809883}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f9be914ea63b9d3428d6274eeb6066fc, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  characterData: {fileID: 11400000, guid: c24da8085b777904aba2ee7c5136a98f, type: 2}
-  enableNetworkSync: 1
-  groundLayerMask:
-    serializedVersion: 2
-    m_Bits: 1024
-  groundCheckRadius: 0.3
-  facingRight: 1
 --- !u!114 &2194072730587793859
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -270,8 +251,8 @@ MonoBehaviour:
   observableSearch: 2
   ObservedComponents:
   - {fileID: 2795373992541480716}
-  - {fileID: 1815663371216282099}
   - {fileID: 1504208963714581354}
+  - {fileID: 7411436999334466731}
   sceneViewId: 0
   InstantiationId: 0
   isRuntimeInstantiated: 0
@@ -404,3 +385,31 @@ AudioSource:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
+--- !u!114 &7411436999334466731
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 990030946171809883}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f9be914ea63b9d3428d6274eeb6066fc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  characterData: {fileID: 11400000, guid: c24da8085b777904aba2ee7c5136a98f, type: 2}
+  enableNetworkSync: 1
+  debugMode: 0
+  groundLayerMask:
+    serializedVersion: 2
+    m_Bits: 1024
+  groundCheckRadius: 0.3
+  facingRight: 1
+  isGrounded: 0
+  isDucking: 0
+  hasBall: 0
+  movementEnabled: 1
+  inputEnabled: 1
+  hasDoubleJumped: 0
+  isDashing: 0
+  isTeleporting: 0

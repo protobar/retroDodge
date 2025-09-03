@@ -10,10 +10,11 @@ using Photon.Realtime;
 public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 {
     [Header("Character Setup")]
-    [SerializeField] private CharacterData characterData;
+    [SerializeField] public CharacterData characterData;
 
     [Header("Network Settings")]
     [SerializeField] private bool enableNetworkSync = true;
+    [SerializeField] private bool debugMode = false;
 
     [Header("Ground Check")]
     [SerializeField] private LayerMask groundLayerMask = 1;
@@ -34,14 +35,14 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     // Movement state
     private Transform characterTransform;
     private Vector3 velocity;
-    private bool isGrounded, isDucking, hasBall = false;
-    private bool movementEnabled = true, inputEnabled = true;
+    public bool isGrounded, isDucking, hasBall = false;
+    public bool movementEnabled = true, inputEnabled = true;
 
     // Character-specific state
-    private bool hasDoubleJumped = false;
+    public bool hasDoubleJumped = false;
     private bool canDash = true;
     private float lastDashTime;
-    private bool isDashing, isTeleporting = false;
+    public bool isDashing, isTeleporting = false;
 
     // Match integration
     private MatchManager currentMatch;
@@ -58,6 +59,19 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     // Network sync data
     private Vector3 networkPosition;
     private bool networkIsGrounded, networkIsDucking, networkHasBall;
+    
+    // OPTIMIZED: Network interpolation and optimization
+    private Vector3 networkVelocity;
+    private float lastNetworkTime;
+    
+    // Performance optimization flags
+    private bool hasSignificantMovement = false;
+    private bool hasStateChanged = false;
+    private bool hasAbilityChanged = false;
+    
+    // PUN2 optimization tracking
+    private float lastSendRateChange = 0f;
+    private const float SEND_RATE_CHANGE_COOLDOWN = 1f; // Don't change send rate too frequently
 
     // FIXED: Character data sync tracking
     private bool characterDataLoaded = false;
@@ -88,6 +102,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         {
             StartCoroutine(WaitForCharacterDataSync());
         }
+        
+        // OPTIMIZED: Set initial network send rate
+        OptimizeNetworkSendRate();
     }
 
     void CacheComponents()
@@ -165,6 +182,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
             HandleDucking();
             HandleBallInteraction();
             UpdateAbilityCharges();
+            
+            // OPTIMIZED: Update network optimization
+            UpdateNetworkOptimization();
         }
         else
         {
@@ -964,16 +984,22 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     {
         if (!enableNetworkSync) return;
 
+        // OPTIMIZED: Improved interpolation with velocity prediction
         float distance = Vector3.Distance(transform.position, networkPosition);
+        
         if (distance > 5f)
         {
-            transform.position = networkPosition; // Teleport if too far
+            // Teleport if too far (network lag or desync)
+            transform.position = networkPosition;
         }
         else if (distance > 0.1f)
         {
-            transform.position = Vector3.Lerp(transform.position, networkPosition, Time.deltaTime * 20f);
+            // Use velocity-based interpolation for smoother movement
+            Vector3 targetPosition = networkPosition + (networkVelocity * Time.deltaTime);
+            transform.position = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * 25f);
         }
 
+        // Apply network state
         isGrounded = networkIsGrounded;
         isDucking = networkIsDucking;
         hasBall = networkHasBall;
@@ -1006,47 +1032,126 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
         if (stream.IsWriting)
         {
-            // Send position, rotation, and key states
+            // FIXED: Always send consistent data structure
+            // Position and velocity (always sent for smooth movement)
             stream.SendNext(transform.position);
+            stream.SendNext(velocity);
+            
+            // State data (always sent, but we'll optimize frequency internally)
             stream.SendNext(isGrounded);
             stream.SendNext(isDucking);
             stream.SendNext(hasBall);
             stream.SendNext(facingRight);
             stream.SendNext(playerSide);
             
-            // FIXED: Sync ability charges for ultimate visibility
+            // Ability charges (always sent for UI sync)
             stream.SendNext(abilityCharges[0]); // Ultimate charge
             stream.SendNext(abilityCharges[1]); // Trick charge
             stream.SendNext(abilityCharges[2]); // Treat charge
         }
         else
         {
-            // Receive network data
-            networkPosition = (Vector3)stream.ReceiveNext();
+            // FIXED: Always receive consistent data structure
+            // Receive position and velocity
+            Vector3 newPosition = (Vector3)stream.ReceiveNext();
+            Vector3 newVelocity = (Vector3)stream.ReceiveNext();
+            
+            // Calculate network velocity for interpolation
+            float currentTime = Time.time;
+            float deltaTime = currentTime - lastNetworkTime;
+            lastNetworkTime = currentTime;
+            
+            if (deltaTime > 0)
+            {
+                networkVelocity = (newPosition - networkPosition) / deltaTime;
+            }
+            
+            networkPosition = newPosition;
+            
+            // Receive state changes
             networkIsGrounded = (bool)stream.ReceiveNext();
             networkIsDucking = (bool)stream.ReceiveNext();
             networkHasBall = (bool)stream.ReceiveNext();
-
-            // FIXED: Sync facing direction
+            
+            // Handle facing direction changes
             bool networkFacingRight = (bool)stream.ReceiveNext();
             int networkPlayerSide = (int)stream.ReceiveNext();
-
+            
             if (facingRight != networkFacingRight || playerSide != networkPlayerSide)
             {
                 facingRight = networkFacingRight;
                 playerSide = networkPlayerSide;
-                FlipCharacterModel(); // Update visual
+                FlipCharacterModel();
             }
             
-            // FIXED: Sync ability charges from network
-            float networkUltimateCharge = (float)stream.ReceiveNext();
-            float networkTrickCharge = (float)stream.ReceiveNext();
-            float networkTreatCharge = (float)stream.ReceiveNext();
+            // Receive ability charges
+            abilityCharges[0] = (float)stream.ReceiveNext();
+            abilityCharges[1] = (float)stream.ReceiveNext();
+            abilityCharges[2] = (float)stream.ReceiveNext();
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // NETWORK OPTIMIZATION
+    // ══════════════════════════════════════════════════════════
+    
+    void OptimizeNetworkSendRate()
+    {
+        // FIXED: PUN2 uses global send rate settings, not per PhotonView
+        if (currentMatch != null && currentMatch.GetMatchState() == MatchManager.MatchState.Fighting)
+        {
+            // High frequency during active gameplay
+            PhotonNetwork.SendRate = 20; // 20 updates per second
+            PhotonNetwork.SerializationRate = 20; // 20 serializations per second
+        }
+        else
+        {
+            // Lower frequency during non-active states
+            PhotonNetwork.SendRate = 10; // 10 updates per second
+            PhotonNetwork.SerializationRate = 10; // 10 serializations per second
+        }
+    }
+    
+    void UpdateNetworkOptimization()
+    {
+        if (!enableNetworkSync) return;
+        
+        // Check for significant movement
+        float movementThreshold = 0.1f;
+        hasSignificantMovement = velocity.magnitude > movementThreshold;
+        
+        // Check for state changes
+        hasStateChanged = (isGrounded != networkIsGrounded) || 
+                         (isDucking != networkIsDucking) || 
+                         (hasBall != networkHasBall);
+        
+        // Check for ability changes
+        hasAbilityChanged = false;
+        for (int i = 0; i < abilityCharges.Length; i++)
+        {
+            if (Mathf.Abs(abilityCharges[i] - (i == 0 ? 0f : abilityCharges[i])) > 0.01f)
+            {
+                hasAbilityChanged = true;
+                break;
+            }
+        }
+        
+        // FIXED: PUN2 optimization with cooldown to prevent constant changes
+        // Only change send rate if enough time has passed and we're the master client
+        if (Time.time - lastSendRateChange >= SEND_RATE_CHANGE_COOLDOWN && PhotonNetwork.IsMasterClient)
+        {
+            bool isActive = hasSignificantMovement || hasStateChanged || hasAbilityChanged;
+            int targetSendRate = isActive ? 20 : 15; // More conservative approach
             
-            // Update ability charges for network sync
-            abilityCharges[0] = networkUltimateCharge;
-            abilityCharges[1] = networkTrickCharge;
-            abilityCharges[2] = networkTreatCharge;
+            if (PhotonNetwork.SendRate != targetSendRate)
+            {
+                PhotonNetwork.SendRate = targetSendRate;
+                PhotonNetwork.SerializationRate = targetSendRate;
+                lastSendRateChange = Time.time;
+                
+                if (debugMode)
+                    Debug.Log($"[NETWORK OPT] Send rate changed to {targetSendRate} (Active: {isActive})");
+            }
         }
     }
 
