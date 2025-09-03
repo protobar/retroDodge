@@ -55,6 +55,10 @@ public class MatchUI : MonoBehaviourPunCallbacks
     [SerializeField] private Button rematchButton;
     [SerializeField] private Button mainMenuButton;
 
+    [Header("Match End UI")]
+    public Button returnToMenuButton;
+    public GameObject matchEndPanel;
+
     [Header("Network Status")]
     [SerializeField] private GameObject networkStatusPanel;
     [SerializeField] private TextMeshProUGUI networkStatusText;
@@ -69,6 +73,14 @@ public class MatchUI : MonoBehaviourPunCallbacks
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip uiUpdateSound;
     [SerializeField] private AudioClip announcementSound;
+
+    [Header("Message Display")]
+    public GameObject messagePanel;
+    public TextMeshProUGUI messageText;
+
+    [Header("Forfeit Victory")]
+    public AudioClip forfeitSound;
+    public AudioClip victorySound;
 
     // State tracking
     private CharacterData player1Character;
@@ -572,6 +584,69 @@ public class MatchUI : MonoBehaviourPunCallbacks
     {
         if (resultsPanel == null) return;
 
+        // Setup winner display (existing code)
+        if (winnerPortrait != null && winnerCharacter.characterIcon != null)
+        {
+            winnerPortrait.sprite = winnerCharacter.characterIcon;
+        }
+
+        if (winnerName != null)
+        {
+            string displayText = winnerCharacter.characterName;
+
+            Player networkWinner = GetPlayerByActorNumber(winner);
+            if (networkWinner != null)
+            {
+                displayText += $"\n({networkWinner.NickName})";
+            }
+
+            winnerName.text = displayText;
+        }
+
+        if (resultsText != null)
+        {
+            resultsText.text = $"{winnerCharacter.characterName}\nWINS THE MATCH!";
+        }
+
+        // Show results panel
+        resultsPanel.SetActive(true);
+
+        // CHANGED: Don't show return button immediately
+        // ShowReturnToMenuButton(false); // Hide initially
+    }
+
+    public void ShowReturnToMenuButton(bool show)
+    {
+        if (returnToMenuButton != null)
+        {
+            returnToMenuButton.gameObject.SetActive(show);
+
+            // Ensure button is interactable
+            returnToMenuButton.interactable = true;
+
+            // Set up button click handler
+            returnToMenuButton.onClick.RemoveAllListeners();
+            returnToMenuButton.onClick.AddListener(() => {
+                // Find MatchManager and call return method
+                MatchManager matchManager = FindObjectOfType<MatchManager>();
+                if (matchManager != null)
+                {
+                    matchManager.OnReturnToMenuButtonPressed();
+                }
+            });
+        }
+
+        if (matchEndPanel != null)
+        {
+            matchEndPanel.SetActive(show);
+        }
+    }
+
+    // ADD to MatchUI.cs - Show forfeit victory
+    public void ShowForfeitVictory(int winner, CharacterData winnerCharacter, string forfeitPlayerName)
+    {
+        if (resultsPanel == null) return;
+
         // Setup winner display
         if (winnerPortrait != null && winnerCharacter.characterIcon != null)
         {
@@ -594,13 +669,59 @@ public class MatchUI : MonoBehaviourPunCallbacks
 
         if (resultsText != null)
         {
-            resultsText.text = $"{winnerCharacter.characterName}\nWINS THE MATCH!";
+            resultsText.text = $"VICTORY BY FORFEIT!\n{forfeitPlayerName} left the match";
         }
 
         // Show results panel
         resultsPanel.SetActive(true);
 
-        PlaySound(announcementSound);
+        PlaySound(victorySound);
+    }
+
+    // ADD to MatchUI.cs - Show temporary message
+    public void ShowMessage(string message, float duration)
+    {
+        StartCoroutine(ShowMessageCoroutine(message, duration));
+    }
+
+    // ADD to MatchUI.cs - Message display coroutine
+    private IEnumerator ShowMessageCoroutine(string message, float duration)
+    {
+        // Create or find a message display UI element
+        GameObject messageObj = null;
+        //Text messageText = null;
+
+        // Try to find existing message display
+        if (messagePanel != null)
+        {
+            messageObj = messagePanel;
+            messageText = messageObj.GetComponentInChildren<TextMeshProUGUI>();
+        }
+        else if (announcementText != null)
+        {
+            // Use announcement text as fallback
+            messageText = announcementText;
+            messageObj = announcementText.gameObject;
+        }
+
+        if (messageText != null)
+        {
+            messageText.text = message;
+            messageObj.SetActive(true);
+
+            yield return new WaitForSeconds(duration);
+
+            // Only hide if we're using the message panel (not announcement text)
+            if (messagePanel != null)
+            {
+                messageObj.SetActive(false);
+            }
+        }
+        else
+        {
+            // Fallback: Log to console if no UI available
+            Debug.Log($"[MATCH MESSAGE] {message}");
+        }
     }
 
     IEnumerator ShowAnnouncementCoroutine(float duration)
@@ -643,11 +764,28 @@ public class MatchUI : MonoBehaviourPunCallbacks
         PlaySound(uiUpdateSound);
     }
 
-    void OnMainMenuClicked()
+    public void OnMainMenuClicked()
     {
-        // Leave room and return to main menu
-        PhotonNetwork.LeaveRoom();
-        PlaySound(uiUpdateSound);
+        // Check if we can actually leave the room
+        var clientState = PhotonNetwork.NetworkClientState;
+
+        if (PhotonNetwork.InRoom &&
+            clientState == Photon.Realtime.ClientState.Joined)
+        {
+            // Safe to leave room
+            PhotonNetwork.LeaveRoom();
+        }
+        else if (clientState == Photon.Realtime.ClientState.Leaving ||
+                 clientState == Photon.Realtime.ClientState.Disconnecting)
+        {
+            // Already leaving, wait for OnLeftRoom callback
+            Debug.Log("Already leaving room, waiting for callback...");
+        }
+        else
+        {
+            // Not in room or not connected, go directly to main menu
+            UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
+        }
     }
 
     #endregion

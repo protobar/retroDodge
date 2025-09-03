@@ -8,7 +8,7 @@ using Photon.Realtime;
 using Hashtable = ExitGames.Client.Photon.Hashtable;
 
 /// <summary>
-/// Fixed PUN2 Character Selection Manager
+/// PUN2 Character Selection Manager with Dodge Detection
 /// </summary>
 public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 {
@@ -50,9 +50,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
     [SerializeField] private AudioClip timerWarningSound;
     [SerializeField] private AudioClip transitionSound;
 
-    [Header("Debug")]
-    [SerializeField] private bool debugMode = true;
-
     // Selection state
     private int selectedCharacterIndex = -1;
     private bool isCharacterLocked = false;
@@ -74,7 +71,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     void Start()
     {
-        // Small delay to ensure room is properly initialized
         StartCoroutine(InitializeWithDelay());
     }
 
@@ -84,7 +80,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         InitializeCharacterSelection();
         UpdatePlayerStatus();
 
-        // Wait a bit more then start timer
         yield return new WaitForSeconds(1f);
         StartSelectionTimer();
     }
@@ -95,23 +90,14 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         {
             UpdateTimer();
         }
-
-        // Debug controls
-        if (debugMode)
-        {
-            HandleDebugInput();
-        }
     }
 
     #endregion
 
     #region Initialization
 
-    // COMPLETE REPLACEMENT FOR THE PROBLEMATIC METHODS
-
     void InitializeCharacterSelection()
     {
-        // Validate we're in a room
         if (!PhotonNetwork.InRoom)
         {
             Debug.LogError("Not in a Photon room! Returning to main menu.");
@@ -119,47 +105,29 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             return;
         }
 
-        if (debugMode)
-        {
-            Debug.Log($"Initializing character selection. Room: {PhotonNetwork.CurrentRoom.Name}, Players: {PhotonNetwork.CurrentRoom.PlayerCount}");
-        }
+        SetPanelActive(characterSelectionPanel, true);
+        SetPanelActive(selectedCharacterPanel, false);
+        SetPanelActive(loadingPanel, false);
+        SetPanelActive(timerPanel, true);
+        SetPanelActive(playerStatusPanel, true);
 
-        // CRITICAL FIX: Proper panel activation - DON'T hide character selection panel!
-        SetPanelActive(characterSelectionPanel, true);   // KEEP THIS VISIBLE
-        SetPanelActive(selectedCharacterPanel, false);   // Hide selected character details initially
-        SetPanelActive(loadingPanel, false);            // Hide loading
-        SetPanelActive(timerPanel, true);              // Show timer
-        SetPanelActive(playerStatusPanel, true);       // Show player status
-
-        // Validate character data
         if (availableCharacters == null || availableCharacters.Length == 0)
         {
             Debug.LogError("No characters available! Check CharacterData array in inspector.");
             return;
         }
 
-        // Create character selection buttons FIRST
         CreateCharacterButtons();
 
-        // Initialize timer display
         timeRemaining = selectionTimeLimit;
         UpdateTimerDisplay();
 
-        // Set initial player properties
         Hashtable playerProps = new Hashtable();
         playerProps[PLAYER_CHARACTER_KEY] = -1;
         playerProps[PLAYER_LOCKED_KEY] = false;
         PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
 
-        // Setup button listeners
         SetupButtonListeners();
-
-        if (debugMode)
-        {
-            Debug.Log($"Character selection initialized for {PhotonNetwork.LocalPlayer.NickName}");
-            Debug.Log($"Available characters: {availableCharacters.Length}");
-            Debug.Log($"Character buttons created: {(characterButtons != null ? characterButtons.Length : 0)}");
-        }
     }
 
     void SetupButtonListeners()
@@ -185,15 +153,9 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             return;
         }
 
-        if (characterGridParent == null)
+        if (characterGridParent == null || characterButtonPrefab == null)
         {
-            Debug.LogError("Character Grid Parent is not assigned!");
-            return;
-        }
-
-        if (characterButtonPrefab == null)
-        {
-            Debug.LogError("Character Button Prefab is not assigned!");
+            Debug.LogError("Character Grid Parent or Button Prefab not assigned!");
             return;
         }
 
@@ -203,12 +165,11 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             DestroyImmediate(child.gameObject);
         }
 
-        // Create character buttons
         characterButtons = new Button[availableCharacters.Length];
 
         for (int i = 0; i < availableCharacters.Length; i++)
         {
-            int characterIndex = i; // Capture for closure
+            int characterIndex = i;
             CharacterData character = availableCharacters[i];
 
             if (character == null)
@@ -217,19 +178,16 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
                 continue;
             }
 
-            // Instantiate button
             GameObject buttonObj = Instantiate(characterButtonPrefab, characterGridParent);
             Button button = buttonObj.GetComponent<Button>();
 
             if (button == null)
             {
-                Debug.LogError($"Character Button Prefab doesn't have a Button component!");
+                Debug.LogError("Character Button Prefab doesn't have a Button component!");
                 continue;
             }
 
             characterButtons[i] = button;
-
-            // CRITICAL FIX: Ensure button is properly configured
             button.interactable = true;
             button.enabled = true;
 
@@ -243,11 +201,8 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
                 }
                 else
                 {
-                    // Set default color if no icon
                     buttonImage.color = Color.cyan;
                 }
-
-                // CRITICAL: Ensure the image can receive raycast events
                 buttonImage.raycastTarget = true;
             }
 
@@ -259,7 +214,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             }
             else
             {
-                // Try regular Text component
                 Text regularText = button.GetComponentInChildren<Text>();
                 if (regularText != null)
                 {
@@ -267,69 +221,41 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
                 }
             }
 
-            // CRITICAL FIX: Clear existing listeners and add new one
             button.onClick.RemoveAllListeners();
             button.onClick.AddListener(() => {
-                if (debugMode)
-                {
-                    Debug.Log($"Button clicked for character {characterIndex}: {character.characterName}");
-                }
                 OnCharacterSelected(characterIndex);
             });
 
-            // Ensure button object is active and visible
             buttonObj.SetActive(true);
 
-            // CRITICAL: Ensure Canvas Group doesn't block interaction
             CanvasGroup canvasGroup = buttonObj.GetComponent<CanvasGroup>();
             if (canvasGroup != null)
             {
                 canvasGroup.interactable = true;
                 canvasGroup.blocksRaycasts = true;
             }
-
-            if (debugMode)
-            {
-                Debug.Log($"Created button {i} for {character.characterName} - Interactable: {button.interactable}");
-            }
         }
 
-        // CRITICAL: Force Canvas to rebuild layout
         StartCoroutine(ForceCanvasRebuild());
-
-        if (debugMode)
-        {
-            Debug.Log($"Created {characterButtons.Length} character buttons");
-        }
     }
 
-    // FORCE CANVAS REBUILD TO ENSURE BUTTONS ARE PROPERLY POSITIONED
     IEnumerator ForceCanvasRebuild()
     {
         yield return new WaitForEndOfFrame();
 
-        // Force canvas to rebuild
         Canvas.ForceUpdateCanvases();
 
-        // Check if EventSystem exists
         if (UnityEngine.EventSystems.EventSystem.current == null)
         {
             Debug.LogError("No EventSystem found! UI buttons won't work without EventSystem.");
 
-            // Try to find EventSystem in scene
             var eventSystem = FindObjectOfType<UnityEngine.EventSystems.EventSystem>();
             if (eventSystem == null)
             {
-                Debug.LogError("Creating new EventSystem...");
                 GameObject eventSystemGO = new GameObject("EventSystem");
                 eventSystemGO.AddComponent<UnityEngine.EventSystems.EventSystem>();
                 eventSystemGO.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
             }
-        }
-
-        if (debugMode)
-        {
-            Debug.Log("Canvas rebuild completed");
         }
     }
 
@@ -339,18 +265,8 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     void OnCharacterSelected(int characterIndex)
     {
-        if (debugMode)
-        {
-            Debug.Log($"OnCharacterSelected called with index: {characterIndex}");
-            Debug.Log($"Current state - Locked: {isCharacterLocked}, Transitioning: {isTransitioning}");
-        }
-
         if (isCharacterLocked || isTransitioning)
         {
-            if (debugMode)
-            {
-                Debug.Log("Character selection blocked - already locked or transitioning");
-            }
             return;
         }
 
@@ -363,27 +279,16 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         selectedCharacterIndex = characterIndex;
         CharacterData selectedCharacter = availableCharacters[characterIndex];
 
-        if (debugMode)
-        {
-            Debug.Log($"Character selected: {selectedCharacter.characterName} (Index: {characterIndex})");
-        }
-
-        // Update UI
         UpdateCharacterDisplay(selectedCharacter);
         UpdateCharacterButtons();
 
-        // Update player properties
         Hashtable playerProps = new Hashtable();
         playerProps[PLAYER_CHARACTER_KEY] = characterIndex;
         PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
 
-        // Play sound and effects
         PlaySound(characterSelectSound);
 
-        // Show selected character panel
         SetPanelActive(selectedCharacterPanel, true);
-
-        // Update status immediately
         UpdatePlayerStatus();
     }
 
@@ -398,7 +303,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         if (selectedCharacterDescription != null)
             selectedCharacterDescription.text = character.characterDescription;
 
-        // Update button states
         if (lockInButton != null)
             lockInButton.interactable = true;
 
@@ -415,7 +319,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             Button button = characterButtons[i];
             if (button == null) continue;
 
-            // Highlight selected character
             ColorBlock colors = button.colors;
             if (i == selectedCharacterIndex)
             {
@@ -430,8 +333,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
                 colors.highlightedColor = Color.gray;
             }
             button.colors = colors;
-
-            // Disable button if character is locked
             button.interactable = !isCharacterLocked;
         }
     }
@@ -440,10 +341,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
     {
         if (selectedCharacterIndex == -1 || isCharacterLocked || isTransitioning)
         {
-            if (debugMode)
-            {
-                Debug.Log($"Lock in blocked - Index: {selectedCharacterIndex}, Locked: {isCharacterLocked}, Transitioning: {isTransitioning}");
-            }
             return;
         }
 
@@ -457,11 +354,9 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             return;
         }
 
-        // Hide selected character panel, show selection again
         SetPanelActive(selectedCharacterPanel, false);
         selectedCharacterIndex = -1;
 
-        // Update player properties
         Hashtable playerProps = new Hashtable();
         playerProps[PLAYER_CHARACTER_KEY] = -1;
         PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
@@ -477,13 +372,11 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         isCharacterLocked = true;
         CharacterData lockedCharacter = availableCharacters[selectedCharacterIndex];
 
-        // Update player properties
         Hashtable playerProps = new Hashtable();
         playerProps[PLAYER_CHARACTER_KEY] = selectedCharacterIndex;
         playerProps[PLAYER_LOCKED_KEY] = true;
         PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
 
-        // Update UI
         if (lockInButton != null)
             lockInButton.interactable = false;
 
@@ -491,19 +384,9 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             changeCharacterButton.interactable = false;
 
         UpdateCharacterButtons();
-
-        // Play effects
         PlaySound(lockInSound);
-
-        // Update status
         UpdatePlayerStatus();
 
-        if (debugMode)
-        {
-            Debug.Log($"Locked in character: {lockedCharacter.characterName}");
-        }
-
-        // Check if both players are ready
         CheckBothPlayersReady();
     }
 
@@ -513,13 +396,11 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     void StartSelectionTimer()
     {
-        // CRITICAL FIX: Any client can start the timer, but use synchronized time
         if (timerStarted) return;
 
         selectionStartTime = PhotonNetwork.Time;
         timerStarted = true;
 
-        // Only master client sets room properties
         if (PhotonNetwork.IsMasterClient)
         {
             Hashtable roomProps = new Hashtable();
@@ -527,18 +408,12 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             roomProps[SELECTION_START_TIME_KEY] = selectionStartTime;
             PhotonNetwork.CurrentRoom.SetCustomProperties(roomProps);
         }
-
-        if (debugMode)
-        {
-            Debug.Log($"Selection timer started. Start time: {selectionStartTime}");
-        }
     }
 
     void UpdateTimer()
     {
         if (!timerStarted) return;
 
-        // Calculate time remaining using Photon synchronized time
         double elapsedTime = PhotonNetwork.Time - selectionStartTime;
         timeRemaining = selectionTimeLimit - (float)elapsedTime;
 
@@ -551,7 +426,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
         UpdateTimerDisplay();
 
-        // Play warning sound at 5 seconds
         if (timeRemaining <= 5f && timeRemaining > 4.8f && !isCharacterLocked)
         {
             PlaySound(timerWarningSound);
@@ -566,7 +440,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             int seconds = Mathf.FloorToInt(timeRemaining % 60f);
             timerText.text = $"{minutes:00}:{seconds:00}";
 
-            // Change color based on time remaining
             if (timeRemaining <= 10f)
                 timerText.color = Color.red;
             else if (timeRemaining <= 30f)
@@ -587,12 +460,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
         timerStarted = false;
 
-        if (debugMode)
-        {
-            Debug.Log("Selection timer expired!");
-        }
-
-        // If player hasn't selected anything, auto-select first character
         if (selectedCharacterIndex == -1 && !isCharacterLocked)
         {
             OnCharacterSelected(0);
@@ -600,11 +467,9 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         }
         else if (selectedCharacterIndex != -1 && !isCharacterLocked)
         {
-            // Auto-lock current selection
             LockInCharacter();
         }
 
-        // Check if both players are ready
         StartCoroutine(CheckReadyAfterDelay());
     }
 
@@ -618,7 +483,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
     {
         yield return new WaitForSeconds(1f);
 
-        // Check if both players have locked characters
         bool allPlayersReady = true;
         foreach (Player player in PhotonNetwork.PlayerList)
         {
@@ -635,7 +499,7 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         }
         else
         {
-            OnMatchDodged();
+            HandleOpponentDodged();
         }
     }
 
@@ -657,31 +521,23 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     void UpdatePlayerStatus()
     {
-        // Update local player status
         string localStatus = GetPlayerStatusText(PhotonNetwork.LocalPlayer);
         if (localPlayerStatusText != null)
             localPlayerStatusText.text = $"You: {localStatus}";
 
-        // Update remote player status
         string remoteStatus = "Waiting...";
         foreach (Player player in PhotonNetwork.PlayerListOthers)
         {
             remoteStatus = GetPlayerStatusText(player);
-            break; // Only one other player in 2-player game
+            break;
         }
 
         if (remotePlayerStatusText != null)
             remotePlayerStatusText.text = $"Opponent: {remoteStatus}";
 
-        // Update room info
         if (roomInfoText != null)
         {
             roomInfoText.text = $"Room: {PhotonNetwork.CurrentRoom.Name} | Players: {PhotonNetwork.CurrentRoom.PlayerCount}/2";
-        }
-
-        if (debugMode)
-        {
-            Debug.Log($"Status updated - Local: {localStatus}, Remote: {remoteStatus}");
         }
     }
 
@@ -712,7 +568,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
     {
         bool allPlayersReady = true;
 
-        // Check all players in room
         foreach (Player player in PhotonNetwork.PlayerList)
         {
             if (!IsPlayerReady(player))
@@ -724,11 +579,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
         if (allPlayersReady)
         {
-            if (debugMode)
-            {
-                Debug.Log("Both players ready! Transitioning to gameplay.");
-            }
-
             StoreSelectionDataForGameplay();
             TransitionToGameplay();
         }
@@ -736,7 +586,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     void StoreSelectionDataForGameplay()
     {
-        // Get both players' selected characters
         CharacterData player1Character = null;
         CharacterData player2Character = null;
 
@@ -760,16 +609,11 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
                 }
             }
         }
-
-        if (debugMode)
-        {
-            Debug.Log($"Stored selection data - P1: {player1Character?.characterName}, P2: {player2Character?.characterName}");
-        }
     }
 
     #endregion
 
-    #region Scene Transitions
+    #region Scene Transitions & Dodge Handling
 
     void TransitionToGameplay()
     {
@@ -781,7 +625,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     IEnumerator TransitionToGameplayCoroutine()
     {
-        // Show loading panel
         SetPanelActive(characterSelectionPanel, false);
         SetPanelActive(selectedCharacterPanel, false);
         SetPanelActive(timerPanel, false);
@@ -792,40 +635,31 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
         PlaySound(transitionSound);
 
-        // Wait a moment for effect
         yield return new WaitForSeconds(2f);
 
-        // Load gameplay scene (only master client loads)
         if (PhotonNetwork.IsMasterClient)
         {
-            if (debugMode)
-            {
-                Debug.Log($"Loading gameplay scene: {gameplayScene}");
-            }
             PhotonNetwork.LoadLevel(gameplayScene);
         }
     }
 
-    void OnMatchDodged()
+    void HandleOpponentDodged()
     {
-        if (debugMode)
-        {
-            Debug.Log("Match dodged - not all players selected characters in time");
-        }
-
-        StartCoroutine(HandleMatchDodgeCoroutine());
+        StartCoroutine(HandleOpponentDodgedCoroutine());
     }
 
-    IEnumerator HandleMatchDodgeCoroutine()
+    IEnumerator HandleOpponentDodgedCoroutine()
     {
-        // Show message
+        SetPanelActive(characterSelectionPanel, false);
+        SetPanelActive(selectedCharacterPanel, false);
+        SetPanelActive(timerPanel, false);
         SetPanelActive(loadingPanel, true);
+
         if (loadingText != null)
-            loadingText.text = "Match dodged! Returning to menu...";
+            loadingText.text = "Opponent disconnected. Returning to main menu...";
 
         yield return new WaitForSeconds(3f);
 
-        // Leave room and return to main menu
         PhotonNetwork.LeaveRoom();
     }
 
@@ -850,14 +684,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         if (panel != null)
         {
             panel.SetActive(active);
-            if (debugMode)
-            {
-                Debug.Log($"Panel {panel.name} set to {active}");
-            }
-        }
-        else if (debugMode)
-        {
-            Debug.LogWarning($"Trying to set null panel to {active}");
         }
     }
 
@@ -871,28 +697,16 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     #endregion
 
-    #region MonoBehaviourPunCallbacks Overrides
+    #region MonoBehaviourPunCallbacks Overrides - Dodge Detection
 
     public override void OnPlayerPropertiesUpdate(Player targetPlayer, Hashtable changedProps)
     {
         UpdatePlayerStatus();
-
-        if (debugMode)
-        {
-            Debug.Log($"Player {targetPlayer.NickName} updated properties");
-            foreach (var prop in changedProps)
-            {
-                Debug.Log($"  {prop.Key}: {prop.Value}");
-            }
-        }
-
-        // Check if both players are ready
         CheckBothPlayersReady();
     }
 
     public override void OnRoomPropertiesUpdate(Hashtable propertiesThatChanged)
     {
-        // Handle timer synchronization
         if (propertiesThatChanged.ContainsKey(TIMER_STARTED_KEY) &&
             propertiesThatChanged.ContainsKey(SELECTION_START_TIME_KEY))
         {
@@ -903,161 +717,61 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             {
                 selectionStartTime = startTime;
                 timerStarted = true;
-
-                if (debugMode)
-                {
-                    Debug.Log($"Timer synchronized from room properties. Start time: {startTime}");
-                }
             }
         }
-
-        if (debugMode)
-        {
-            Debug.Log("Room properties updated");
-        }
     }
 
+    // VALORANT-STYLE DODGE DETECTION
     public override void OnPlayerLeftRoom(Player otherPlayer)
     {
-        if (debugMode)
+        // Player has dodged by leaving the room (Alt+F4, network disconnect, etc.)
+        if (!isTransitioning)
         {
-            Debug.Log($"Player {otherPlayer.NickName} left the room");
+            StartCoroutine(HandlePlayerDodgedCoroutine());
         }
-
-        // If someone leaves during character selection, return to main menu
-        StartCoroutine(HandlePlayerLeftCoroutine());
     }
 
-    IEnumerator HandlePlayerLeftCoroutine()
+    IEnumerator HandlePlayerDodgedCoroutine()
     {
-        SetPanelActive(loadingPanel, true);
-        if (loadingText != null)
-            loadingText.text = "Player left the match. Returning to menu...";
+        isTransitioning = true;
 
-        yield return new WaitForSeconds(2f);
-        ReturnToMainMenu();
+        SetPanelActive(characterSelectionPanel, false);
+        SetPanelActive(selectedCharacterPanel, false);
+        SetPanelActive(timerPanel, false);
+        SetPanelActive(loadingPanel, true);
+
+        if (loadingText != null)
+            loadingText.text = "Opponent disconnected. Returning to main menu...";
+
+        yield return new WaitForSeconds(3f);
+
+        PhotonNetwork.LeaveRoom();
     }
 
     public override void OnLeftRoom()
     {
-        if (debugMode)
-        {
-            Debug.Log("Left room, returning to main menu");
-        }
         SceneManager.LoadScene("MainMenu");
     }
 
     public override void OnPlayerEnteredRoom(Player newPlayer)
     {
         UpdatePlayerStatus();
-
-        if (debugMode)
-        {
-            Debug.Log($"Player {newPlayer.NickName} entered room");
-        }
     }
 
     public override void OnMasterClientSwitched(Player newMasterClient)
     {
-        if (debugMode)
-        {
-            Debug.Log($"Master client switched to {newMasterClient.NickName}");
-        }
+        // Handle master client switching if needed
     }
 
-    #endregion
-
-    #region Debug
-
-    void HandleDebugInput()
+    // Handle network disconnection from Photon servers
+    public override void OnDisconnected(DisconnectCause cause)
     {
-        if (Input.GetKeyDown(KeyCode.Alpha1) && availableCharacters.Length > 0)
+        if (SceneManager.GetActiveScene().name != "MainMenu")
         {
-            OnCharacterSelected(0);
-        }
-        else if (Input.GetKeyDown(KeyCode.Alpha2) && availableCharacters.Length > 1)
-        {
-            OnCharacterSelected(1);
-        }
-        else if (Input.GetKeyDown(KeyCode.Alpha3) && availableCharacters.Length > 2)
-        {
-            OnCharacterSelected(2);
-        }
-        else if (Input.GetKeyDown(KeyCode.L))
-        {
-            OnLockInButtonClicked();
-        }
-        else if (Input.GetKeyDown(KeyCode.C))
-        {
-            OnChangeCharacterButtonClicked();
-        }
-        else if (Input.GetKeyDown(KeyCode.Escape))
-        {
-            ReturnToMainMenu();
-        }
-        else if (Input.GetKeyDown(KeyCode.T))
-        {
-            // Force start timer
-            StartSelectionTimer();
+            SceneManager.LoadScene("MainMenu");
         }
     }
 
-    void OnGUI()
-    {
-        if (!debugMode) return;
-
-        GUILayout.BeginArea(new Rect(10, 10, 450, 500));
-        GUILayout.BeginVertical("box");
-
-        GUILayout.Label("=== CHARACTER SELECTION DEBUG ===");
-        GUILayout.Label($"In Room: {PhotonNetwork.InRoom}");
-        GUILayout.Label($"Room: {PhotonNetwork.CurrentRoom?.Name ?? "None"}");
-        GUILayout.Label($"Players: {PhotonNetwork.CurrentRoom?.PlayerCount ?? 0}/2");
-        GUILayout.Label($"Master Client: {PhotonNetwork.IsMasterClient}");
-
-        GUILayout.Space(5);
-        GUILayout.Label($"Available Characters: {(availableCharacters != null ? availableCharacters.Length : 0)}");
-        GUILayout.Label($"Character Buttons: {(characterButtons != null ? characterButtons.Length : 0)}");
-
-        if (characterButtons != null)
-        {
-            for (int i = 0; i < characterButtons.Length; i++)
-            {
-                if (characterButtons[i] != null)
-                {
-                    GUILayout.Label($"  Button {i}: Interactable={characterButtons[i].interactable}, Active={characterButtons[i].gameObject.activeInHierarchy}");
-                }
-            }
-        }
-
-        GUILayout.Label($"Selected Character: {(selectedCharacterIndex >= 0 && availableCharacters != null && selectedCharacterIndex < availableCharacters.Length ? availableCharacters[selectedCharacterIndex].characterName : "None")}");
-        GUILayout.Label($"Character Locked: {isCharacterLocked}");
-        GUILayout.Label($"Timer Started: {timerStarted}");
-        GUILayout.Label($"Time Remaining: {timeRemaining:F1}s");
-        GUILayout.Label($"Is Transitioning: {isTransitioning}");
-
-        GUILayout.Space(5);
-        GUILayout.Label("Panel States:");
-        GUILayout.Label($"  Character Selection: {(characterSelectionPanel != null ? characterSelectionPanel.activeSelf.ToString() : "NULL")}");
-        GUILayout.Label($"  Selected Character: {(selectedCharacterPanel != null ? selectedCharacterPanel.activeSelf.ToString() : "NULL")}");
-        GUILayout.Label($"  Timer Panel: {(timerPanel != null ? timerPanel.activeSelf.ToString() : "NULL")}");
-        GUILayout.Label($"  Player Status: {(playerStatusPanel != null ? playerStatusPanel.activeSelf.ToString() : "NULL")}");
-
-        // EventSystem check
-        var eventSystem = UnityEngine.EventSystems.EventSystem.current;
-        GUILayout.Label($"EventSystem: {(eventSystem != null ? "Found" : "MISSING!")}");
-
-        GUILayout.Space(10);
-        GUILayout.Label("Debug Controls:");
-        GUILayout.Label("1/2/3 - Select Characters");
-        GUILayout.Label("L - Lock In Character");
-        GUILayout.Label("C - Change Character");
-        GUILayout.Label("T - Force Start Timer");
-        GUILayout.Label("ESC - Return to Menu");
-
-        GUILayout.EndVertical();
-        GUILayout.EndArea();
-    }
 
     #endregion
 }

@@ -48,6 +48,9 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     public enum MatchState { Initializing, PreFight, Fighting, RoundEnd, MatchEnd }
     private MatchState currentState = MatchState.Initializing;
 
+    [Header("State Management")]
+    private bool isReturningToMenu = false;
+
     // Match data (synchronized)
     private int currentRound = 0;
     private int player1RoundsWon = 0;
@@ -103,17 +106,13 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
     void Update()
     {
-        // FIXED: Sync timer AND round info to ALL clients, not just master
+        // FIXED: Update timer for ALL clients, not just master
         if (roundActive && matchUI != null)
         {
-            // Calculate remaining time using network time
-            float remainingTime = 0f;
-            if (roundEndTime > 0.0)
-            {
-                remainingTime = Mathf.Max(0f, (float)(roundEndTime - PhotonNetwork.Time));
-            }
+            // Calculate remaining time using network time for ALL clients
+            float remainingTime = GetRemainingTime();
 
-            // Update UI on ALL clients (both master and remote)
+            // Update UI on ALL clients
             matchUI.UpdateTimer(remainingTime);
             matchUI.UpdateRoundInfo(currentRound, player1RoundsWon, player2RoundsWon);
 
@@ -124,11 +123,8 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             }
         }
 
-        // Sync match state from room properties for non-master clients
-        if (!PhotonNetwork.IsMasterClient)
-        {
-            SyncFromRoomProperties();
-        }
+        // ALL clients sync match state from room properties
+        SyncFromRoomProperties();
 
         // Debug controls
         if (debugMode)
@@ -629,19 +625,49 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         currentState = MatchState.Fighting;
         roundActive = true;
 
-        // FIXED: Sync timer start for all clients
+        // FIXED: Master client sets timer, others sync from room properties
         if (PhotonNetwork.IsMasterClient)
         {
             roundStartTime = PhotonNetwork.Time;
             roundEndTime = roundStartTime + roundDuration;
             UpdateRoomProperties();
+
+            // Immediately sync to all clients
+            photonView.RPC("SyncTimerValues", RpcTarget.Others, roundStartTime, roundEndTime);
         }
 
         // Enable player input
         EnablePlayerInput(true);
 
-        // Update UI immediately
-        SyncUIToAllClients();
+        // Update UI immediately for all clients
+        if (matchUI != null)
+        {
+            matchUI.UpdateRoundInfo(currentRound, player1RoundsWon, player2RoundsWon);
+            if (roundActive)
+            {
+                float remainingTime = GetRemainingTime();
+                matchUI.UpdateTimer(remainingTime);
+            }
+        }
+    }
+
+    [PunRPC]
+    void SyncTimerValues(double startTime, double endTime)
+    {
+        roundStartTime = startTime;
+        roundEndTime = endTime;
+
+        // Immediately update UI
+        if (matchUI != null && roundActive)
+        {
+            float remainingTime = GetRemainingTime();
+            matchUI.UpdateTimer(remainingTime);
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"[TIMER SYNC] Received timer sync: Start={startTime}, End={endTime}, Remaining={GetRemainingTime()}");
+        }
     }
 
     void EndRoundByTimeOut()
@@ -734,7 +760,8 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     {
         currentState = MatchState.MatchEnd;
 
-        if (PhotonNetwork.IsMasterClient)
+        // FIXED: Only update room properties if we're still connected and able to
+        if (PhotonNetwork.IsMasterClient && PhotonNetwork.IsConnected && PhotonNetwork.InRoom)
         {
             UpdateRoomProperties();
         }
@@ -753,10 +780,263 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         }
 
         PlaySound(matchWinSound);
-        yield return new WaitForSeconds(matchEndDelay);
+        yield return new WaitForSeconds(2f); // Show result briefly
 
-        ReturnToCharacterSelection();
+        // Enable the "Return to Menu" button
+        if (matchUI != null)
+        {
+            matchUI.ShowReturnToMenuButton(true);
+        }
     }
+
+    public void OnReturnToMenuButtonPressed()
+    {
+        // This will be called by the UI button
+        ReturnToMainMenu();
+    }
+
+    void ReturnToMainMenu()
+    {
+        if (debugMode)
+            Debug.Log($"[MATCH MANAGER] ReturnToMainMenu called. InRoom: {PhotonNetwork.InRoom}, State: {PhotonNetwork.NetworkClientState}");
+
+        // CRITICAL: Set this flag FIRST to stop all room property updates
+        isReturningToMenu = true;
+
+        // Stop any ongoing coroutines that might call UpdateRoomProperties
+        StopAllCoroutines();
+
+        if (PhotonNetwork.InRoom && PhotonNetwork.NetworkClientState != Photon.Realtime.ClientState.Leaving)
+        {
+            // Disable input to prevent any game actions during transition
+            EnablePlayerInput(false);
+            PhotonNetwork.LeaveRoom();
+        }
+        else
+        {
+            SceneManager.LoadScene("MainMenu");
+        }
+    }
+
+    // When the room is left, go straight to Main Menu
+    public override void OnLeftRoom()
+    {
+        Debug.Log("[MATCH MANAGER] Left room, loading main menu scene");
+
+        // Load main menu scene when leaving room
+        SceneManager.LoadScene(mainMenuScene);
+
+    }
+
+    public override void OnPlayerLeftRoom(Player otherPlayer)
+    {
+        if (debugMode)
+        {
+            Debug.Log($"[MATCH MANAGER] Player {otherPlayer.NickName} left the room. Match state: {currentState}");
+        }
+
+        // Handle player leaving during different match states
+        switch (currentState)
+        {
+            case MatchState.Initializing:
+            case MatchState.PreFight:
+                HandlePlayerLeavePreMatch(otherPlayer);
+                break;
+
+            case MatchState.Fighting:
+                HandlePlayerLeaveDuringMatch(otherPlayer);
+                break;
+
+            case MatchState.RoundEnd:
+                HandlePlayerLeaveRoundEnd(otherPlayer);
+                break;
+
+            case MatchState.MatchEnd:
+                // Match already ended, no special handling needed
+                break;
+
+            default:
+                HandlePlayerLeaveDefault(otherPlayer);
+                break;
+        }
+    }
+
+    // NEW METHOD: Handle player leaving before match starts
+    void HandlePlayerLeavePreMatch(Player otherPlayer)
+    {
+        if (debugMode)
+            Debug.Log("[MATCH MANAGER] Player left before match started, returning to menu");
+
+        // If match hasn't started yet, just return to menu
+        if (matchUI != null)
+        {
+            matchUI.ShowMessage($"{otherPlayer.NickName} left the match", 3f);
+        }
+
+        StartCoroutine(DelayedReturnToMenu(3f));
+    }
+
+    // NEW METHOD: Handle player leaving during active match (MAIN FEATURE)
+    void HandlePlayerLeaveDuringMatch(Player otherPlayer)
+    {
+        if (debugMode)
+            Debug.Log($"[MATCH MANAGER] Player {otherPlayer.NickName} left during active match");
+
+        // Determine winner (the remaining player)
+        int winnerActorNumber = GetRemainingPlayerActorNumber();
+
+        if (winnerActorNumber == -1)
+        {
+            Debug.LogError("[MATCH MANAGER] Could not determine remaining player!");
+            return;
+        }
+
+        // End match immediately with forfeit win
+        EndMatchByForfeit(winnerActorNumber, otherPlayer);
+    }
+
+    // NEW METHOD: Handle player leaving during round end
+    void HandlePlayerLeaveRoundEnd(Player otherPlayer)
+    {
+        if (debugMode)
+            Debug.Log($"[MATCH MANAGER] Player {otherPlayer.NickName} left during round end");
+
+        // If we're between rounds, treat as forfeit
+        int winnerActorNumber = GetRemainingPlayerActorNumber();
+
+        if (winnerActorNumber != -1)
+        {
+            EndMatchByForfeit(winnerActorNumber, otherPlayer);
+        }
+    }
+
+    // NEW METHOD: Default handling for other states
+    void HandlePlayerLeaveDefault(Player otherPlayer)
+    {
+        if (debugMode)
+            Debug.Log($"[MATCH MANAGER] Player {otherPlayer.NickName} left in state {currentState}");
+
+        // Return to main menu with message
+        if (matchUI != null)
+        {
+            matchUI.ShowMessage($"{otherPlayer.NickName} left the match", 3f);
+        }
+
+        StartCoroutine(DelayedReturnToMenu(3f));
+    }
+
+    // NEW METHOD: Get the actor number of the remaining player
+    int GetRemainingPlayerActorNumber()
+    {
+        // Check who's still in the room
+        foreach (Player player in PhotonNetwork.PlayerList)
+        {
+            // Return the first (and should be only) remaining player
+            return player.ActorNumber;
+        }
+
+        // If no players found, check our tracked network players
+        foreach (var kvp in networkPlayers)
+        {
+            int actorNumber = kvp.Key;
+            var playerComponent = kvp.Value;
+
+            // Check if this player still exists in PhotonNetwork
+            Player photonPlayer = PhotonNetwork.CurrentRoom.GetPlayer(actorNumber);
+            if (photonPlayer != null)
+            {
+                return actorNumber;
+            }
+        }
+
+        return -1; // No remaining player found
+    }
+
+    // NEW METHOD: End match by forfeit
+    void EndMatchByForfeit(int winnerActorNumber, Player forfeitPlayer)
+    {
+        if (debugMode)
+            Debug.Log($"[MATCH MANAGER] Ending match by forfeit. Winner: Player {winnerActorNumber}");
+
+        // Stop any active round
+        roundActive = false;
+        currentState = MatchState.MatchEnd;
+
+        // Set the winner
+        matchWinner = winnerActorNumber;
+
+        // Update round scores to reflect forfeit win
+        // Give winner enough rounds to win the match
+        if (winnerActorNumber == 1)
+        {
+            player1RoundsWon = roundsToWin; // Instant match win
+        }
+        else if (winnerActorNumber == 2)
+        {
+            player2RoundsWon = roundsToWin; // Instant match win
+        }
+
+        // Update room properties
+        if (PhotonNetwork.IsMasterClient)
+            UpdateRoomProperties();
+
+        // Disable player input
+        EnablePlayerInput(false);
+
+        // Show forfeit message and results
+        StartCoroutine(ShowForfeitResult(winnerActorNumber, forfeitPlayer));
+    }
+
+    // NEW COROUTINE: Show forfeit result
+    IEnumerator ShowForfeitResult(int winnerActorNumber, Player forfeitPlayer)
+    {
+        // Show forfeit message first
+        if (matchUI != null)
+        {
+            string forfeitMessage = $"{forfeitPlayer.NickName} forfeited the match!";
+            matchUI.ShowMessage(forfeitMessage, 3f);
+        }
+
+        PlaySound(matchWinSound);
+        yield return new WaitForSeconds(3f);
+
+        // Now show match results
+        if (matchUI != null)
+        {
+            CharacterData winnerCharacter = null;
+            if (winnerActorNumber == 1 && networkPlayers.ContainsKey(1))
+                winnerCharacter = networkPlayers[1].GetCharacterData();
+            else if (winnerActorNumber == 2 && networkPlayers.ContainsKey(2))
+                winnerCharacter = networkPlayers[2].GetCharacterData();
+
+            if (winnerCharacter != null)
+            {
+                // Show special forfeit victory message
+                matchUI.ShowForfeitVictory(winnerActorNumber, winnerCharacter, forfeitPlayer.NickName);
+            }
+            else
+            {
+                // Fallback to regular result display
+                matchUI.ShowMatchResult(winnerActorNumber, winnerCharacter);
+            }
+        }
+
+        yield return new WaitForSeconds(2f);
+
+        // Enable return to menu button
+        if (matchUI != null)
+        {
+            matchUI.ShowReturnToMenuButton(true);
+        }
+    }
+
+    // NEW COROUTINE: Delayed return to menu
+    IEnumerator DelayedReturnToMenu(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        ReturnToMainMenu();
+    }
+
 
     // ══════════════════════════════════════════════════════════
     // FIXED: UI SYNCHRONIZATION
@@ -922,27 +1202,49 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
     void UpdateRoomProperties()
     {
+        // Enhanced checks to prevent SetProperties errors during disconnection
         if (!PhotonNetwork.IsMasterClient) return;
+        if (!PhotonNetwork.IsConnected) return;
+        if (!PhotonNetwork.InRoom) return;
+        if (PhotonNetwork.NetworkClientState == Photon.Realtime.ClientState.Leaving) return;
+        if (PhotonNetwork.NetworkClientState == Photon.Realtime.ClientState.Disconnecting) return;
+        if (isReturningToMenu) return; // Use your existing flag
 
-        Hashtable props = new Hashtable
+        // Additional safety check for room state
+        if (PhotonNetwork.CurrentRoom == null) return;
+
+        try
         {
-            [ROOM_MATCH_STATE] = (int)currentState,
-            [ROOM_CURRENT_ROUND] = currentRound,
-            [ROOM_P1_ROUNDS] = player1RoundsWon,
-            [ROOM_P2_ROUNDS] = player2RoundsWon,
-            [ROOM_ROUND_START_TIME] = roundStartTime,
-            [ROOM_ROUND_END_TIME] = roundEndTime,
-            [ROOM_ROUND_ACTIVE] = roundActive
-        };
-        PhotonNetwork.CurrentRoom.SetCustomProperties(props);
+            Hashtable props = new Hashtable
+            {
+                [ROOM_MATCH_STATE] = (int)currentState,
+                [ROOM_CURRENT_ROUND] = currentRound,
+                [ROOM_P1_ROUNDS] = player1RoundsWon,
+                [ROOM_P2_ROUNDS] = player2RoundsWon,
+                [ROOM_ROUND_START_TIME] = roundStartTime,
+                [ROOM_ROUND_END_TIME] = roundEndTime,
+                [ROOM_ROUND_ACTIVE] = roundActive
+            };
+
+            PhotonNetwork.CurrentRoom.SetCustomProperties(props);
+        }
+        catch (System.Exception ex)
+        {
+            if (debugMode)
+                Debug.LogWarning($"[ROOM PROPS] Failed to update room properties: {ex.Message}");
+        }
     }
 
     void SyncFromRoomProperties()
     {
-        var room = PhotonNetwork.CurrentRoom;
-        if (room?.CustomProperties == null) return;
+        // Simple null check - if any of these are null, just return
+        if (PhotonNetwork.CurrentRoom?.CustomProperties == null) return;
 
+        var room = PhotonNetwork.CurrentRoom;
+
+        // Rest of your existing code stays exactly the same...
         bool changed = false;
+        bool timerChanged = false;
 
         if (room.CustomProperties.ContainsKey(ROOM_MATCH_STATE))
         {
@@ -950,9 +1252,16 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             int newRound = (int)room.CustomProperties[ROOM_CURRENT_ROUND];
             int newP1Rounds = (int)room.CustomProperties[ROOM_P1_ROUNDS];
             int newP2Rounds = (int)room.CustomProperties[ROOM_P2_ROUNDS];
-            double newRoundStartTime = (double)room.CustomProperties[ROOM_ROUND_START_TIME];
-            double newRoundEndTime = (double)room.CustomProperties[ROOM_ROUND_END_TIME];
             bool newRoundActive = (bool)room.CustomProperties[ROOM_ROUND_ACTIVE];
+
+            // FIXED: Also sync timer values
+            double newRoundStartTime = 0.0;
+            double newRoundEndTime = 0.0;
+
+            if (room.CustomProperties.ContainsKey(ROOM_ROUND_START_TIME))
+                newRoundStartTime = (double)room.CustomProperties[ROOM_ROUND_START_TIME];
+            if (room.CustomProperties.ContainsKey(ROOM_ROUND_END_TIME))
+                newRoundEndTime = (double)room.CustomProperties[ROOM_ROUND_END_TIME];
 
             // Check if anything changed
             if (currentState != newState || currentRound != newRound ||
@@ -963,22 +1272,23 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
                 currentRound = newRound;
                 player1RoundsWon = newP1Rounds;
                 player2RoundsWon = newP2Rounds;
-                roundStartTime = newRoundStartTime;
-                roundEndTime = newRoundEndTime;
                 roundActive = newRoundActive;
                 changed = true;
             }
-        }
 
-        // Update UI if anything changed
-        if (changed && matchUI != null)
-        {
-            matchUI.UpdateRoundInfo(currentRound, player1RoundsWon, player2RoundsWon);
-
-            if (roundActive && roundEndTime > 0.0)
+            // Check if timer changed
+            if (System.Math.Abs(roundStartTime - newRoundStartTime) > 0.1 ||
+                System.Math.Abs(roundEndTime - newRoundEndTime) > 0.1)
             {
-                float remainingTime = Mathf.Max(0f, (float)(roundEndTime - PhotonNetwork.Time));
-                matchUI.UpdateTimer(remainingTime);
+                roundStartTime = newRoundStartTime;
+                roundEndTime = newRoundEndTime;
+                timerChanged = true;
+            }
+
+            // Update UI if anything changed
+            if (changed || timerChanged)
+            {
+                SyncUIToAllClients();
             }
         }
     }
@@ -1006,8 +1316,8 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         }
     }
 
-    void ReturnToCharacterSelection() => PhotonNetwork.LeaveRoom();
-    public override void OnLeftRoom() => SceneManager.LoadScene(characterSelectionScene);
+    /*void ReturnToCharacterSelection() => PhotonNetwork.LeaveRoom();
+    public override void OnLeftRoom() => SceneManager.LoadScene(characterSelectionScene);*/
 
     void PlaySound(AudioClip clip)
     {
@@ -1043,7 +1353,10 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     public int GetCurrentRound() => currentRound;
     public float GetRemainingTime()
     {
-        if (!roundActive || roundEndTime <= 0.0) return 0f;
+        if (!roundActive || roundEndTime <= 0.0)
+            return 0f;
+
+        // Use PhotonNetwork.Time for synchronized timing across all clients
         double timeRemaining = roundEndTime - PhotonNetwork.Time;
         return Mathf.Max(0f, (float)timeRemaining);
     }

@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 416c2fc259394f3459ecf4c65ed03941, type: 3}
   m_Name: Nova_Data
   m_EditorClassIdentifier: 
-  characterName: Lightning
+  characterName: Nova
   characterDescription: Fast and evasive
   characterIcon: {fileID: -1254451046, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
   characterPrefab: {fileID: 45927926235480509, guid: 1992dc87c81c1c545b92d9058f393f3f,
