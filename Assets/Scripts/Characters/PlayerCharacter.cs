@@ -45,7 +45,6 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     // Match integration
     private MatchManager currentMatch;
-    private RoundManager currentRound;
 
     // Ability system - unified
     private float[] abilityCharges = new float[3]; // Ultimate, Trick, Treat
@@ -82,7 +81,6 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     void Start()
     {
         currentMatch = FindObjectOfType<MatchManager>();
-        currentRound = FindObjectOfType<RoundManager>();
         SetupNetworkBehavior();
 
         // FIXED: Wait for character data from network if not local player
