@@ -2373,7 +2373,7 @@ MonoBehaviour:
   connectButton: {fileID: 1579940830}
   quickMatchButton: {fileID: 161214083}
   createRoomButton: {fileID: 1134039012}
-  joinRoomButton: {fileID: 0}
+  joinRoomButton: {fileID: 126629001}
   backFromCustomRoomButton: {fileID: 352102926}
   quickMatchButtonText: {fileID: 720574873}
   statusText: {fileID: 382552712}

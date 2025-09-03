@@ -27,7 +27,6 @@ public class CharacterSelectionButton : MonoBehaviour
 
     // Component references
     private Button button;
-    private CharacterSelectionManager selectionManager;
 
     // Character data
     private CharacterData character;
@@ -54,11 +53,10 @@ public class CharacterSelectionButton : MonoBehaviour
     /// <summary>
     /// Initialize the button with character data
     /// </summary>
-    public void Initialize(CharacterData characterData, int index, CharacterSelectionManager manager)
+    public void Initialize(CharacterData characterData, int index)
     {
         character = characterData;
         characterIndex = index;
-        selectionManager = manager;
 
         SetupVisuals();
         SetupButton();
@@ -96,7 +94,6 @@ public class CharacterSelectionButton : MonoBehaviour
         if (button != null)
         {
             button.onClick.RemoveAllListeners();
-            button.onClick.AddListener(OnButtonClicked);
         }
     }
 
@@ -173,14 +170,7 @@ public class CharacterSelectionButton : MonoBehaviour
         }
     }
 
-    void OnButtonClicked()
-    {
-        if (selectionManager != null)
-        {
-            // Let the selection manager handle the selection logic
-            selectionManager.OnCharacterSelected(characterIndex);
-        }
-    }
+   
 
     System.Collections.IEnumerator AnimateHighlight()
     {

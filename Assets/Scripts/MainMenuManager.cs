@@ -122,7 +122,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         PhotonNetwork.NickName = nickname;
         PlayerPrefs.SetString("PlayerNickname", nickname);
 
-        connectionPanel.SetActive(false);
+        //connectionPanel.SetActive(false);
         loadingIndicator.SetActive(true);
         UpdateStatus("Connecting...");
 
@@ -182,20 +182,29 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
 
     IEnumerator MatchmakingTimer()
     {
+        int totalSeconds = 0; // reset at start
+
         while (isMatchmaking)
         {
-            matchmakingTime += Time.deltaTime;
+            int minutes = totalSeconds / 60;
+            int seconds = totalSeconds % 60;
 
-            int minutes = Mathf.FloorToInt(matchmakingTime / 60f);
-            int seconds = Mathf.FloorToInt(matchmakingTime % 60f);
+            // Update button text
             quickMatchButtonText.text = $"Cancel ({minutes:00}:{seconds:00})";
 
-            int dots = Mathf.FloorToInt(matchmakingTime * 2f) % 4;
+            // Animate dots for "Finding Match..."
+            int dots = totalSeconds % 4;
             UpdateStatus($"Finding Match{new string('.', dots)}");
 
-            yield return new WaitForSeconds(0.1f);
+            // Wait exactly 1 second
+            yield return new WaitForSeconds(1f);
+
+            // Increase time after each second
+            totalSeconds++;
         }
     }
+
+
 
     void ResetQuickMatchButton()
     {
@@ -381,7 +390,11 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         CancelMatchmaking();
         ResetCustomRoomStates();
 
-        customRoomPanel.SetActive(false);
+        if (customRoomPanel != null && customRoomPanel.gameObject != null)
+        {
+            customRoomPanel.SetActive(false);
+        }
+
         mainMenuPanel.SetActive(true);
         UpdateStatus($"Welcome back, {PhotonNetwork.NickName}!");
 
@@ -394,13 +407,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     {
         if (PhotonNetwork.CurrentRoom.PlayerCount >= PhotonNetwork.CurrentRoom.MaxPlayers)
         {
-            isMatchmaking = false;
-            if (matchmakingCoroutine != null)
-            {
-                StopCoroutine(matchmakingCoroutine);
-                matchmakingCoroutine = null;
-            }
-
+            // FIXED: Don't stop matchmaking timer yet - let it continue until countdown starts
             StartCoroutine(ShowMatchFoundAndStartCountdown());
         }
         else
@@ -415,6 +422,14 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         UpdateStatus("Match Found!");
 
         yield return new WaitForSeconds(1f);
+
+        // FIXED: Stop matchmaking timer when countdown starts
+        isMatchmaking = false;
+        if (matchmakingCoroutine != null)
+        {
+            StopCoroutine(matchmakingCoroutine);
+            matchmakingCoroutine = null;
+        }
 
         // Start countdown from 3 to 1
         if (countdownCoroutine != null)

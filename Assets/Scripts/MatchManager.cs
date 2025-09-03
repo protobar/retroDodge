@@ -82,7 +82,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     private const string PLAYERS_SPAWNED_KEY = "PlayersSpawned";
     private const string PLAYER_CHARACTER_KEY = "SelectedCharacter";
 
-    void Awake()
+        void Awake()
     {
         // Setup audio
         if (audioSource == null)
@@ -242,7 +242,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
         // Set spawn flag to false initially
         Hashtable roomProps = new Hashtable { [PLAYERS_SPAWNED_KEY] = false };
-        PhotonNetwork.CurrentRoom.SetCustomProperties(roomProps);
+        SafeSetRoomProperties(roomProps);
         yield return new WaitForSeconds(0.2f);
 
         // Spawn master client first
@@ -255,7 +255,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
         // Mark spawning complete
         roomProps[PLAYERS_SPAWNED_KEY] = true;
-        PhotonNetwork.CurrentRoom.SetCustomProperties(roomProps);
+        SafeSetRoomProperties(roomProps);
 
         playersSpawned = true;
         Debug.Log("[MASTER] All players spawned successfully");
@@ -333,7 +333,11 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             ["CharacterColor_G"] = character.characterColor.g,
             ["CharacterColor_B"] = character.characterColor.b
         };
-        PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
+        // FIXED: Safe player property update with guards
+        if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom && !isReturningToMenu)
+        {
+            PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
+        }
 
         Debug.Log($"[DATA STORED] Character data stored for {character.characterName}");
     }
@@ -795,37 +799,59 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         ReturnToMainMenu();
     }
 
+    /// <summary>
+    /// REFACTORED: Called by MatchUI when return to menu is requested
+    /// </summary>
+    public void OnReturnToMenuRequested()
+    {
+        ReturnToMainMenu();
+    }
+
     void ReturnToMainMenu()
     {
         if (debugMode)
             Debug.Log($"[MATCH MANAGER] ReturnToMainMenu called. InRoom: {PhotonNetwork.InRoom}, State: {PhotonNetwork.NetworkClientState}");
 
-        // CRITICAL: Set this flag FIRST to stop all room property updates
         isReturningToMenu = true;
+        EnablePlayerInput(false);
 
-        // Stop any ongoing coroutines that might call UpdateRoomProperties
-        StopAllCoroutines();
+        StartCoroutine(SafeReturnToMainMenu());
+    }
 
-        if (PhotonNetwork.InRoom && PhotonNetwork.NetworkClientState != Photon.Realtime.ClientState.Leaving)
+    /// <summary>
+    /// FIXED: Safe coroutine to handle main menu return without SetProperties errors
+    /// </summary>
+    IEnumerator SafeReturnToMainMenu()
+    {
+        yield return null;
+
+        if (PhotonNetwork.InRoom &&
+            PhotonNetwork.NetworkClientState != Photon.Realtime.ClientState.Leaving &&
+            PhotonNetwork.NetworkClientState != Photon.Realtime.ClientState.Disconnecting)
         {
-            // Disable input to prevent any game actions during transition
-            EnablePlayerInput(false);
+            if (debugMode)
+                Debug.Log("[MATCH MANAGER] Leaving room safely...");
+
             PhotonNetwork.LeaveRoom();
         }
         else
         {
-            SceneManager.LoadScene("MainMenu");
+            if (debugMode)
+                Debug.Log("[MATCH MANAGER] Already leaving or disconnected");
         }
     }
 
     // When the room is left, go straight to Main Menu
     public override void OnLeftRoom()
     {
-        Debug.Log("[MATCH MANAGER] Left room, loading main menu scene");
+        if (debugMode)
+            Debug.Log("[MATCH MANAGER] Left room, loading main menu scene");
 
-        // Load main menu scene when leaving room
-        SceneManager.LoadScene(mainMenuScene);
-
+        if (isReturningToMenu &&
+            SceneManager.GetActiveScene().name != mainMenuScene)
+        {
+            SceneManager.LoadScene(mainMenuScene);
+        }
     }
 
     public override void OnPlayerLeftRoom(Player otherPlayer)
@@ -1200,43 +1226,62 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
     Vector3 GetSpawnPosition() => GetSpawnPositionForActor(PhotonNetwork.LocalPlayer.ActorNumber);
 
-    void UpdateRoomProperties()
+    /// <summary>
+    /// FIXED: Safe method to set room properties with comprehensive checks
+    /// </summary>
+    bool SafeSetRoomProperties(Hashtable properties)
     {
         // Enhanced checks to prevent SetProperties errors during disconnection
-        if (!PhotonNetwork.IsMasterClient) return;
-        if (!PhotonNetwork.IsConnected) return;
-        if (!PhotonNetwork.InRoom) return;
-        if (PhotonNetwork.NetworkClientState == Photon.Realtime.ClientState.Leaving) return;
-        if (PhotonNetwork.NetworkClientState == Photon.Realtime.ClientState.Disconnecting) return;
-        if (isReturningToMenu) return; // Use your existing flag
+        if (!PhotonNetwork.IsMasterClient) return false;
+        if (!PhotonNetwork.IsConnected) return false;
+        if (!PhotonNetwork.InRoom) return false;
+        if (PhotonNetwork.NetworkClientState == Photon.Realtime.ClientState.Leaving) return false;
+        if (PhotonNetwork.NetworkClientState == Photon.Realtime.ClientState.Disconnecting) return false;
+        if (isReturningToMenu) return false; // Use your existing flag
 
         // Additional safety check for room state
-        if (PhotonNetwork.CurrentRoom == null) return;
+        if (PhotonNetwork.CurrentRoom == null) return false;
+
+        // Check if we're in the correct scene (prevent updates during scene transitions)
+        if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != "GameplayArena") return false;
 
         try
         {
-            Hashtable props = new Hashtable
-            {
-                [ROOM_MATCH_STATE] = (int)currentState,
-                [ROOM_CURRENT_ROUND] = currentRound,
-                [ROOM_P1_ROUNDS] = player1RoundsWon,
-                [ROOM_P2_ROUNDS] = player2RoundsWon,
-                [ROOM_ROUND_START_TIME] = roundStartTime,
-                [ROOM_ROUND_END_TIME] = roundEndTime,
-                [ROOM_ROUND_ACTIVE] = roundActive
-            };
-
-            PhotonNetwork.CurrentRoom.SetCustomProperties(props);
+            PhotonNetwork.CurrentRoom.SetCustomProperties(properties);
+            return true;
         }
         catch (System.Exception ex)
         {
             if (debugMode)
-                Debug.LogWarning($"[ROOM PROPS] Failed to update room properties: {ex.Message}");
+                Debug.LogWarning($"[ROOM PROPS] Failed to set room properties: {ex.Message}");
+            return false;
         }
+    }
+
+    void UpdateRoomProperties()
+    {
+        // FIXED: Don't update room properties if we're leaving
+        if (isReturningToMenu) return;
+        
+        Hashtable props = new Hashtable
+        {
+            [ROOM_MATCH_STATE] = (int)currentState,
+            [ROOM_CURRENT_ROUND] = currentRound,
+            [ROOM_P1_ROUNDS] = player1RoundsWon,
+            [ROOM_P2_ROUNDS] = player2RoundsWon,
+            [ROOM_ROUND_START_TIME] = roundStartTime,
+            [ROOM_ROUND_END_TIME] = roundEndTime,
+            [ROOM_ROUND_ACTIVE] = roundActive
+        };
+
+        SafeSetRoomProperties(props);
     }
 
     void SyncFromRoomProperties()
     {
+        // FIXED: Don't sync room properties if we're leaving
+        if (isReturningToMenu) return;
+        
         // Simple null check - if any of these are null, just return
         if (PhotonNetwork.CurrentRoom?.CustomProperties == null) return;
 

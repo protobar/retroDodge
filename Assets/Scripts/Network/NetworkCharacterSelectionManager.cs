@@ -48,6 +48,9 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
     [SerializeField] private AudioClip characterSelectSound;
     [SerializeField] private AudioClip lockInSound;
     [SerializeField] private AudioClip timerWarningSound;
+    
+    // FIXED: Flag to prevent room property updates when leaving
+    private bool isLeavingRoom = false;
     [SerializeField] private AudioClip transitionSound;
 
     // Selection state
@@ -125,7 +128,11 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         Hashtable playerProps = new Hashtable();
         playerProps[PLAYER_CHARACTER_KEY] = -1;
         playerProps[PLAYER_LOCKED_KEY] = false;
-        PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
+        // FIXED: Safe player property update with guards
+        if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom && !isLeavingRoom)
+        {
+            PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
+        }
 
         SetupButtonListeners();
     }
@@ -284,7 +291,11 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
         Hashtable playerProps = new Hashtable();
         playerProps[PLAYER_CHARACTER_KEY] = characterIndex;
-        PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
+        // FIXED: Safe player property update with guards
+        if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom && !isLeavingRoom)
+        {
+            PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
+        }
 
         PlaySound(characterSelectSound);
 
@@ -359,7 +370,11 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
         Hashtable playerProps = new Hashtable();
         playerProps[PLAYER_CHARACTER_KEY] = -1;
-        PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
+        // FIXED: Safe player property update with guards
+        if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom && !isLeavingRoom)
+        {
+            PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
+        }
 
         UpdateCharacterButtons();
         UpdatePlayerStatus();
@@ -375,7 +390,11 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         Hashtable playerProps = new Hashtable();
         playerProps[PLAYER_CHARACTER_KEY] = selectedCharacterIndex;
         playerProps[PLAYER_LOCKED_KEY] = true;
-        PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
+        // FIXED: Safe player property update with guards
+        if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom && !isLeavingRoom)
+        {
+            PhotonNetwork.LocalPlayer.SetCustomProperties(playerProps);
+        }
 
         if (lockInButton != null)
             lockInButton.interactable = false;
@@ -403,10 +422,19 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
         if (PhotonNetwork.IsMasterClient)
         {
-            Hashtable roomProps = new Hashtable();
-            roomProps[TIMER_STARTED_KEY] = true;
-            roomProps[SELECTION_START_TIME_KEY] = selectionStartTime;
-            PhotonNetwork.CurrentRoom.SetCustomProperties(roomProps);
+            // FIXED: Safe room property update with proper checks
+            if (PhotonNetwork.IsConnected && PhotonNetwork.InRoom && 
+                PhotonNetwork.NetworkClientState == Photon.Realtime.ClientState.Joined)
+            {
+                Hashtable roomProps = new Hashtable();
+                roomProps[TIMER_STARTED_KEY] = true;
+                roomProps[SELECTION_START_TIME_KEY] = selectionStartTime;
+                // FIXED: Safe room property update with guards
+                if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom && !isLeavingRoom)
+                {
+                    PhotonNetwork.CurrentRoom.SetCustomProperties(roomProps);
+                }
+            }
         }
     }
 
@@ -750,7 +778,25 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     public override void OnLeftRoom()
     {
+        Debug.Log("[CHARACTER SELECTION] Left room, returning to main menu");
+        isLeavingRoom = true; // FIXED: Set flag to prevent any remaining property updates
         SceneManager.LoadScene("MainMenu");
+    }
+    
+    /// <summary>
+    /// FIXED: Method to safely leave room and prevent property updates
+    /// </summary>
+    public void SafeLeaveRoom()
+    {
+        isLeavingRoom = true;
+        if (PhotonNetwork.InRoom)
+        {
+            PhotonNetwork.LeaveRoom();
+        }
+        else
+        {
+            SceneManager.LoadScene("MainMenu");
+        }
     }
 
     public override void OnPlayerEnteredRoom(Player newPlayer)

@@ -6,10 +6,10 @@ using Photon.Pun;
 using Photon.Realtime;
 
 /// <summary>
-/// PUN2 Multiplayer Match UI Manager
-/// Handles all match-related UI elements with network synchronization
+/// REFACTORED: Pure UI Display Component for Match
+/// Handles ONLY UI display - no game logic, no networking, no disconnection handling
 /// </summary>
-public class MatchUI : MonoBehaviourPunCallbacks
+public class MatchUI : MonoBehaviour
 {
     [Header("Player Health Bars")]
     [SerializeField] private Slider player1HealthBar;
@@ -24,6 +24,20 @@ public class MatchUI : MonoBehaviourPunCallbacks
     [SerializeField] private Image player2Portrait;
     [SerializeField] private TextMeshProUGUI player1Name;
     [SerializeField] private TextMeshProUGUI player2Name;
+
+    [Header("Player Abilities")]
+    [SerializeField] private Slider player1UltimateBar;
+    [SerializeField] private Slider player1TrickBar;
+    [SerializeField] private Slider player1TreatBar;
+    [SerializeField] private Slider player2UltimateBar;
+    [SerializeField] private Slider player2TrickBar;
+    [SerializeField] private Slider player2TreatBar;
+    [SerializeField] private TextMeshProUGUI player1UltimateText;
+    [SerializeField] private TextMeshProUGUI player1TrickText;
+    [SerializeField] private TextMeshProUGUI player1TreatText;
+    [SerializeField] private TextMeshProUGUI player2UltimateText;
+    [SerializeField] private TextMeshProUGUI player2TrickText;
+    [SerializeField] private TextMeshProUGUI player2TreatText;
 
     [Header("Round Info")]
     [SerializeField] private TextMeshProUGUI roundNumberText;
@@ -52,17 +66,9 @@ public class MatchUI : MonoBehaviourPunCallbacks
     [SerializeField] private TextMeshProUGUI resultsText;
     [SerializeField] private Image winnerPortrait;
     [SerializeField] private TextMeshProUGUI winnerName;
-    [SerializeField] private Button rematchButton;
-    [SerializeField] private Button mainMenuButton;
 
     [Header("Match End UI")]
     public Button returnToMenuButton;
-    public GameObject matchEndPanel;
-
-    [Header("Network Status")]
-    [SerializeField] private GameObject networkStatusPanel;
-    [SerializeField] private TextMeshProUGUI networkStatusText;
-    [SerializeField] private GameObject connectionLostPanel;
 
     [Header("Visual Effects")]
     [SerializeField] private Color healthBarHealthyColor = Color.green;
@@ -72,21 +78,16 @@ public class MatchUI : MonoBehaviourPunCallbacks
     [Header("Audio")]
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip uiUpdateSound;
-    [SerializeField] private AudioClip announcementSound;
+    [SerializeField] private AudioClip countdownSound;
+    [SerializeField] private AudioClip roundStartSound;
+    [SerializeField] private AudioClip matchEndSound;
 
     [Header("Message Display")]
     public GameObject messagePanel;
-    public TextMeshProUGUI messageText;
+    [SerializeField] private TextMeshProUGUI messageText;
 
-    [Header("Forfeit Victory")]
-    public AudioClip forfeitSound;
-    public AudioClip victorySound;
-
-    // State tracking
-    private CharacterData player1Character;
-    private CharacterData player2Character;
-    private int roundsToWin = 2;
-    private Coroutine timerFlashCoroutine;
+    // Private state
+    private MatchManager matchManager;
     private bool isInitialized = false;
 
     void Awake()
@@ -99,520 +100,233 @@ public class MatchUI : MonoBehaviourPunCallbacks
             audioSource.volume = 0.7f;
         }
 
-        // Hide panels initially
-        HideAllPanels();
-
-        // Setup button listeners
-        SetupButtonListeners();
+        // Find MatchManager
+        matchManager = FindObjectOfType<MatchManager>();
+        if (matchManager == null)
+        {
+            Debug.LogError("[MATCH UI] MatchManager not found! MatchUI requires MatchManager to function.");
+        }
     }
 
     void Start()
     {
-        // Show network status
-        UpdateNetworkStatus();
+        SetupButtonListeners();
+        HideAllPanels();
     }
 
-    void HideAllPanels()
+    void Update()
     {
-        if (announcementPanel != null)
-            announcementPanel.SetActive(false);
-
-        if (countdownPanel != null)
-            countdownPanel.SetActive(false);
-
-        if (resultsPanel != null)
-            resultsPanel.SetActive(false);
-
-        if (connectionLostPanel != null)
-            connectionLostPanel.SetActive(false);
+        // Update ability bars if initialized
+        if (isInitialized && matchManager != null)
+        {
+            UpdateAbilityBars();
+        }
     }
 
     void SetupButtonListeners()
     {
-        if (rematchButton != null)
+        if (returnToMenuButton != null)
         {
-            rematchButton.onClick.AddListener(OnRematchClicked);
-        }
-
-        if (mainMenuButton != null)
-        {
-            mainMenuButton.onClick.AddListener(OnMainMenuClicked);
+            returnToMenuButton.onClick.AddListener(OnReturnToMenuClicked);
         }
     }
 
-    void UpdateNetworkStatus()
+    void HideAllPanels()
     {
-        if (networkStatusPanel == null || networkStatusText == null) return;
-
-        string statusText = "";
-        if (PhotonNetwork.IsConnected)
-        {
-            statusText = $"Room: {PhotonNetwork.CurrentRoom?.Name ?? "Unknown"}\n";
-            statusText += $"Players: {PhotonNetwork.PlayerList.Length}/2\n";
-            statusText += $"Ping: {PhotonNetwork.GetPing()}ms";
-        }
-        else
-        {
-            statusText = "Disconnected";
-        }
-
-        networkStatusText.text = statusText;
-
-        // Auto-hide network status after a few seconds
-        if (PhotonNetwork.PlayerList.Length >= 2)
-        {
-            StartCoroutine(HideNetworkStatusAfterDelay(3f));
-        }
+        if (announcementPanel != null) announcementPanel.SetActive(false);
+        if (countdownPanel != null) countdownPanel.SetActive(false);
+        if (resultsPanel != null) resultsPanel.SetActive(false);
+        if (messagePanel != null) messagePanel.SetActive(false);
+        if (returnToMenuButton != null) returnToMenuButton.gameObject.SetActive(false);
     }
 
-    IEnumerator HideNetworkStatusAfterDelay(float delay)
-    {
-        yield return new WaitForSeconds(delay);
-        if (networkStatusPanel != null)
-        {
-            networkStatusPanel.SetActive(false);
-        }
-    }
+    // ═══════════════════════════════════════════════════════════════
+    // PUBLIC API - Called by MatchManager
+    // ═══════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// Initialize the match UI with character data
-    /// </summary>
     public void InitializeMatch(CharacterData p1Character, CharacterData p2Character, int p1Rounds, int p2Rounds, int totalRoundsToWin)
     {
-        player1Character = p1Character;
-        player2Character = p2Character;
-        roundsToWin = totalRoundsToWin;
+        if (p1Character == null || p2Character == null)
+        {
+            Debug.LogError("[MATCH UI] Cannot initialize with null character data!");
+            return;
+        }
 
-        // Setup player info
-        SetupPlayerInfo();
+        // Setup player 1 info
+        if (player1Name != null) player1Name.text = p1Character.characterName;
+        if (player1Portrait != null && p1Character.characterIcon != null)
+            player1Portrait.sprite = p1Character.characterIcon;
+
+        // Setup player 2 info
+        if (player2Name != null) player2Name.text = p2Character.characterName;
+        if (player2Portrait != null && p2Character.characterIcon != null)
+            player2Portrait.sprite = p2Character.characterIcon;
 
         // Initialize health bars
-        InitializeHealthBars();
+        UpdatePlayerHealth(1, p1Character.maxHealth, p1Character.maxHealth);
+        UpdatePlayerHealth(2, p2Character.maxHealth, p2Character.maxHealth);
 
-        // Initialize round indicators
-        InitializeRoundIndicators();
+        // Initialize ability bars
+        UpdateAbilityBars();
 
-        // Update initial scores
+        // Initialize round info
         UpdateRoundInfo(1, p1Rounds, p2Rounds);
 
         isInitialized = true;
-    }
-
-    void SetupPlayerInfo()
-    {
-        // Player 1 - determine if this is local player
-        if (player1Portrait != null && player1Character != null && player1Character.characterIcon != null)
-        {
-            player1Portrait.sprite = player1Character.characterIcon;
-        }
-
-        if (player1Name != null && player1Character != null)
-        {
-            string displayName = player1Character.characterName;
-
-            // Add network player info
-            if (PhotonNetwork.PlayerList.Length >= 1)
-            {
-                Player networkPlayer1 = GetPlayerByActorNumber(1);
-                if (networkPlayer1 != null)
-                {
-                    displayName += $"\n{networkPlayer1.NickName}";
-
-                    // Highlight local player
-                    if (networkPlayer1 == PhotonNetwork.LocalPlayer)
-                    {
-                        displayName += " (You)";
-                        player1Name.color = Color.cyan;
-                    }
-                }
-            }
-
-            player1Name.text = displayName;
-        }
-
-        // Player 2
-        if (player2Portrait != null && player2Character != null && player2Character.characterIcon != null)
-        {
-            player2Portrait.sprite = player2Character.characterIcon;
-        }
-
-        if (player2Name != null && player2Character != null)
-        {
-            string displayName = player2Character.characterName;
-
-            // Add network player info
-            if (PhotonNetwork.PlayerList.Length >= 2)
-            {
-                Player networkPlayer2 = GetPlayerByActorNumber(2);
-                if (networkPlayer2 != null)
-                {
-                    displayName += $"\n{networkPlayer2.NickName}";
-
-                    // Highlight local player
-                    if (networkPlayer2 == PhotonNetwork.LocalPlayer)
-                    {
-                        displayName += " (You)";
-                        player2Name.color = Color.cyan;
-                    }
-                }
-            }
-
-            player2Name.text = displayName;
-        }
-    }
-
-    Player GetPlayerByActorNumber(int actorNumber)
-    {
-        foreach (Player player in PhotonNetwork.PlayerList)
-        {
-            if (player.ActorNumber == actorNumber)
-            {
-                return player;
-            }
-        }
-        return null;
-    }
-
-    void InitializeHealthBars()
-    {
-        // Player 1 health bar
-        if (player1HealthBar != null && player1Character != null)
-        {
-            player1HealthBar.maxValue = player1Character.maxHealth;
-            player1HealthBar.value = player1Character.maxHealth;
-        }
-
-        if (player1HealthFill != null)
-        {
-            player1HealthFill.color = healthBarHealthyColor;
-        }
-
-        // Player 2 health bar
-        if (player2HealthBar != null && player2Character != null)
-        {
-            player2HealthBar.maxValue = player2Character.maxHealth;
-            player2HealthBar.value = player2Character.maxHealth;
-        }
-
-        if (player2HealthFill != null)
-        {
-            player2HealthFill.color = healthBarHealthyColor;
-        }
-
-        // Update health text
-        if (player1Character != null)
-            UpdateHealthText(1, player1Character.maxHealth, player1Character.maxHealth);
-        if (player2Character != null)
-            UpdateHealthText(2, player2Character.maxHealth, player2Character.maxHealth);
-    }
-
-    void InitializeRoundIndicators()
-    {
-        // Enable correct number of round indicators based on rounds to win
-        for (int i = 0; i < player1RoundWins.Length; i++)
-        {
-            if (player1RoundWins[i] != null)
-            {
-                player1RoundWins[i].SetActive(i < roundsToWin);
-                SetRoundWinIndicator(player1RoundWins[i], false);
-            }
-        }
-
-        for (int i = 0; i < player2RoundWins.Length; i++)
-        {
-            if (player2RoundWins[i] != null)
-            {
-                player2RoundWins[i].SetActive(i < roundsToWin);
-                SetRoundWinIndicator(player2RoundWins[i], false);
-            }
-        }
-    }
-
-    void SetRoundWinIndicator(GameObject indicator, bool won)
-    {
-        Image indicatorImage = indicator.GetComponent<Image>();
-        if (indicatorImage != null)
-        {
-            indicatorImage.color = won ? Color.yellow : Color.gray;
-        }
-    }
-
-    /// <summary>
-    /// Update player health display
-    /// </summary>
-    public void UpdatePlayerHealth(int playerNumber, int currentHealth, int maxHealth)
-    {
-        if (!isInitialized) return;
-
-        if (playerNumber == 1)
-        {
-            UpdateHealthBar(player1HealthBar, player1HealthFill, currentHealth, maxHealth);
-            UpdateHealthText(1, currentHealth, maxHealth);
-        }
-        else if (playerNumber == 2)
-        {
-            UpdateHealthBar(player2HealthBar, player2HealthFill, currentHealth, maxHealth);
-            UpdateHealthText(2, currentHealth, maxHealth);
-        }
-
         PlaySound(uiUpdateSound);
     }
 
-    void UpdateHealthBar(Slider healthBar, Image healthFill, int currentHealth, int maxHealth)
+    public void UpdatePlayerHealth(int playerNumber, int currentHealth, int maxHealth)
     {
-        if (healthBar == null) return;
+        if (maxHealth <= 0) return;
 
         float healthPercentage = (float)currentHealth / maxHealth;
-        healthBar.value = currentHealth;
-
-        // Update color based on health percentage
-        if (healthFill != null)
-        {
-            Color targetColor;
-            if (healthPercentage > 0.6f)
-            {
-                targetColor = healthBarHealthyColor;
-            }
-            else if (healthPercentage > 0.3f)
-            {
-                targetColor = healthBarWarningColor;
-            }
-            else
-            {
-                targetColor = healthBarCriticalColor;
-            }
-
-            healthFill.color = targetColor;
-        }
-    }
-
-    void UpdateHealthText(int playerNumber, int currentHealth, int maxHealth)
-    {
+        Slider healthBar = playerNumber == 1 ? player1HealthBar : player2HealthBar;
         TextMeshProUGUI healthText = playerNumber == 1 ? player1HealthText : player2HealthText;
+        Image healthFill = playerNumber == 1 ? player1HealthFill : player2HealthFill;
+
+        if (healthBar != null)
+        {
+            healthBar.value = healthPercentage;
+        }
 
         if (healthText != null)
         {
             healthText.text = $"{currentHealth}/{maxHealth}";
         }
+
+        if (healthFill != null)
+        {
+            if (healthPercentage > 0.6f)
+                healthFill.color = healthBarHealthyColor;
+            else if (healthPercentage > 0.3f)
+                healthFill.color = healthBarWarningColor;
+            else
+                healthFill.color = healthBarCriticalColor;
+        }
     }
 
-    /// <summary>
-    /// Update round information
-    /// </summary>
     public void UpdateRoundInfo(int currentRound, int player1Rounds, int player2Rounds)
     {
-        // Update round number
         if (roundNumberText != null)
         {
-            roundNumberText.text = $"ROUND {currentRound}";
+            roundNumberText.text = $"Round {currentRound}";
         }
 
-        // Update match score
         if (matchScoreText != null)
         {
             matchScoreText.text = $"{player1Rounds} - {player2Rounds}";
         }
 
         // Update round win indicators
-        UpdateRoundWinIndicators(player1Rounds, player2Rounds);
-
-        PlaySound(uiUpdateSound);
+        UpdateRoundWinIndicators(player1RoundWins, player1Rounds);
+        UpdateRoundWinIndicators(player2RoundWins, player2Rounds);
     }
 
-    void UpdateRoundWinIndicators(int player1Rounds, int player2Rounds)
-    {
-        // Update Player 1 round wins
-        for (int i = 0; i < player1RoundWins.Length && i < roundsToWin; i++)
-        {
-            if (player1RoundWins[i] != null)
-            {
-                SetRoundWinIndicator(player1RoundWins[i], i < player1Rounds);
-            }
-        }
-
-        // Update Player 2 round wins
-        for (int i = 0; i < player2RoundWins.Length && i < roundsToWin; i++)
-        {
-            if (player2RoundWins[i] != null)
-            {
-                SetRoundWinIndicator(player2RoundWins[i], i < player2Rounds);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Update timer display
-    /// </summary>
     public void UpdateTimer(float timeRemaining)
     {
         if (timerText == null) return;
 
-        // Format time as MM:SS
-        int minutes = Mathf.FloorToInt(timeRemaining / 60);
-        int seconds = Mathf.FloorToInt(timeRemaining % 60);
+        int minutes = Mathf.FloorToInt(timeRemaining / 60f);
+        int seconds = Mathf.FloorToInt(timeRemaining % 60f);
         timerText.text = $"{minutes:00}:{seconds:00}";
 
         // Update timer color based on remaining time
-        UpdateTimerColor(timeRemaining);
-    }
-
-    void UpdateTimerColor(float timeRemaining)
-    {
-        Color targetColor;
-
-        if (timeRemaining > 30f)
-        {
-            targetColor = normalTimerColor;
-            // Stop flashing if it was active
-            if (timerFlashCoroutine != null)
-            {
-                StopCoroutine(timerFlashCoroutine);
-                timerFlashCoroutine = null;
-            }
-        }
-        else if (timeRemaining > 10f)
-        {
-            targetColor = warningTimerColor;
-            // Stop flashing if it was active
-            if (timerFlashCoroutine != null)
-            {
-                StopCoroutine(timerFlashCoroutine);
-                timerFlashCoroutine = null;
-            }
-        }
-        else
-        {
-            targetColor = criticalTimerColor;
-            // Start flashing timer when critical
-            if (timerFlashCoroutine == null)
-            {
-                timerFlashCoroutine = StartCoroutine(TimerFlashCoroutine());
-            }
-        }
-
-        if (timerText != null && timerFlashCoroutine == null)
-        {
-            timerText.color = targetColor;
-        }
-
         if (timerBackground != null)
         {
-            timerBackground.color = Color.Lerp(Color.clear, targetColor, 0.2f);
+            if (timeRemaining > 30f)
+                timerBackground.color = normalTimerColor;
+            else if (timeRemaining > 10f)
+                timerBackground.color = warningTimerColor;
+            else
+                timerBackground.color = criticalTimerColor;
         }
     }
 
-    IEnumerator TimerFlashCoroutine()
-    {
-        while (timerText != null)
-        {
-            float flash = Mathf.PingPong(Time.time * 3f, 1f);
-            timerText.color = Color.Lerp(criticalTimerColor, Color.white, flash);
-            yield return null;
-        }
-    }
-
-    /// <summary>
-    /// Show round announcement (synchronized)
-    /// </summary>
     public void ShowRoundAnnouncement(int roundNumber)
     {
         if (announcementPanel == null || announcementText == null) return;
 
-        announcementText.text = $"ROUND {roundNumber}";
-        StartCoroutine(ShowAnnouncementCoroutine(announcementDuration));
-        PlaySound(announcementSound);
+        announcementText.text = $"Round {roundNumber}";
+        announcementPanel.SetActive(true);
+        PlaySound(roundStartSound);
+
+        StartCoroutine(HideAnnouncementAfterDelay());
     }
 
-    /// <summary>
-    /// Show countdown number (synchronized)
-    /// </summary>
     public void ShowCountdown(int number)
     {
         if (countdownPanel == null || countdownText == null) return;
 
-        countdownText.text = number.ToString();
+        countdownText.text = number > 0 ? number.ToString() : "FIGHT!";
         countdownPanel.SetActive(true);
-        StartCoroutine(HideCountdownCoroutine(1f));
+        PlaySound(countdownSound);
+
+        StartCoroutine(HideCountdownAfterDelay());
     }
 
-    /// <summary>
-    /// Show "FIGHT!" message (synchronized)
-    /// </summary>
     public void ShowFightStart()
     {
-        if (countdownPanel == null || countdownText == null) return;
-
-        countdownText.text = "FIGHT!";
-        countdownPanel.SetActive(true);
-        StartCoroutine(HideCountdownCoroutine(1f));
+        ShowCountdown(0);
     }
 
-    /// <summary>
-    /// Show round result (synchronized)
-    /// </summary>
     public void ShowRoundResult(int winner)
     {
         if (announcementPanel == null || announcementText == null) return;
 
-        string winnerName = "";
-        if (winner == 1 && player1Character != null)
-        {
-            winnerName = player1Character.characterName;
-        }
-        else if (winner == 2 && player2Character != null)
-        {
-            winnerName = player2Character.characterName;
-        }
+        string winnerName = winner == 1 ? player1Name?.text : player2Name?.text;
+        announcementText.text = $"{winnerName} Wins Round!";
+        announcementPanel.SetActive(true);
 
-        if (winner == 0)
-        {
-            announcementText.text = "ROUND DRAW!";
-        }
-        else
-        {
-            announcementText.text = $"{winnerName} WINS ROUND!";
-        }
-
-        StartCoroutine(ShowAnnouncementCoroutine(announcementDuration));
-        PlaySound(announcementSound);
+        StartCoroutine(HideAnnouncementAfterDelay());
     }
 
-    /// <summary>
-    /// Show final match result
-    /// </summary>
     public void ShowMatchResult(int winner, CharacterData winnerCharacter)
     {
         if (resultsPanel == null) return;
 
-        // Setup winner display (existing code)
+        resultsPanel.SetActive(true);
+
+        if (resultsText != null)
+        {
+            resultsText.text = $"{winnerCharacter.characterName} Wins!";
+        }
+
+        if (winnerName != null)
+        {
+            winnerName.text = winnerCharacter.characterName;
+        }
+
         if (winnerPortrait != null && winnerCharacter.characterIcon != null)
         {
             winnerPortrait.sprite = winnerCharacter.characterIcon;
         }
 
-        if (winnerName != null)
-        {
-            string displayText = winnerCharacter.characterName;
+        PlaySound(matchEndSound);
+    }
 
-            Player networkWinner = GetPlayerByActorNumber(winner);
-            if (networkWinner != null)
-            {
-                displayText += $"\n({networkWinner.NickName})";
-            }
+    public void ShowForfeitVictory(int winner, CharacterData winnerCharacter, string forfeitPlayerName)
+    {
+        if (resultsPanel == null) return;
 
-            winnerName.text = displayText;
-        }
+        resultsPanel.SetActive(true);
 
         if (resultsText != null)
         {
-            resultsText.text = $"{winnerCharacter.characterName}\nWINS THE MATCH!";
+            resultsText.text = $"{winnerCharacter.characterName} Wins by Forfeit!";
         }
 
-        // Show results panel
-        resultsPanel.SetActive(true);
+        if (winnerName != null)
+        {
+            winnerName.text = $"{winnerCharacter.characterName}\n{forfeitPlayerName} Forfeited";
+        }
 
-        // CHANGED: Don't show return button immediately
-        // ShowReturnToMenuButton(false); // Hide initially
+        if (winnerPortrait != null && winnerCharacter.characterIcon != null)
+        {
+            winnerPortrait.sprite = winnerCharacter.characterIcon;
+        }
+
+        PlaySound(matchEndSound);
     }
 
     public void ShowReturnToMenuButton(bool show)
@@ -620,223 +334,189 @@ public class MatchUI : MonoBehaviourPunCallbacks
         if (returnToMenuButton != null)
         {
             returnToMenuButton.gameObject.SetActive(show);
-
-            // Ensure button is interactable
-            returnToMenuButton.interactable = true;
-
-            // Set up button click handler
-            returnToMenuButton.onClick.RemoveAllListeners();
-            returnToMenuButton.onClick.AddListener(() => {
-                // Find MatchManager and call return method
-                MatchManager matchManager = FindObjectOfType<MatchManager>();
-                if (matchManager != null)
-                {
-                    matchManager.OnReturnToMenuButtonPressed();
-                }
-            });
-        }
-
-        if (matchEndPanel != null)
-        {
-            matchEndPanel.SetActive(show);
         }
     }
 
-    // ADD to MatchUI.cs - Show forfeit victory
-    public void ShowForfeitVictory(int winner, CharacterData winnerCharacter, string forfeitPlayerName)
-    {
-        if (resultsPanel == null) return;
-
-        // Setup winner display
-        if (winnerPortrait != null && winnerCharacter.characterIcon != null)
-        {
-            winnerPortrait.sprite = winnerCharacter.characterIcon;
-        }
-
-        if (winnerName != null)
-        {
-            string displayText = winnerCharacter.characterName;
-
-            // Add network player name
-            Player networkWinner = GetPlayerByActorNumber(winner);
-            if (networkWinner != null)
-            {
-                displayText += $"\n({networkWinner.NickName})";
-            }
-
-            winnerName.text = displayText;
-        }
-
-        if (resultsText != null)
-        {
-            resultsText.text = $"VICTORY BY FORFEIT!\n{forfeitPlayerName} left the match";
-        }
-
-        // Show results panel
-        resultsPanel.SetActive(true);
-
-        PlaySound(victorySound);
-    }
-
-    // ADD to MatchUI.cs - Show temporary message
     public void ShowMessage(string message, float duration)
     {
-        StartCoroutine(ShowMessageCoroutine(message, duration));
+        if (messagePanel == null || messageText == null) return;
+
+        messageText.text = message;
+        messagePanel.SetActive(true);
+
+        StartCoroutine(HideMessageAfterDelay(duration));
     }
 
-    // ADD to MatchUI.cs - Message display coroutine
-    private IEnumerator ShowMessageCoroutine(string message, float duration)
+    // ═══════════════════════════════════════════════════════════════
+    // ABILITY BAR UPDATES
+    // ═══════════════════════════════════════════════════════════════
+
+    void UpdateAbilityBars()
     {
-        // Create or find a message display UI element
-        GameObject messageObj = null;
-        //Text messageText = null;
+        if (matchManager == null) return;
 
-        // Try to find existing message display
-        if (messagePanel != null)
+        // Get all players in the scene
+        PlayerCharacter[] players = FindObjectsOfType<PlayerCharacter>();
+        
+        foreach (PlayerCharacter player in players)
         {
-            messageObj = messagePanel;
-            messageText = messageObj.GetComponentInChildren<TextMeshProUGUI>();
+            if (player == null || player.photonView == null) continue;
+
+            int playerNumber = GetPlayerNumber(player);
+            if (playerNumber == -1) continue;
+
+            // FIXED: Only show abilities to the respective player
+            bool isLocalPlayer = player.photonView.IsMine;
+            UpdatePlayerAbilityBars(playerNumber, player, isLocalPlayer);
         }
-        else if (announcementText != null)
+    }
+
+    int GetPlayerNumber(PlayerCharacter player)
+    {
+        if (player.photonView == null) return -1;
+
+        // Get player number based on actor number or player side
+        int actorNumber = player.photonView.Owner.ActorNumber;
+        int playerSide = player.GetPlayerSide();
+
+        // Use player side if available, otherwise use actor number
+        if (playerSide > 0)
         {
-            // Use announcement text as fallback
-            messageText = announcementText;
-            messageObj = announcementText.gameObject;
+            return playerSide;
+        }
+        else
+        {
+            // Default: actor number 1 = player 1, actor number 2 = player 2
+            return actorNumber;
+        }
+    }
+
+    void UpdatePlayerAbilityBars(int playerNumber, PlayerCharacter player, bool isLocalPlayer)
+    {
+        Slider ultimateBar = playerNumber == 1 ? player1UltimateBar : player2UltimateBar;
+        Slider trickBar = playerNumber == 1 ? player1TrickBar : player2TrickBar;
+        Slider treatBar = playerNumber == 1 ? player1TreatBar : player2TreatBar;
+
+        TextMeshProUGUI ultimateText = playerNumber == 1 ? player1UltimateText : player2UltimateText;
+        TextMeshProUGUI trickText = playerNumber == 1 ? player1TrickText : player2TrickText;
+        TextMeshProUGUI treatText = playerNumber == 1 ? player1TreatText : player2TreatText;
+
+        // FIXED: Ultimate is visible to both players (for strategic gameplay)
+        if (ultimateBar != null)
+        {
+            float ultimateCharge = player.GetUltimateChargePercentage();
+            ultimateBar.value = ultimateCharge;
         }
 
-        if (messageText != null)
+        if (ultimateText != null)
         {
-            messageText.text = message;
-            messageObj.SetActive(true);
+            float ultimateCharge = player.GetUltimateChargePercentage();
+            ultimateText.text = ultimateCharge >= 1f ? "READY" : $"{Mathf.RoundToInt(ultimateCharge * 100)}%";
+        }
 
-            yield return new WaitForSeconds(duration);
-
-            // Only hide if we're using the message panel (not announcement text)
-            if (messagePanel != null)
+        // FIXED: Trick and Treat are only visible to the respective player
+        if (isLocalPlayer)
+        {
+            // Show Trick bar for local player
+            if (trickBar != null)
             {
-                messageObj.SetActive(false);
+                float trickCharge = player.GetTrickChargePercentage();
+                trickBar.value = trickCharge;
+            }
+
+            if (trickText != null)
+            {
+                float trickCharge = player.GetTrickChargePercentage();
+                trickText.text = trickCharge >= 1f ? "READY" : $"{Mathf.RoundToInt(trickCharge * 100)}%";
+            }
+
+            // Show Treat bar for local player
+            if (treatBar != null)
+            {
+                float treatCharge = player.GetTreatChargePercentage();
+                treatBar.value = treatCharge;
+            }
+
+            if (treatText != null)
+            {
+                float treatCharge = player.GetTreatChargePercentage();
+                treatText.text = treatCharge >= 1f ? "READY" : $"{Mathf.RoundToInt(treatCharge * 100)}%";
             }
         }
         else
         {
-            // Fallback: Log to console if no UI available
-            Debug.Log($"[MATCH MESSAGE] {message}");
+            // Hide Trick and Treat bars for opponent
+            if (trickBar != null) trickBar.value = 0f;
+            if (trickText != null) trickText.text = "???";
+            if (treatBar != null) treatBar.value = 0f;
+            if (treatText != null) treatText.text = "???";
         }
     }
 
-    IEnumerator ShowAnnouncementCoroutine(float duration)
+    void UpdateRoundWinIndicators(GameObject[] indicators, int wins)
     {
-        if (announcementPanel != null)
+        if (indicators == null) return;
+
+        for (int i = 0; i < indicators.Length; i++)
         {
-            announcementPanel.SetActive(true);
-            yield return new WaitForSeconds(duration);
-            announcementPanel.SetActive(false);
+            if (indicators[i] != null)
+            {
+                indicators[i].SetActive(i < wins);
+            }
         }
     }
 
-    IEnumerator HideCountdownCoroutine(float duration)
+    // ═══════════════════════════════════════════════════════════════
+    // UI ANIMATIONS AND COROUTINES
+    // ═══════════════════════════════════════════════════════════════
+
+    IEnumerator HideAnnouncementAfterDelay()
+    {
+        yield return new WaitForSeconds(announcementDuration);
+        if (announcementPanel != null)
+            announcementPanel.SetActive(false);
+    }
+
+    IEnumerator HideCountdownAfterDelay()
+    {
+        yield return new WaitForSeconds(1f);
+        if (countdownPanel != null)
+            countdownPanel.SetActive(false);
+    }
+
+    IEnumerator HideMessageAfterDelay(float duration)
     {
         yield return new WaitForSeconds(duration);
-
-        if (countdownPanel != null)
-        {
-            countdownPanel.SetActive(false);
-        }
+        if (messagePanel != null)
+            messagePanel.SetActive(false);
     }
 
-    #region Button Handlers
+    // ═══════════════════════════════════════════════════════════════
+    // BUTTON HANDLERS
+    // ═══════════════════════════════════════════════════════════════
 
-    void OnRematchClicked()
+    void OnReturnToMenuClicked()
     {
-        // Only Master Client can initiate rematch
-        if (PhotonNetwork.IsMasterClient)
+        // REFACTORED: Only notify MatchManager, don't handle networking
+        if (matchManager != null)
         {
-            // Reset room for new match
-            PhotonNetwork.CurrentRoom.SetCustomProperties(new ExitGames.Client.Photon.Hashtable());
-
-            // Reload scene for all players
-            if (PhotonNetwork.IsMasterClient)
-            {
-                PhotonNetwork.LoadLevel(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
-            }
-        }
-
-        PlaySound(uiUpdateSound);
-    }
-
-    public void OnMainMenuClicked()
-    {
-        // Check if we can actually leave the room
-        var clientState = PhotonNetwork.NetworkClientState;
-
-        if (PhotonNetwork.InRoom &&
-            clientState == Photon.Realtime.ClientState.Joined)
-        {
-            // Safe to leave room
-            PhotonNetwork.LeaveRoom();
-        }
-        else if (clientState == Photon.Realtime.ClientState.Leaving ||
-                 clientState == Photon.Realtime.ClientState.Disconnecting)
-        {
-            // Already leaving, wait for OnLeftRoom callback
-            Debug.Log("Already leaving room, waiting for callback...");
+            matchManager.OnReturnToMenuRequested();
         }
         else
         {
-            // Not in room or not connected, go directly to main menu
-            UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
+            Debug.LogError("[MATCH UI] MatchManager not found! Cannot handle return to menu request.");
         }
     }
 
-    #endregion
-
-    #region Network Callbacks
-
-    public override void OnPlayerEnteredRoom(Player newPlayer)
-    {
-        UpdateNetworkStatus();
-    }
-
-    public override void OnPlayerLeftRoom(Player otherPlayer)
-    {
-        UpdateNetworkStatus();
-
-        // Show connection lost if we're down to 1 player during a match
-        if (PhotonNetwork.PlayerList.Length < 2 && isInitialized)
-        {
-            ShowConnectionLost();
-        }
-    }
-
-    public override void OnDisconnected(Photon.Realtime.DisconnectCause cause)
-    {
-        ShowConnectionLost();
-    }
-
-    void ShowConnectionLost()
-    {
-        if (connectionLostPanel != null)
-        {
-            connectionLostPanel.SetActive(true);
-        }
-    }
-
-    #endregion
+    // ═══════════════════════════════════════════════════════════════
+    // UTILITY METHODS
+    // ═══════════════════════════════════════════════════════════════
 
     void PlaySound(AudioClip clip)
     {
         if (audioSource != null && clip != null)
         {
             audioSource.PlayOneShot(clip);
-        }
-    }
-
-    void OnDestroy()
-    {
-        // Clean up coroutines
-        if (timerFlashCoroutine != null)
-        {
-            StopCoroutine(timerFlashCoroutine);
         }
     }
 }

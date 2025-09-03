@@ -1015,6 +1015,11 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
             stream.SendNext(hasBall);
             stream.SendNext(facingRight);
             stream.SendNext(playerSide);
+            
+            // FIXED: Sync ability charges for ultimate visibility
+            stream.SendNext(abilityCharges[0]); // Ultimate charge
+            stream.SendNext(abilityCharges[1]); // Trick charge
+            stream.SendNext(abilityCharges[2]); // Treat charge
         }
         else
         {
@@ -1034,6 +1039,16 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
                 playerSide = networkPlayerSide;
                 FlipCharacterModel(); // Update visual
             }
+            
+            // FIXED: Sync ability charges from network
+            float networkUltimateCharge = (float)stream.ReceiveNext();
+            float networkTrickCharge = (float)stream.ReceiveNext();
+            float networkTreatCharge = (float)stream.ReceiveNext();
+            
+            // Update ability charges for network sync
+            abilityCharges[0] = networkUltimateCharge;
+            abilityCharges[1] = networkTrickCharge;
+            abilityCharges[2] = networkTreatCharge;
         }
     }
 
