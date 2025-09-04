@@ -2,7 +2,7 @@
 using System.Collections;
 using Photon.Pun;
 using Photon.Realtime;
-
+using TMPro;
 /// <summary>
 /// FIXED PlayerCharacter with proper PUN2 multiplayer integration
 /// Fixes: Character data sync, facing direction, round reset issues
@@ -46,6 +46,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     // Match integration
     private MatchManager currentMatch;
+
+    // AFK System
+    private SimpleAFKDetector afkDetector;
 
     // Ability system - unified
     private float[] abilityCharges = new float[3]; // Ultimate, Trick, Treat
@@ -105,6 +108,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         
         // OPTIMIZED: Set initial network send rate
         OptimizeNetworkSendRate();
+        
+        // Initialize AFK System
+        InitializeAFKSystem();
     }
 
     void CacheComponents()
@@ -113,6 +119,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         characterCollider = GetComponent<CapsuleCollider>();
         inputHandler = GetComponent<PlayerInputHandler>();
         playerHealth = GetComponent<PlayerHealth>();
+        afkDetector = GetComponent<SimpleAFKDetector>();
         audioSource = GetComponent<AudioSource>() ?? gameObject.AddComponent<AudioSource>();
 
         if (characterCollider != null)
@@ -131,6 +138,20 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
                            gameObject.AddComponent<ArenaMovementRestrictor>();
         duckSystem = GetComponent<DuckSystem>() ??
                     gameObject.AddComponent<DuckSystem>();
+    }
+    
+    void InitializeAFKSystem()
+    {
+        // Add Simple AFK Detector if not present
+        if (afkDetector == null)
+        {
+            afkDetector = gameObject.AddComponent<SimpleAFKDetector>();
+        }
+        
+        if (debugMode)
+        {
+            Debug.Log($"[PlayerCharacter] Simple AFK detector initialized for {name}");
+        }
     }
 
     void SetupNetworkBehavior()
@@ -1548,4 +1569,29 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     public int GetThrowDamage(ThrowType throwType) => characterData?.GetThrowDamage(throwType) ?? 10;
     public float GetDamageResistance() => characterData?.damageResistance ?? 1f;
+    
+    // ═══════════════════════════════════════════════════════════════
+    // SIMPLE AFK SYSTEM INTEGRATION
+    // ═══════════════════════════════════════════════════════════════
+    
+    /// <summary>
+    /// Check if player is AFK
+    /// </summary>
+    public bool IsAFK()
+    {
+        return afkDetector != null && afkDetector.IsAFK();
+    }
+    
+    /// <summary>
+    /// Force reset AFK timer (for external use)
+    /// </summary>
+    public void ResetAFKTimer()
+    {
+        if (afkDetector != null)
+        {
+            afkDetector.ForceResetAFKTimer();
+        }
+    }
+    
+    
 }

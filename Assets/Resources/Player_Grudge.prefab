@@ -21,6 +21,7 @@ GameObject:
   - component: {fileID: 1504208963714581354}
   - component: {fileID: -379046048538752417}
   - component: {fileID: 7411436999334466731}
+  - component: {fileID: 275289898229416672}
   m_Layer: 8
   m_Name: Player_Grudge
   m_TagString: Player
@@ -413,3 +414,19 @@ MonoBehaviour:
   hasDoubleJumped: 0
   isDashing: 0
   isTeleporting: 0
+--- !u!114 &275289898229416672
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 990030946171809883}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8095dfa384427e04b9307a437e692cde, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  afkThreshold: 10
+  damageInterval: 1
+  afkDamage: 5
+  positionThreshold: 0.5

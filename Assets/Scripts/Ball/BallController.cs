@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using System.Collections;
+using System.Collections.Generic;
 using Photon.Pun;
 
 /// <summary>
@@ -117,6 +118,10 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         {
             photonView.OwnershipTransfer = OwnershipOption.Takeover;
             Debug.Log("Ball PhotonView set to Takeover ownership");
+
+            // NOTE: Do not forcibly change ObservedComponents at runtime.
+            // Ensure in prefab that ObservedComponents includes BOTH BallController and PhotonTransformViewClassic.
+            // This component writes a fixed 8-item payload; PhotonTransformViewClassic handles separate Transform sync.
         }
 
         collisionSystem = GetComponent<CollisionDamageSystem>();
@@ -565,12 +570,13 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
                 adaptiveVelocityRate *= 1.2f;
             }
             
-            // Use SmoothDamp for more natural movement
-            Vector3 smoothPosition = Vector3.SmoothDamp(ballTransform.position, networkPosition, ref velocity, adaptivePositionRate);
-            ballTransform.position = smoothPosition;
+            // Use Lerp with rate-based factor (previous SmoothDamp was using seconds, causing very slow follow)
+            float posT = Mathf.Clamp01(adaptivePositionRate * Time.deltaTime);
+            ballTransform.position = Vector3.Lerp(ballTransform.position, networkPosition, posT);
             
             // Smooth velocity changes
-            velocity = Vector3.Lerp(velocity, networkVelocity, adaptiveVelocityRate * Time.deltaTime);
+            float velT = Mathf.Clamp01(adaptiveVelocityRate * Time.deltaTime);
+            velocity = Vector3.Lerp(velocity, networkVelocity, velT);
         }
     }
 
@@ -596,7 +602,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
     public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
     {
-        if (stream.IsWriting && hasNetworkAuthority)
+        if (stream.IsWriting)
         {
             // FIXED: Always send the same number of data items
             stream.SendNext(ballTransform.position);
@@ -610,17 +616,34 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         }
         else if (stream.IsReading)
         {
-            // FIXED: Always read the same number of data items
+            // FIXED: Always read the same number of data items and use type-tolerant conversions
+            object o1 = null, o2 = null, o3 = null, o4 = null, o5 = null, o6 = null, o7 = null, o8 = null;
             try
             {
-                networkPosition = (Vector3)stream.ReceiveNext();
-                networkVelocity = (Vector3)stream.ReceiveNext();
-                networkBallState = (BallState)(int)stream.ReceiveNext();
-                networkHolderID = (int)stream.ReceiveNext();
-                networkThrowerID = (int)stream.ReceiveNext();
-                currentDamage = (int)stream.ReceiveNext();
-                currentThrowType = (ThrowType)(int)stream.ReceiveNext();
-                float timestamp = (float)stream.ReceiveNext();
+                o1 = stream.ReceiveNext();
+                o2 = stream.ReceiveNext();
+                o3 = stream.ReceiveNext();
+                o4 = stream.ReceiveNext();
+                o5 = stream.ReceiveNext();
+                o6 = stream.ReceiveNext();
+                o7 = stream.ReceiveNext();
+                o8 = stream.ReceiveNext();
+
+                // Safe conversions
+                if (o1 is Vector3 pos) networkPosition = pos; else networkPosition = Vector3.zero;
+                if (o2 is Vector3 vel) networkVelocity = vel; else networkVelocity = Vector3.zero;
+
+                int stateInt = o3 is int i3 ? i3 : System.Convert.ToInt32(o3);
+                networkBallState = (BallState)stateInt;
+
+                networkHolderID = o4 is int i4 ? i4 : System.Convert.ToInt32(o4);
+                networkThrowerID = o5 is int i5 ? i5 : System.Convert.ToInt32(o5);
+                currentDamage = o6 is int i6 ? i6 : System.Convert.ToInt32(o6);
+
+                int throwTypeInt = o7 is int i7 ? i7 : System.Convert.ToInt32(o7);
+                currentThrowType = (ThrowType)throwTypeInt;
+
+                float timestamp = o8 is float f8 ? f8 : (o8 is double d8 ? (float)d8 : System.Convert.ToSingle(o8));
 
                 // FIXED: Improved lag compensation
                 float lag = Mathf.Abs((float)(PhotonNetwork.Time - timestamp));

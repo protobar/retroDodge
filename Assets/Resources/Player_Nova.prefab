@@ -21,6 +21,7 @@ GameObject:
   - component: {fileID: 103471099555658016}
   - component: {fileID: 6907733259876641164}
   - component: {fileID: 6224535904762556999}
+  - component: {fileID: -5405950840906997944}
   m_Layer: 8
   m_Name: Player_Nova
   m_TagString: Player
@@ -253,6 +254,7 @@ MonoBehaviour:
   - {fileID: 1067358175726693603}
   - {fileID: 103471099555658016}
   - {fileID: 6907733259876641164}
+  - {fileID: -5405950840906997944}
   sceneViewId: 0
   InstantiationId: 0
   isRuntimeInstantiated: 0
@@ -413,3 +415,19 @@ AudioSource:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
+--- !u!114 &-5405950840906997944
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 45927926235480509}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8095dfa384427e04b9307a437e692cde, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  afkThreshold: 10
+  damageInterval: 1
+  afkDamage: 5
+  positionThreshold: 0.5
