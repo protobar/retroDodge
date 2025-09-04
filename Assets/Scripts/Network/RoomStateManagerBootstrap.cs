@@ -44,3 +44,4 @@ public class RoomStateManagerBootstrap : MonoBehaviour
         GUILayout.EndArea();
     }
 }
+

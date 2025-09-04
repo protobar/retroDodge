@@ -14,7 +14,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 {
     [Header("Match Settings")]
     [SerializeField] private int roundsToWin = 2;
-    [SerializeField] private float roundDuration = 90f;
+    [SerializeField] private float defaultRoundDuration = 90f; // Fallback if no room settings
     [SerializeField] private float preFightCountdown = 3f;
     [SerializeField] private float postRoundDelay = 3f;
     [SerializeField] private float matchEndDelay = 5f;
@@ -89,6 +89,34 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         {
             matchUI = FindObjectOfType<MatchUI>();
         }
+    }
+    
+    /// <summary>
+    /// Get round duration from room settings or use default
+    /// </summary>
+    private float GetRoundDuration()
+    {
+        // FIXED: Read match length directly from room properties
+        if (PhotonNetwork.CurrentRoom != null && PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey("ML"))
+        {
+            int matchLength = (int)PhotonNetwork.CurrentRoom.CustomProperties["ML"];
+            if (debugMode) Debug.Log($"[MATCH MANAGER] Using match length from room properties: {matchLength} seconds");
+            return matchLength;
+        }
+        
+        // Fallback to RoomStateManager if available
+        if (RoomStateManager.Instance != null)
+        {
+            RoomSettings roomSettings = RoomStateManager.Instance.GetRoomSettings();
+            if (roomSettings != null)
+            {
+                if (debugMode) Debug.Log($"[MATCH MANAGER] Using match length from RoomStateManager: {roomSettings.matchLengthSeconds} seconds");
+                return roomSettings.matchLengthSeconds;
+            }
+        }
+        
+        if (debugMode) Debug.Log($"[MATCH MANAGER] Using default match length: {defaultRoundDuration} seconds");
+        return defaultRoundDuration;
     }
 
     void Start()
@@ -626,7 +654,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         if (PhotonNetwork.IsMasterClient)
         {
             roundStartTime = PhotonNetwork.Time;
-            roundEndTime = roundStartTime + roundDuration;
+            roundEndTime = roundStartTime + GetRoundDuration();
             UpdateRoomProperties();
 
             // Immediately sync to all clients

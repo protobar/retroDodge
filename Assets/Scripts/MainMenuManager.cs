@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using UnityEngine.SceneManagement;
+using System.Collections.Generic;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections;
@@ -8,47 +9,78 @@ using Photon.Realtime;
 using Hashtable = ExitGames.Client.Photon.Hashtable;
 
 /// <summary>
-/// Enhanced Main Menu Manager with Custom Room Features
-/// Handles connection, matchmaking, custom room creation/joining, and transition flow
+/// FIXED MainMenuManager with proper PUN2 matchmaking and custom room sharing
+/// Key fixes: JoinRandomOrCreateRoom, custom properties for lobby, proper room code system
 /// </summary>
 public class MainMenuManager : MonoBehaviourPunCallbacks
 {
-    [Header("UI References")]
+    [Header("=== MAIN UI PANELS ===")]
     [SerializeField] private GameObject connectionPanel;
     [SerializeField] private GameObject mainMenuPanel;
     [SerializeField] private GameObject customRoomPanel;
+    [SerializeField] private GameObject joinRoomPanel;
+    [SerializeField] private GameObject createRoomPanel;
+    [SerializeField] private GameObject roomLobbyPanel;
+    [SerializeField] private GameObject matchFoundPanel;
+
+    [Header("=== CONNECTION & MAIN MENU ===")]
     [SerializeField] private TMP_InputField nicknameInput;
     [SerializeField] private Button connectButton;
     [SerializeField] private Button quickMatchButton;
-    [SerializeField] private Button createRoomButton;
-    [SerializeField] private Button joinRoomButton;
-    [SerializeField] private Button backFromCustomRoomButton;
+    [SerializeField] private Button customRoomButton;
     [SerializeField] private TMP_Text quickMatchButtonText;
     [SerializeField] private TMP_Text statusText;
     [SerializeField] private GameObject loadingIndicator;
-    [SerializeField] private GameObject matchFoundPanel;
     [SerializeField] private TMP_Text countdownText;
 
-    [Header("Custom Room UI")]
-    [SerializeField] private TMP_InputField roomNameInput;
-    [SerializeField] private TMP_InputField joinRoomNameInput;
-    [SerializeField] private Button confirmCreateRoomButton;
-    [SerializeField] private Button confirmJoinRoomButton;
+    [Header("=== CUSTOM ROOM - MAIN OPTIONS ===")]
+    [SerializeField] private Button createRoomButton;
+    [SerializeField] private Button joinRoomButton;
+    [SerializeField] private Button backFromCustomRoomButton;
 
-    [Header("Settings")]
+    [Header("=== CREATE ROOM PANEL ===")]
+    [SerializeField] private TMP_Text generatedRoomCodeText;
+    [SerializeField] private TMP_Dropdown matchLengthDropdown;
+    [SerializeField] private TMP_Dropdown mapSelectionDropdown;
+    [SerializeField] private Button generateRoomCodeButton;
+    [SerializeField] private Button confirmCreateRoomButton;
+    [SerializeField] private Button backFromCreateRoomButton;
+
+    [Header("=== JOIN ROOM PANEL ===")]
+    [SerializeField] private TMP_InputField roomCodeInput;
+    [SerializeField] private Button confirmJoinRoomButton;
+    [SerializeField] private Button backFromJoinRoomButton;
+
+    [Header("=== ROOM LOBBY PANEL ===")]
+    [SerializeField] private TMP_Text roomNameText;
+    [SerializeField] private TMP_Text roomInfoText;
+    [SerializeField] private TMP_Text playerListText;
+    [SerializeField] private Button startGameButton;
+    [SerializeField] private Button leaveRoomButton;
+    [SerializeField] private Button backFromRoomLobbyButton;
+
+    [Header("=== GAME SETTINGS ===")]
     [SerializeField] private string characterSelectionScene = "CharacterSelection";
     [SerializeField] private byte maxPlayers = 2;
     [SerializeField] private bool debugMode = true;
 
-    // Matchmaking state
+    // FIXED: Matchmaking state management
     private bool isMatchmaking = false;
     private float matchmakingTime = 0f;
     private Coroutine matchmakingCoroutine;
     private Coroutine countdownCoroutine;
+    private bool matchFound = false;
 
-    // Custom room state
+    // FIXED: Custom room state with proper room code system
     private bool isCreatingCustomRoom = false;
     private bool isJoiningCustomRoom = false;
+    private string currentRoomCode = "";
+
+    // FIXED: Constants for room properties
+    private const string ROOM_CODE_KEY = "RC"; // Room Code
+    private const string MATCH_LENGTH_KEY = "ML"; // Match Length
+    private const string SELECTED_MAP_KEY = "SM"; // Selected Map
+    private const string ROOM_TYPE_KEY = "RT"; // Room Type (0=QuickMatch, 1=Custom)
 
     void Start()
     {
@@ -56,23 +88,28 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         SetupButtonListeners();
         SetupCustomRoomUI();
 
-        // Photon basic setup
+        // FIXED: Proper PUN2 setup
         PhotonNetwork.AutomaticallySyncScene = true;
         PhotonNetwork.GameVersion = "1.0";
+        PhotonNetwork.SendRate = 20; // Default is good
+        PhotonNetwork.SerializationRate = 10; // Default is good
 
-        if (debugMode) Debug.Log("[MAIN MENU] Initialized");
+        if (debugMode) Debug.Log("[MAIN MENU] Initialized with PUN2 best practices");
     }
 
     #region UI Setup
     void SetupUI()
     {
-        bool isReturning = PhotonNetwork.IsConnected && !string.IsNullOrEmpty(PhotonNetwork.NickName);
+        bool isReturning = PhotonNetwork.IsConnectedAndReady && !string.IsNullOrEmpty(PhotonNetwork.NickName);
 
         connectionPanel.SetActive(!isReturning);
         mainMenuPanel.SetActive(isReturning);
         customRoomPanel.SetActive(false);
-        loadingIndicator.SetActive(false);
+        joinRoomPanel.SetActive(false);
+        createRoomPanel.SetActive(false);
+        roomLobbyPanel.SetActive(false);
         matchFoundPanel?.SetActive(false);
+        loadingIndicator.SetActive(false);
 
         if (nicknameInput != null)
         {
@@ -90,20 +127,43 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     {
         connectButton?.onClick.AddListener(OnConnectClicked);
         quickMatchButton?.onClick.AddListener(OnQuickMatchClicked);
+        customRoomButton?.onClick.AddListener(OnCustomRoomClicked);
         createRoomButton?.onClick.AddListener(OnCreateRoomClicked);
         joinRoomButton?.onClick.AddListener(OnJoinRoomClicked);
         backFromCustomRoomButton?.onClick.AddListener(OnBackFromCustomRoomClicked);
+        backFromJoinRoomButton?.onClick.AddListener(OnBackFromJoinRoomClicked);
+        backFromCreateRoomButton?.onClick.AddListener(OnBackFromCreateRoomClicked);
+        backFromRoomLobbyButton?.onClick.AddListener(OnBackFromRoomLobbyClicked);
         confirmCreateRoomButton?.onClick.AddListener(OnConfirmCreateRoomClicked);
         confirmJoinRoomButton?.onClick.AddListener(OnConfirmJoinRoomClicked);
+        startGameButton?.onClick.AddListener(OnStartGameClicked);
+        leaveRoomButton?.onClick.AddListener(OnLeaveRoomClicked);
+        generateRoomCodeButton?.onClick.AddListener(OnGenerateRoomCodeClicked);
     }
 
     void SetupCustomRoomUI()
     {
-
-        // Setup room name placeholder
-        if (roomNameInput != null)
+        // Setup match length dropdown
+        if (matchLengthDropdown != null)
         {
-            roomNameInput.text = $"Room_{Random.Range(100, 999)}";
+            matchLengthDropdown.ClearOptions();
+            var options = new List<string> { "30 seconds", "1 minute", "2 minutes", "3 minutes", "5 minutes" };
+            matchLengthDropdown.AddOptions(options);
+            matchLengthDropdown.value = 1; // Default to 1 minute
+        }
+
+        // Setup map selection dropdown - using fallback if MapRegistry doesn't exist
+        if (mapSelectionDropdown != null)
+        {
+            mapSelectionDropdown.ClearOptions();
+            var mapNames = new List<string> { "Arena1", "Arena2", "Arena3" }; // Fallback maps
+            mapSelectionDropdown.AddOptions(mapNames);
+            mapSelectionDropdown.value = 0;
+        }
+
+        if (generatedRoomCodeText != null)
+        {
+            generatedRoomCodeText.text = "Click 'Generate Code' to create room";
         }
     }
     #endregion
@@ -122,7 +182,6 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         PhotonNetwork.NickName = nickname;
         PlayerPrefs.SetString("PlayerNickname", nickname);
 
-        //connectionPanel.SetActive(false);
         loadingIndicator.SetActive(true);
         UpdateStatus("Connecting...");
 
@@ -130,7 +189,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     }
     #endregion
 
-    #region Matchmaking
+    #region FIXED: Quick Match with proper PUN2 patterns
     void OnQuickMatchClicked()
     {
         if (!PhotonNetwork.IsConnectedAndReady)
@@ -142,12 +201,13 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         if (isMatchmaking)
             CancelMatchmaking();
         else
-            StartMatchmaking();
+            StartQuickMatch();
     }
 
-    void StartMatchmaking()
+    void StartQuickMatch()
     {
         isMatchmaking = true;
+        matchFound = false;
         matchmakingTime = 0f;
         quickMatchButtonText.text = "Cancel";
 
@@ -157,15 +217,27 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
             StopCoroutine(matchmakingCoroutine);
         matchmakingCoroutine = StartCoroutine(MatchmakingTimer());
 
-        RoomOptions options = new RoomOptions { MaxPlayers = maxPlayers };
-        PhotonNetwork.JoinRandomOrCreateRoom(null, maxPlayers,
-            MatchmakingMode.FillRoom, null, null,
-            $"QuickMatch_{System.DateTime.Now.Ticks}", options);
+        if (debugMode) Debug.Log($"[QUICK MATCH] Starting with JoinRandomRoom");
+
+        // FIXED: Use proper PUN2 pattern - JoinRandomRoom with room type filter
+        Hashtable expectedProps = new Hashtable { { ROOM_TYPE_KEY, 0 } }; // Only join quick match rooms
+        PhotonNetwork.JoinRandomRoom(expectedProps, maxPlayers);
+    }
+
+    Hashtable CreateQuickMatchProperties()
+    {
+        return new Hashtable
+        {
+            { ROOM_TYPE_KEY, 0 }, // 0 = Quick Match
+            { MATCH_LENGTH_KEY, 60 }, // 60 seconds default
+            { SELECTED_MAP_KEY, "Arena1" }
+        };
     }
 
     void CancelMatchmaking()
     {
         isMatchmaking = false;
+        matchFound = false;
 
         if (matchmakingCoroutine != null)
         {
@@ -173,38 +245,68 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
             matchmakingCoroutine = null;
         }
 
+        if (countdownCoroutine != null)
+        {
+            StopCoroutine(countdownCoroutine);
+            countdownCoroutine = null;
+        }
+
         ResetQuickMatchButton();
         UpdateStatus("Matchmaking cancelled");
 
+        // Leave room if we're in one
         if (PhotonNetwork.InRoom)
             PhotonNetwork.LeaveRoom();
+
+        // Hide match found panel
+        matchFoundPanel?.SetActive(false);
     }
 
     IEnumerator MatchmakingTimer()
     {
-        int totalSeconds = 0; // reset at start
-
-        while (isMatchmaking)
+        while (isMatchmaking && !matchFound)
         {
-            int minutes = totalSeconds / 60;
-            int seconds = totalSeconds % 60;
+            int minutes = (int)matchmakingTime / 60;
+            int seconds = (int)matchmakingTime % 60;
 
-            // Update button text
             quickMatchButtonText.text = $"Cancel ({minutes:00}:{seconds:00})";
 
-            // Animate dots for "Finding Match..."
-            int dots = totalSeconds % 4;
+            // Animate dots for status
+            int dots = ((int)matchmakingTime) % 4;
             UpdateStatus($"Finding Match{new string('.', dots)}");
 
-            // Wait exactly 1 second
             yield return new WaitForSeconds(1f);
-
-            // Increase time after each second
-            totalSeconds++;
+            matchmakingTime += 1f;
         }
     }
 
+    // FIXED: Proper countdown when match is found
+    IEnumerator QuickMatchCountdown()
+    {
+        matchFoundPanel?.SetActive(true);
 
+        // Countdown from 3 to 1
+        for (int i = 3; i >= 1; i--)
+        {
+            if (countdownText != null)
+                countdownText.text = i.ToString();
+
+            UpdateStatus($"Match found! Starting in {i}...");
+            yield return new WaitForSeconds(1f);
+        }
+
+        if (countdownText != null)
+            countdownText.text = "GO!";
+
+        UpdateStatus("Starting game...");
+        yield return new WaitForSeconds(0.5f);
+
+        // Only master client loads scene
+        if (PhotonNetwork.IsMasterClient)
+        {
+            PhotonNetwork.LoadLevel(characterSelectionScene);
+        }
+    }
 
     void ResetQuickMatchButton()
     {
@@ -212,82 +314,268 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     }
     #endregion
 
-    #region Custom Room Management
-    void OnCreateRoomClicked()
+    #region FIXED: Custom Room System with proper room code sharing
+    void OnCustomRoomClicked()
     {
-        if (!PhotonNetwork.IsConnectedAndReady)
-        {
-            UpdateStatus("Not connected to servers!");
-            return;
-        }
-
         mainMenuPanel.SetActive(false);
         customRoomPanel.SetActive(true);
-        UpdateStatus("Enter room details");
+        UpdateStatus("Choose an option");
+    }
+
+    void OnCreateRoomClicked()
+    {
+        customRoomPanel.SetActive(false);
+        createRoomPanel.SetActive(true);
+        UpdateStatus("Configure your room settings");
     }
 
     void OnJoinRoomClicked()
     {
-        if (!PhotonNetwork.IsConnectedAndReady)
-        {
-            UpdateStatus("Not connected to servers!");
-            return;
-        }
-
-        mainMenuPanel.SetActive(false);
-        customRoomPanel.SetActive(true);
-        UpdateStatus("Enter room name to join");
-    }
-
-    void OnBackFromCustomRoomClicked()
-    {
         customRoomPanel.SetActive(false);
-        mainMenuPanel.SetActive(true);
-        UpdateStatus($"Welcome back, {PhotonNetwork.NickName}!");
+        joinRoomPanel.SetActive(true);
+        UpdateStatus("Enter room code to join");
     }
 
+    void OnGenerateRoomCodeClicked()
+    {
+        currentRoomCode = GenerateRoomCode();
+        if (generatedRoomCodeText != null)
+        {
+            generatedRoomCodeText.text = $"Room Code: {currentRoomCode}";
+        }
+        UpdateStatus($"Generated room code: {currentRoomCode}");
+        if (debugMode) Debug.Log($"[ROOM CODE] Generated: {currentRoomCode}");
+    }
+
+    // FIXED: Create room with proper custom properties for lobby sharing
     void OnConfirmCreateRoomClicked()
     {
-        string roomName = roomNameInput?.text?.Trim() ?? "";
-
-        if (string.IsNullOrEmpty(roomName) || roomName.Length < 3)
+        if (string.IsNullOrEmpty(currentRoomCode))
         {
-            UpdateStatus("Enter a valid room name (3+ characters)");
+            UpdateStatus("Please generate a room code first");
             return;
         }
 
         isCreatingCustomRoom = true;
         loadingIndicator.SetActive(true);
-        UpdateStatus("Creating room...");
+        UpdateStatus("Creating custom room...");
+
+        // FIXED: Create room with properties visible in lobby
+        Hashtable customProps = CreateCustomRoomProperties();
 
         RoomOptions roomOptions = new RoomOptions
         {
-            IsVisible = true,
-            IsOpen = true
+            IsVisible = true, // Must be visible for room codes to work
+            IsOpen = true,
+            MaxPlayers = maxPlayers,
+            PlayerTtl = 5000, // FIXED: Shorter TTL to clean up faster
+            EmptyRoomTtl = 2000, // FIXED: Much shorter empty room TTL
+            CustomRoomProperties = customProps,
+            CustomRoomPropertiesForLobby = new string[] { ROOM_CODE_KEY, ROOM_TYPE_KEY, MATCH_LENGTH_KEY, SELECTED_MAP_KEY }
         };
 
+        // FIXED: Use a predictable room name based on room code
+        string roomName = $"CustomRoom_{currentRoomCode}";
         PhotonNetwork.CreateRoom(roomName, roomOptions);
+
+        if (debugMode) Debug.Log($"[CUSTOM ROOM] Creating room '{roomName}' with code '{currentRoomCode}'");
     }
 
+    Hashtable CreateCustomRoomProperties()
+    {
+        // Get settings from UI
+        int matchLength = GetMatchLengthFromDropdown();
+        string selectedMap = GetSelectedMapFromDropdown();
+
+        return new Hashtable
+        {
+            { ROOM_CODE_KEY, currentRoomCode },
+            { ROOM_TYPE_KEY, 1 }, // 1 = Custom Room
+            { MATCH_LENGTH_KEY, matchLength },
+            { SELECTED_MAP_KEY, selectedMap }
+        };
+    }
+
+    int GetMatchLengthFromDropdown()
+    {
+        if (matchLengthDropdown == null) return 60;
+
+        switch (matchLengthDropdown.value)
+        {
+            case 0: return 30;  // 30 seconds
+            case 1: return 60;  // 1 minute  
+            case 2: return 120; // 2 minutes
+            case 3: return 180; // 3 minutes
+            case 4: return 300; // 5 minutes
+            default: return 60;
+        }
+    }
+
+    string GetSelectedMapFromDropdown()
+    {
+        if (mapSelectionDropdown == null) return "Arena1";
+
+        List<string> maps = new List<string> { "Arena1", "Arena2", "Arena3" };
+        int index = mapSelectionDropdown.value;
+        return (index >= 0 && index < maps.Count) ? maps[index] : "Arena1";
+    }
+
+    // FIXED: Join room using room code - search through visible rooms
     void OnConfirmJoinRoomClicked()
     {
-        string roomName = joinRoomNameInput?.text?.Trim() ?? "";
-
-        if (string.IsNullOrEmpty(roomName) || roomName.Length < 3)
+        string roomCode = roomCodeInput?.text?.Trim().ToUpper() ?? "";
+        if (string.IsNullOrEmpty(roomCode) || roomCode.Length != 4)
         {
-            UpdateStatus("Enter a valid room name (3+ characters)");
+            UpdateStatus("Enter a valid 4-character room code");
             return;
         }
 
         isJoiningCustomRoom = true;
         loadingIndicator.SetActive(true);
-        UpdateStatus("Joining room...");
+        UpdateStatus($"Searching for room with code {roomCode}...");
 
+        // FIXED: Try to join using the predictable room name format
+        string roomName = $"CustomRoom_{roomCode}";
         PhotonNetwork.JoinRoom(roomName);
+
+        if (debugMode) Debug.Log($"[CUSTOM ROOM] Attempting to join room '{roomName}' with code '{roomCode}'");
+    }
+
+    string GenerateRoomCode()
+    {
+        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        string code = "";
+        for (int i = 0; i < 4; i++)
+        {
+            code += chars[Random.Range(0, chars.Length)];
+        }
+        return code;
     }
     #endregion
 
-    #region Photon Callbacks
+    #region Navigation Buttons
+    void OnBackFromCustomRoomClicked()
+    {
+        customRoomPanel.SetActive(false);
+        mainMenuPanel.SetActive(true);
+        UpdateStatus("Welcome back!");
+    }
+
+    void OnBackFromJoinRoomClicked()
+    {
+        joinRoomPanel.SetActive(false);
+        customRoomPanel.SetActive(true);
+        UpdateStatus("Choose an option");
+    }
+
+    void OnBackFromCreateRoomClicked()
+    {
+        createRoomPanel.SetActive(false);
+        customRoomPanel.SetActive(true);
+        UpdateStatus("Choose an option");
+    }
+
+    void OnBackFromRoomLobbyClicked()
+    {
+        roomLobbyPanel.SetActive(false);
+        mainMenuPanel.SetActive(true);
+        PhotonNetwork.LeaveRoom();
+        UpdateStatus("Left room");
+    }
+
+    void OnStartGameClicked()
+    {
+        if (!PhotonNetwork.IsMasterClient)
+        {
+            UpdateStatus("Only the room creator can start the game");
+            return;
+        }
+
+        if (PhotonNetwork.CurrentRoom.PlayerCount < 2)
+        {
+            UpdateStatus("Need at least 2 players to start");
+            return;
+        }
+
+        PhotonNetwork.LoadLevel(characterSelectionScene);
+    }
+
+    void OnLeaveRoomClicked()
+    {
+        // FIXED: If master client is leaving a custom room, close it to prevent quick match from joining
+        if (PhotonNetwork.IsMasterClient && PhotonNetwork.CurrentRoom != null)
+        {
+            // Check if this is a custom room (has room code)
+            if (PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(ROOM_CODE_KEY))
+            {
+                if (debugMode) Debug.Log("[LEAVE ROOM] Master client leaving custom room - closing it");
+                // Close the room to prevent others from joining
+                PhotonNetwork.CurrentRoom.IsOpen = false;
+                PhotonNetwork.CurrentRoom.IsVisible = false;
+            }
+        }
+        
+        PhotonNetwork.LeaveRoom();
+    }
+    #endregion
+
+    #region Room Lobby UI
+    void UpdateRoomLobbyUI()
+    {
+        if (PhotonNetwork.CurrentRoom == null) return;
+
+        // Update room name
+        if (roomNameText != null)
+        {
+            // Get room code from properties if it's a custom room
+            string roomCode = "";
+            if (PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(ROOM_CODE_KEY))
+            {
+                roomCode = (string)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_CODE_KEY];
+            }
+
+            string displayName = !string.IsNullOrEmpty(roomCode) ? $"Room Code: {roomCode}" : PhotonNetwork.CurrentRoom.Name;
+            roomNameText.text = displayName;
+        }
+
+        // Update room info
+        if (roomInfoText != null)
+        {
+            int matchLength = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(MATCH_LENGTH_KEY) ?
+                            (int)PhotonNetwork.CurrentRoom.CustomProperties[MATCH_LENGTH_KEY] : 60;
+
+            string selectedMap = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(SELECTED_MAP_KEY) ?
+                               (string)PhotonNetwork.CurrentRoom.CustomProperties[SELECTED_MAP_KEY] : "Arena1";
+
+            int roomType = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(ROOM_TYPE_KEY) ?
+                          (int)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_TYPE_KEY] : 0;
+
+            string roomTypeText = roomType == 0 ? "Quick Match" : "Custom Room";
+            string matchLengthText = matchLength < 60 ? $"{matchLength}s" : $"{matchLength / 60}m";
+
+            roomInfoText.text = $"Type: {roomTypeText}\nMatch Length: {matchLengthText}\nMap: {selectedMap}\nPlayers: {PhotonNetwork.CurrentRoom.PlayerCount}/{PhotonNetwork.CurrentRoom.MaxPlayers}";
+        }
+
+        // Update player list
+        if (playerListText != null)
+        {
+            string playerList = "Players in room:\n";
+            foreach (var player in PhotonNetwork.CurrentRoom.Players.Values)
+            {
+                playerList += $"• {player.NickName}";
+                if (player.IsMasterClient) playerList += " (Host)";
+                playerList += "\n";
+            }
+            playerListText.text = playerList;
+        }
+
+        // Show/hide start button for master client
+        if (startGameButton != null)
+            startGameButton.gameObject.SetActive(PhotonNetwork.IsMasterClient);
+    }
+    #endregion
+
+    #region FIXED: Photon Callbacks
     public override void OnConnectedToMaster()
     {
         loadingIndicator.SetActive(false);
@@ -312,10 +600,41 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         if (debugMode) Debug.Log($"[MAIN MENU] Disconnected: {cause}");
     }
 
+    public override void OnPlayerEnteredRoom(Player newPlayer)
+    {
+        if (roomLobbyPanel.activeInHierarchy)
+        {
+            UpdateRoomLobbyUI();
+        }
+
+        // FIXED: Check for full room in quick match
+        if (isMatchmaking && PhotonNetwork.CurrentRoom.PlayerCount >= PhotonNetwork.CurrentRoom.MaxPlayers)
+        {
+            StartMatchFoundSequence();
+        }
+    }
+
+    public override void OnPlayerLeftRoom(Player otherPlayer)
+    {
+        if (roomLobbyPanel.activeInHierarchy)
+        {
+            UpdateRoomLobbyUI();
+        }
+    }
+
+    // FIXED: Handle successful room creation
     public override void OnCreatedRoom()
     {
-        UpdateStatus($"Room '{PhotonNetwork.CurrentRoom.Name}' created successfully!");
-        if (debugMode) Debug.Log($"[MAIN MENU] Created room: {PhotonNetwork.CurrentRoom.Name}");
+        if (debugMode) Debug.Log($"[ROOM CREATED] {PhotonNetwork.CurrentRoom.Name}");
+
+        if (isMatchmaking)
+        {
+            UpdateStatus("Waiting for players...");
+        }
+        else if (isCreatingCustomRoom)
+        {
+            UpdateStatus($"Custom room created! Code: {currentRoomCode}");
+        }
     }
 
     public override void OnCreateRoomFailed(short returnCode, string message)
@@ -323,30 +642,112 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         isCreatingCustomRoom = false;
         loadingIndicator.SetActive(false);
         UpdateStatus($"Failed to create room: {message}");
-        if (debugMode) Debug.Log($"[MAIN MENU] Create room failed: {message}");
+        if (debugMode) Debug.Log($"[CREATE ROOM FAILED] {message} (Code: {returnCode})");
     }
 
+    // FIXED: Handle successful room join
     public override void OnJoinedRoom()
     {
         loadingIndicator.SetActive(false);
 
-        if (isCreatingCustomRoom)
+        if (debugMode) Debug.Log($"[JOINED ROOM] {PhotonNetwork.CurrentRoom.Name} with {PhotonNetwork.CurrentRoom.PlayerCount} players");
+
+        // FIXED: Verify room type matches what we expected
+        if (isMatchmaking)
         {
+            // Check if this is actually a quick match room
+            int roomType = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(ROOM_TYPE_KEY) ? 
+                          (int)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_TYPE_KEY] : -1;
+            
+            if (roomType != 0) // Not a quick match room
+            {
+                if (debugMode) Debug.LogWarning($"[QUICK MATCH] Joined wrong room type: {roomType}, leaving...");
+                PhotonNetwork.LeaveRoom();
+                return;
+            }
+        }
+
+        if (isMatchmaking)
+        {
+            // FIXED: Reset RoomStateManager leaving flag and clear character properties
+            RoomStateManager.GetOrCreateInstance()?.ResetLeavingFlag();
+            
+            if (PhotonNetwork.IsConnectedAndReady)
+            {
+                Hashtable clearProps = new Hashtable
+                {
+                    { RoomStateManager.PLAYER_CHARACTER_KEY, -1 },
+                    { RoomStateManager.PLAYER_LOCKED_KEY, false }
+                };
+                PhotonNetwork.LocalPlayer.SetCustomProperties(clearProps);
+            }
+
+            // Quick match logic - check if room is full
+            if (PhotonNetwork.CurrentRoom.PlayerCount >= PhotonNetwork.CurrentRoom.MaxPlayers)
+            {
+                // Room is full, start match found sequence
+                StartMatchFoundSequence();
+            }
+            else
+            {
+                // Room not full yet, keep waiting
+                UpdateStatus($"Waiting for players ({PhotonNetwork.CurrentRoom.PlayerCount}/{PhotonNetwork.CurrentRoom.MaxPlayers})...");
+            }
+        }
+        else if (isCreatingCustomRoom)
+        {
+            // Created custom room - go to lobby
             isCreatingCustomRoom = false;
-            customRoomPanel.SetActive(false);
-            mainMenuPanel.SetActive(true);
+            createRoomPanel.SetActive(false);
+            roomLobbyPanel.SetActive(true);
+            UpdateRoomLobbyUI();
+            UpdateStatus("Room created! Waiting for players...");
         }
         else if (isJoiningCustomRoom)
         {
+            // FIXED: Reset RoomStateManager leaving flag and clear character properties
+            RoomStateManager.GetOrCreateInstance()?.ResetLeavingFlag();
+            
+            if (PhotonNetwork.IsConnectedAndReady)
+            {
+                Hashtable clearProps = new Hashtable
+                {
+                    { RoomStateManager.PLAYER_CHARACTER_KEY, -1 },
+                    { RoomStateManager.PLAYER_LOCKED_KEY, false }
+                };
+                PhotonNetwork.LocalPlayer.SetCustomProperties(clearProps);
+            }
+
+            // Joined custom room - go to lobby
             isJoiningCustomRoom = false;
-            customRoomPanel.SetActive(false);
-            mainMenuPanel.SetActive(true);
+            joinRoomPanel.SetActive(false);
+            roomLobbyPanel.SetActive(true);
+            UpdateRoomLobbyUI();
+            UpdateStatus("Successfully joined room!");
         }
+    }
 
-        UpdateStatus($"Joined room: {PhotonNetwork.CurrentRoom.Name}");
-        if (debugMode) Debug.Log($"[MAIN MENU] Joined room with {PhotonNetwork.CurrentRoom.PlayerCount} players");
-
-        CheckIfGameCanStart();
+    // FIXED: Handle join room failure with better error messages
+    public override void OnJoinRandomFailed(short returnCode, string message)
+    {
+        if (isMatchmaking)
+        {
+            if (debugMode) Debug.Log($"[QUICK MATCH] No random room found, creating new one");
+            
+            // Create a new room when no random room is available
+            RoomOptions quickMatchOptions = new RoomOptions
+            {
+                MaxPlayers = maxPlayers,
+                IsVisible = true,
+                IsOpen = true,
+                PlayerTtl = 30000, // 30 seconds
+                EmptyRoomTtl = 10000, // 10 seconds
+                CustomRoomProperties = CreateQuickMatchProperties(),
+                CustomRoomPropertiesForLobby = new string[] { ROOM_TYPE_KEY, MATCH_LENGTH_KEY }
+            };
+            
+            PhotonNetwork.CreateRoom($"QuickMatch_{System.DateTime.Now.Ticks}", quickMatchOptions);
+        }
     }
 
     public override void OnJoinRoomFailed(short returnCode, string message)
@@ -355,34 +756,21 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         isCreatingCustomRoom = false;
         loadingIndicator.SetActive(false);
 
-        if (isMatchmaking)
-        {
-            CancelMatchmaking();
-            UpdateStatus("Failed to find match, try again");
-        }
-        else
-        {
-            UpdateStatus($"Failed to join room: {message}");
-        }
+        string errorMessage = GetJoinRoomErrorMessage(returnCode, message);
+        UpdateStatus($"❌ {errorMessage}");
 
-        if (debugMode) Debug.Log($"[MAIN MENU] Join room failed: {message}");
+        if (debugMode) Debug.Log($"[JOIN ROOM FAILED] {message} (Code: {returnCode})");
     }
 
-    public override void OnPlayerEnteredRoom(Player newPlayer)
+    string GetJoinRoomErrorMessage(short returnCode, string message)
     {
-        UpdateStatus($"{newPlayer.NickName} joined!");
-        if (debugMode) Debug.Log($"[MAIN MENU] {newPlayer.NickName} entered room");
-
-        CheckIfGameCanStart();
-    }
-
-    public override void OnPlayerLeftRoom(Player otherPlayer)
-    {
-        UpdateStatus($"{otherPlayer.NickName} left the room");
-        if (debugMode) Debug.Log($"[MAIN MENU] {otherPlayer.NickName} left room");
-
-        // Update player count display
-        CheckIfGameCanStart();
+        switch (returnCode)
+        {
+            case 32765: return "Room not found! Check the room code.";
+            case 32764: return "Room is full! Try another room.";
+            case 32763: return "Room is closed! Cannot join.";
+            default: return $"Could not join room: {message}";
+        }
     }
 
     public override void OnLeftRoom()
@@ -390,77 +778,57 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         CancelMatchmaking();
         ResetCustomRoomStates();
 
-        if (customRoomPanel != null && customRoomPanel.gameObject != null)
+        // FIXED: Clear player properties to prevent character persistence
+        if (PhotonNetwork.IsConnectedAndReady)
         {
-            customRoomPanel.SetActive(false);
+            Hashtable clearProps = new Hashtable
+            {
+                { RoomStateManager.PLAYER_CHARACTER_KEY, -1 },
+                { RoomStateManager.PLAYER_LOCKED_KEY, false }
+            };
+            PhotonNetwork.LocalPlayer.SetCustomProperties(clearProps);
         }
 
+        // FIXED: Clear room code mapping to prevent reusing old rooms
+        currentRoomCode = "";
+        if (generatedRoomCodeText != null)
+        {
+            generatedRoomCodeText.text = "Click 'Generate Code' to create room";
+        }
+
+        // Hide all panels except main menu
+        customRoomPanel.SetActive(false);
+        roomLobbyPanel.SetActive(false);
+        matchFoundPanel?.SetActive(false);
         mainMenuPanel.SetActive(true);
+
         UpdateStatus($"Welcome back, {PhotonNetwork.NickName}!");
 
-        if (debugMode) Debug.Log("[MAIN MENU] Left room");
+        if (debugMode) Debug.Log("[LEFT ROOM] Returned to main menu and cleared player properties");
     }
     #endregion
 
-    #region Game Start
-    void CheckIfGameCanStart()
+    #region Match Found Logic
+    void StartMatchFoundSequence()
     {
-        if (PhotonNetwork.CurrentRoom.PlayerCount >= PhotonNetwork.CurrentRoom.MaxPlayers)
-        {
-            // FIXED: Don't stop matchmaking timer yet - let it continue until countdown starts
-            StartCoroutine(ShowMatchFoundAndStartCountdown());
-        }
-        else
-        {
-            UpdateStatus($"Waiting for players ({PhotonNetwork.CurrentRoom.PlayerCount}/{PhotonNetwork.CurrentRoom.MaxPlayers})");
-        }
-    }
+        if (matchFound) return; // Prevent multiple calls
 
-    IEnumerator ShowMatchFoundAndStartCountdown()
-    {
-        matchFoundPanel?.SetActive(true);
-        UpdateStatus("Match Found!");
-
-        yield return new WaitForSeconds(1f);
-
-        // FIXED: Stop matchmaking timer when countdown starts
+        matchFound = true;
         isMatchmaking = false;
+        
+        // Stop matchmaking timer
         if (matchmakingCoroutine != null)
         {
             StopCoroutine(matchmakingCoroutine);
             matchmakingCoroutine = null;
         }
+        
+        ResetQuickMatchButton();
+        matchFoundPanel?.SetActive(true);
 
-        // Start countdown from 3 to 1
         if (countdownCoroutine != null)
             StopCoroutine(countdownCoroutine);
-        countdownCoroutine = StartCoroutine(StartCountdown());
-    }
-
-    IEnumerator StartCountdown()
-    {
-        for (int i = 3; i > 0; i--)
-        {
-            if (countdownText != null)
-                countdownText.text = i.ToString();
-
-            UpdateStatus($"Starting in {i}...");
-
-            yield return new WaitForSeconds(1f);
-        }
-
-        if (countdownText != null)
-            countdownText.text = "GO!";
-
-        UpdateStatus("Starting game!");
-
-        yield return new WaitForSeconds(0.5f);
-
-        // Only master client loads the scene
-        if (PhotonNetwork.IsMasterClient)
-        {
-            PhotonNetwork.LoadLevel(characterSelectionScene);
-        }
+        countdownCoroutine = StartCoroutine(QuickMatchCountdown());
     }
     #endregion
 
@@ -476,6 +844,12 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     {
         isCreatingCustomRoom = false;
         isJoiningCustomRoom = false;
+        currentRoomCode = "";
+
+        if (generatedRoomCodeText != null)
+        {
+            generatedRoomCodeText.text = "Click 'Generate Code' to create room";
+        }
     }
     #endregion
 
@@ -486,21 +860,19 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
 
         if (Input.GetKeyDown(KeyCode.F1)) OnConnectClicked();
         if (Input.GetKeyDown(KeyCode.F2)) OnQuickMatchClicked();
-        if (Input.GetKeyDown(KeyCode.F3))
-        {
-            mainMenuPanel.SetActive(false);
-            customRoomPanel.SetActive(true);
-            UpdateStatus("Enter room name and choose action");
-        }
         if (Input.GetKeyDown(KeyCode.L) && PhotonNetwork.InRoom) PhotonNetwork.LeaveRoom();
-        if (Input.GetKeyDown(KeyCode.Escape) && customRoomPanel.activeInHierarchy) OnBackFromCustomRoomClicked();
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (customRoomPanel.activeInHierarchy) OnBackFromCustomRoomClicked();
+            else if (joinRoomPanel.activeInHierarchy) OnBackFromJoinRoomClicked();
+            else if (createRoomPanel.activeInHierarchy) OnBackFromCreateRoomClicked();
+        }
     }
     #endregion
 
     #region Cleanup
     void OnDestroy()
     {
-        // Clean up coroutines
         if (matchmakingCoroutine != null)
             StopCoroutine(matchmakingCoroutine);
 

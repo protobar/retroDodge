@@ -1,0 +1,26 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 00651a1fcea42404cb29bde81dfe60ca, type: 3}
+  m_Name: Arena1_MapData
+  m_EditorClassIdentifier: 
+  mapId: Arena1
+  mapName: Default Map
+  sceneName: GameplayArena
+  mapDescription: The classic arena for intense dodgeball matches
+  mapPreview: {fileID: 21300000, guid: c9055c8a7a57c27478e7c7802cdad3a5, type: 3}
+  mapThumbnail: {fileID: 21300000, guid: c9055c8a7a57c27478e7c7802cdad3a5, type: 3}
+  isUnlocked: 1
+  difficultyLevel: 1
+  isCompetitive: 1
+  mapSize: 1
+  specialFeatures: []
+  mapRules: 

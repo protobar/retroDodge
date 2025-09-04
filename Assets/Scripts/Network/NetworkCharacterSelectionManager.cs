@@ -48,7 +48,9 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
     [SerializeField] private AudioClip characterSelectSound;
     [SerializeField] private AudioClip lockInSound;
     [SerializeField] private AudioClip timerWarningSound;
-    
+    [SerializeField] private bool debugMode;
+
+
     // FIXED: Flag to prevent room property updates when leaving
     private bool isLeavingRoom = false;
     [SerializeField] private AudioClip transitionSound;
@@ -60,6 +62,7 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
     private bool timerStarted = false;
     private bool isTransitioning = false;
     private double selectionStartTime = 0;
+
 
     // FIXED: Use centralized room state manager
     // Room property constants are now in RoomStateManager
@@ -281,13 +284,24 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         UpdateCharacterButtons();
 
         // FIXED: Use centralized room state manager with fallback
-        RoomStateManager.GetOrCreateInstance()?.SetPlayerProperty(RoomStateManager.PLAYER_CHARACTER_KEY, characterIndex);
+        bool success = RoomStateManager.GetOrCreateInstance()?.SetPlayerProperty(RoomStateManager.PLAYER_CHARACTER_KEY, characterIndex) ?? false;
+        if (debugMode) Debug.Log($"[CHAR SELECT] Set character property: {success}, CharacterIndex: {characterIndex}");
+        
+        // FIXED: If property update failed, try to reset the leaving flag
+        if (!success && RoomStateManager.GetOrCreateInstance() != null)
+        {
+            RoomStateManager.GetOrCreateInstance().ResetLeavingFlag();
+            // Try again after resetting the flag
+            success = RoomStateManager.GetOrCreateInstance().SetPlayerProperty(RoomStateManager.PLAYER_CHARACTER_KEY, characterIndex);
+            if (debugMode) Debug.Log($"[CHAR SELECT] Retry after reset flag: {success}");
+        }
 
         PlaySound(characterSelectSound);
 
         SetPanelActive(selectedCharacterPanel, true);
         UpdatePlayerStatus();
     }
+    
 
     void UpdateCharacterDisplay(CharacterData character)
     {
@@ -369,7 +383,17 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         CharacterData lockedCharacter = availableCharacters[selectedCharacterIndex];
 
         // FIXED: Use centralized room state manager with fallback
-        RoomStateManager.GetOrCreateInstance()?.SetPlayerSelectionState(selectedCharacterIndex, true);
+        bool success = RoomStateManager.GetOrCreateInstance()?.SetPlayerSelectionState(selectedCharacterIndex, true) ?? false;
+        if (debugMode) Debug.Log($"[CHAR SELECT] Set lock-in property: {success}, CharacterIndex: {selectedCharacterIndex}");
+        
+        // FIXED: If property update failed, try to reset the leaving flag
+        if (!success && RoomStateManager.GetOrCreateInstance() != null)
+        {
+            RoomStateManager.GetOrCreateInstance().ResetLeavingFlag();
+            // Try again after resetting the flag
+            success = RoomStateManager.GetOrCreateInstance().SetPlayerSelectionState(selectedCharacterIndex, true);
+            if (debugMode) Debug.Log($"[CHAR SELECT] Retry after reset flag: {success}");
+        }
 
         if (lockInButton != null)
             lockInButton.interactable = false;
@@ -383,6 +407,7 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
         CheckBothPlayersReady();
     }
+    
 
     #endregion
 
@@ -502,13 +527,21 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     bool IsPlayerReady(Player player)
     {
+        if (debugMode) Debug.Log($"[CHAR SELECT] Checking if player {player.NickName} is ready...");
+        
         if (player.CustomProperties.TryGetValue(RoomStateManager.PLAYER_LOCKED_KEY, out object lockedObj) &&
             player.CustomProperties.TryGetValue(RoomStateManager.PLAYER_CHARACTER_KEY, out object characterObj))
         {
             bool isLocked = (bool)lockedObj;
             int characterIndex = (int)characterObj;
-            return isLocked && characterIndex >= 0 && characterIndex < availableCharacters.Length;
+            bool isValidCharacter = characterIndex >= 0 && characterIndex < availableCharacters.Length;
+            
+            if (debugMode) Debug.Log($"[CHAR SELECT] Player {player.NickName}: Locked={isLocked}, CharacterIndex={characterIndex}, ValidCharacter={isValidCharacter}");
+            
+            return isLocked && isValidCharacter;
         }
+        
+        if (debugMode) Debug.Log($"[CHAR SELECT] Player {player.NickName}: Missing properties in CustomProperties. Available keys: {string.Join(", ", player.CustomProperties.Keys)}");
         return false;
     }
 
@@ -564,18 +597,26 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
     void CheckBothPlayersReady()
     {
         bool allPlayersReady = true;
+        int readyCount = 0;
 
         foreach (Player player in PhotonNetwork.PlayerList)
         {
-            if (!IsPlayerReady(player))
+            bool isReady = IsPlayerReady(player);
+            if (isReady) readyCount++;
+            
+            if (!isReady)
             {
                 allPlayersReady = false;
-                break;
             }
+            
+            if (debugMode) Debug.Log($"[CHAR SELECT] Player {player.NickName}: Ready={isReady}");
         }
+
+        if (debugMode) Debug.Log($"[CHAR SELECT] Ready check: {readyCount}/{PhotonNetwork.PlayerList.Length} players ready, AllReady={allPlayersReady}");
 
         if (allPlayersReady)
         {
+            if (debugMode) Debug.Log("[CHAR SELECT] All players ready! Transitioning to gameplay...");
             StoreSelectionDataForGameplay();
             TransitionToGameplay();
         }
@@ -698,6 +739,8 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     public override void OnPlayerPropertiesUpdate(Player targetPlayer, Hashtable changedProps)
     {
+        if (debugMode) Debug.Log($"[CHAR SELECT] Player properties updated for {targetPlayer.NickName}: {string.Join(", ", changedProps.Keys)}");
+        
         UpdatePlayerStatus();
         CheckBothPlayersReady();
     }

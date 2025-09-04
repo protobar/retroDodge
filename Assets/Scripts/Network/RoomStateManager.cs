@@ -44,6 +44,15 @@ public class RoomStateManager : MonoBehaviourPunCallbacks
     public const string PLAYER_CHARACTER_COLOR_G = "CharacterColor_G";
     public const string PLAYER_CHARACTER_COLOR_B = "CharacterColor_B";
     
+    // Room Settings Properties
+    public const string ROOM_MATCH_LENGTH = "MatchLength";
+    public const string ROOM_SELECTED_MAP = "SelectedMap";
+    public const string ROOM_IS_PRIVATE = "IsPrivate";
+    public const string ROOM_PASSWORD = "RoomPassword";
+    public const string ROOM_MAX_PLAYERS = "MaxPlayers";
+    public const string ROOM_ALLOW_SPECTATORS = "AllowSpectators";
+    public const string ROOM_IS_VISIBLE = "IsVisible";
+    
     // ═══════════════════════════════════════════════════════════════
     // SINGLETON PATTERN
     // ═══════════════════════════════════════════════════════════════
@@ -350,8 +359,73 @@ public class RoomStateManager : MonoBehaviourPunCallbacks
     }
     
     // ═══════════════════════════════════════════════════════════════
+    // ROOM SETTINGS METHODS
+    // ═══════════════════════════════════════════════════════════════
+    
+    /// <summary>
+    /// Set room settings from RoomSettings object
+    /// </summary>
+    public bool SetRoomSettings(RoomSettings settings)
+    {
+        if (settings == null) return false;
+        
+        Hashtable props = new Hashtable
+        {
+            [ROOM_MATCH_LENGTH] = settings.matchLengthSeconds,
+            [ROOM_SELECTED_MAP] = settings.selectedMap,
+            [ROOM_IS_PRIVATE] = settings.isPrivate,
+            [ROOM_PASSWORD] = settings.roomPassword,
+            [ROOM_MAX_PLAYERS] = settings.maxPlayers,
+            [ROOM_ALLOW_SPECTATORS] = settings.allowSpectators,
+            [ROOM_IS_VISIBLE] = settings.isVisible
+        };
+        
+        return SetRoomProperties(props);
+    }
+    
+    /// <summary>
+    /// Get room settings as RoomSettings object
+    /// </summary>
+    public RoomSettings GetRoomSettings()
+    {
+        return new RoomSettings
+        {
+            matchLengthSeconds = GetRoomProperty(ROOM_MATCH_LENGTH, 60),
+            selectedMap = GetRoomProperty(ROOM_SELECTED_MAP, "Arena1"),
+            isPrivate = GetRoomProperty(ROOM_IS_PRIVATE, false),
+            roomPassword = GetRoomProperty(ROOM_PASSWORD, ""),
+            maxPlayers = GetRoomProperty(ROOM_MAX_PLAYERS, 2),
+            allowSpectators = GetRoomProperty(ROOM_ALLOW_SPECTATORS, false),
+            isVisible = GetRoomProperty(ROOM_IS_VISIBLE, true)
+        };
+    }
+    
+    /// <summary>
+    /// Set individual room setting
+    /// </summary>
+    public bool SetRoomSetting(string key, object value)
+    {
+        Hashtable props = new Hashtable { [key] = value };
+        return SetRoomProperties(props);
+    }
+    
+    /// <summary>
+    /// Get individual room setting
+    /// </summary>
+    public T GetRoomSetting<T>(string key, T defaultValue = default(T))
+    {
+        return GetRoomProperty<T>(key, defaultValue);
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
     // PHOTON CALLBACKS
     // ═══════════════════════════════════════════════════════════════
+    
+    public override void OnJoinedRoom()
+    {
+        Debug.Log("[ROOM STATE MANAGER] Joined room - resetting leaving flag");
+        isLeavingRoom = false; // FIXED: Reset flag when joining new room
+    }
     
     public override void OnLeftRoom()
     {
@@ -363,5 +437,14 @@ public class RoomStateManager : MonoBehaviourPunCallbacks
     {
         Debug.Log($"[ROOM STATE MANAGER] Disconnected: {cause}");
         isLeavingRoom = true;
+    }
+    
+    /// <summary>
+    /// FIXED: Manually reset the leaving flag (for debugging/fix purposes)
+    /// </summary>
+    public void ResetLeavingFlag()
+    {
+        isLeavingRoom = false;
+        if (debugMode) Debug.Log("[ROOM STATE] Manually reset leaving flag");
     }
 }
