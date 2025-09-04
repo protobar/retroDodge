@@ -382,14 +382,27 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     {
         if (!ShouldProcessInput()) return;
 
+        // FIXED: Check if player actually has ball but hasBall is true
+        if (hasBall)
+        {
+            var currentBall = BallManager.Instance?.GetCurrentBall();
+            if (currentBall == null || currentBall.GetHolder() != this)
+            {
+                Debug.Log($"[BALL STATE] Player {name} has hasBall=true but no actual ball - clearing state");
+                SetHasBall(false);
+            }
+        }
+
         // Jump system with character data integration
         if (inputHandler.GetJumpPressed())
         {
+            Debug.Log($"[JUMP INPUT] Jump pressed - isGrounded: {isGrounded}, isDucking: {isDucking}, canDoubleJump: {characterData?.canDoubleJump}, hasDoubleJumped: {hasDoubleJumped}");
+            
             if (isGrounded && !isDucking)
             {
                 Jump();
             }
-            else if (characterData.canDoubleJump && !hasDoubleJumped && !isGrounded)
+            else if (characterData != null && characterData.canDoubleJump && !hasDoubleJumped && !isGrounded)
             {
                 DoubleJump();
             }
@@ -463,11 +476,46 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     void DoubleJump()
     {
-        if (hasDoubleJumped) return;
+        Debug.Log($"[DOUBLE JUMP] Attempting double jump - hasDoubleJumped: {hasDoubleJumped}, canDoubleJump: {characterData?.canDoubleJump}, isGrounded: {isGrounded}, velocity.y: {velocity.y}");
+        
+        // FIXED: More robust double jump conditions
+        if (hasDoubleJumped) 
+        {
+            Debug.Log($"[DOUBLE JUMP] Blocked - already double jumped");
+            return;
+        }
+        
+        if (characterData == null || !characterData.canDoubleJump)
+        {
+            Debug.Log($"[DOUBLE JUMP] Blocked - character cannot double jump");
+            return;
+        }
+        
+        if (isGrounded)
+        {
+            Debug.Log($"[DOUBLE JUMP] Blocked - player is grounded, should use normal jump");
+            return;
+        }
+        
+        // FIXED: Check if player is actually in air (falling or rising)
+        if (velocity.y >= 0)
+        {
+            Debug.Log($"[DOUBLE JUMP] Blocked - player not falling (velocity.y: {velocity.y})");
+            return;
+        }
+        
+        Debug.Log($"[DOUBLE JUMP] Executing double jump!");
         velocity.y = characterData.jumpHeight * 0.8f;
         hasDoubleJumped = true;
-        PlayCharacterSound(CharacterAudioType.Jump);
-        SyncPlayerAction("DoubleJump");
+        
+        // FIXED: Sync double jump to other players
+        if (photonView.IsMine)
+        {
+            PlayCharacterSound(CharacterAudioType.Jump);
+            SyncPlayerAction("DoubleJump");
+            // FIXED: Also sync the double jump state
+            photonView.RPC("SyncDoubleJumpState", RpcTarget.Others, hasDoubleJumped);
+        }
     }
 
     bool CanDash()
@@ -588,9 +636,11 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
         SpawnThrowVFX(throwType);
 
+        // FIXED: Set hasBall to false before throwing
+        SetHasBall(false);
+
         // Pass throw direction to ball manager
         BallManager.Instance.RequestBallThrowWithCharacterData(this, characterData, throwType, damage);
-
 
         PlayCharacterSound(CharacterAudioType.Throw);
 
@@ -753,6 +803,12 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         abilityCharges[1] = 0f;
         StartCoroutine(AbilityCooldown(1));
 
+        // FIXED: Sync trick activation to other players
+        if (photonView.IsMine)
+        {
+            photonView.RPC("SyncPlayerAction", RpcTarget.Others, "Trick");
+        }
+
         var opponent = FindOpponent();
         if (opponent != null)
         {
@@ -765,6 +821,12 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     {
         abilityCharges[2] = 0f;
         StartCoroutine(AbilityCooldown(2));
+
+        // FIXED: Sync treat activation to other players
+        if (photonView.IsMine)
+        {
+            photonView.RPC("SyncPlayerAction", RpcTarget.Others, "Treat");
+        }
 
         SpawnTreatVFX();
         ExecuteTreat();
@@ -783,6 +845,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
             ball.SetThrowData(ThrowType.Ultimate, damage, speed);
             ball.ThrowBall(throwDirection, 1.5f);
+            SetHasBall(false); // FIXED: Set hasBall to false after throwing
 
             // Screen shake
             var camera = FindObjectOfType<CameraController>();
@@ -799,27 +862,50 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         float speed = characterData.GetUltimateSpeed();
         float delay = characterData.GetMultiThrowDelay();
 
-        Vector3 throwDir = GetThrowDirection(); // FIXED: Use proper direction
+        Vector3 throwDir = GetThrowDirection();
 
-        for (int i = 0; i < count; i++)
+        // FIXED: First throw the original ball, then spawn multi-balls
+        var originalBall = BallManager.Instance.GetCurrentBall();
+        if (originalBall != null)
         {
-            var ballObj = Instantiate(BallManager.Instance.ballPrefab,
-                transform.position + characterData.GetMultiThrowSpawnOffset(), Quaternion.identity);
+            // Throw the original ball first
+            originalBall.SetThrowData(ThrowType.Ultimate, damage, speed);
+            originalBall.ThrowBall(throwDir, 1.5f);
+            SetHasBall(false); // FIXED: Set hasBall to false after throwing original ball
+        }
 
-            var ballController = ballObj.GetComponent<BallController>();
-            if (ballController != null)
+        // Wait a bit before spawning multi-balls
+        yield return new WaitForSeconds(0.1f);
+
+        // FIXED: Use BallManager for proper network instantiation
+        if (BallManager.Instance != null)
+        {
+            // Use BallManager's MultiThrowCoroutine method for proper network handling
+            BallManager.Instance.StartCoroutine(BallManager.Instance.MultiThrowCoroutine(this, characterData));
+        }
+        else
+        {
+            // Fallback: Create balls locally (for testing)
+            for (int i = 0; i < count; i++)
             {
-                float angleOffset = (i - (count - 1) * 0.5f) * (characterData.GetMultiThrowSpread() / count);
-                Vector3 spreadDir = Quaternion.Euler(0, angleOffset, 0) * throwDir;
+                var ballObj = Instantiate(BallManager.Instance.ballPrefab,
+                    transform.position + characterData.GetMultiThrowSpawnOffset(), Quaternion.identity);
 
-                ballController.SetThrowData(ThrowType.Ultimate, damage, speed);
-                ballController.SetThrower(this);
-                ballController.velocity = spreadDir * speed;
+                var ballController = ballObj.GetComponent<BallController>();
+                if (ballController != null)
+                {
+                    float angleOffset = (i - (count - 1) * 0.5f) * (characterData.GetMultiThrowSpread() / count);
+                    Vector3 spreadDir = Quaternion.Euler(0, angleOffset, 0) * throwDir;
 
-                Destroy(ballObj, 4f);
+                    ballController.SetThrowData(ThrowType.Ultimate, damage, speed);
+                    ballController.SetThrower(this);
+                    ballController.ThrowBallInternal(spreadDir.normalized, 1f);
+
+                    Destroy(ballObj, 4f);
+                }
+
+                yield return new WaitForSeconds(delay);
             }
-
-            yield return new WaitForSeconds(delay);
         }
     }
 
@@ -837,6 +923,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
             ball.SetThrowData(ThrowType.Ultimate, damage, speed);
             ball.ThrowBall(throwDir, 1f);
+            SetHasBall(false); // FIXED: Set hasBall to false after throwing
 
             StartCoroutine(CurveballBehavior(ball));
         }
@@ -862,21 +949,23 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     void ExecuteTrick(PlayerCharacter opponent)
     {
-        switch (characterData.trickType)
+        // FIXED: Sync trick effects across network
+        if (photonView.IsMine && opponent != null)
         {
-            case TrickType.SlowSpeed: StartCoroutine(ApplySlowSpeed(opponent)); break;
-            case TrickType.Freeze: StartCoroutine(ApplyFreeze(opponent)); break;
-            case TrickType.InstantDamage: ApplyInstantDamage(opponent); break;
+            PhotonView opponentView = opponent.GetComponent<PhotonView>();
+            if (opponentView != null)
+            {
+                photonView.RPC("ApplyTrickEffect", RpcTarget.All, opponentView.ViewID, (int)characterData.trickType);
+            }
         }
     }
 
     void ExecuteTreat()
     {
-        switch (characterData.treatType)
+        // FIXED: Sync treat effects across network
+        if (photonView.IsMine)
         {
-            case TreatType.Shield: ApplyShield(); break;
-            case TreatType.Teleport: ExecuteTeleport(); break;
-            case TreatType.SpeedBoost: StartCoroutine(ApplySpeedBoost()); break;
+            photonView.RPC("ApplyTreatEffect", RpcTarget.All, photonView.ViewID, (int)characterData.treatType);
         }
     }
 
@@ -906,8 +995,17 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     void ApplyInstantDamage(PlayerCharacter opponent)
     {
+        Debug.Log($"[INSTANT DAMAGE] Applying {characterData.GetInstantDamageAmount()} damage to {opponent.name}");
         var health = opponent.GetComponent<PlayerHealth>();
-        health?.TakeDamage(characterData.GetInstantDamageAmount(), null);
+        if (health != null)
+        {
+            health.TakeDamage(characterData.GetInstantDamageAmount(), null);
+            Debug.Log($"[INSTANT DAMAGE] Damage applied successfully to {opponent.name}");
+        }
+        else
+        {
+            Debug.LogWarning($"[INSTANT DAMAGE] No PlayerHealth component found on {opponent.name}");
+        }
     }
 
     void ApplyShield()
@@ -1022,6 +1120,77 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
                 break;
             case "Ultimate":
                 SpawnUltimateVFX();
+                break;
+            case "Trick":
+                // FIXED: Sync trick effects to other players
+                var opponent = FindOpponent();
+                if (opponent != null)
+                {
+                    SpawnTrickVFX(opponent);
+                    ExecuteTrick(opponent); // FIXED: Also execute trick effect
+                }
+                break;
+            case "Treat":
+                // FIXED: Sync treat effects to other players
+                SpawnTreatVFX();
+                break;
+        }
+    }
+
+    [PunRPC]
+    void SyncDoubleJumpState(bool doubleJumped)
+    {
+        if (photonView.IsMine) return;
+        hasDoubleJumped = doubleJumped;
+    }
+
+    [PunRPC]
+    void ApplyTrickEffect(int targetViewID, int trickType)
+    {
+        PhotonView targetView = PhotonView.Find(targetViewID);
+        if (targetView == null) return;
+
+        PlayerCharacter targetPlayer = targetView.GetComponent<PlayerCharacter>();
+        if (targetPlayer == null) return;
+
+        // FIXED: Apply trick effect based on type and target ownership
+        switch ((TrickType)trickType)
+        {
+            case TrickType.SlowSpeed:
+                if (!targetView.IsMine) // Apply to opponent
+                    StartCoroutine(ApplySlowSpeed(targetPlayer));
+                break;
+            case TrickType.Freeze:
+                if (!targetView.IsMine) // Apply to opponent
+                    StartCoroutine(ApplyFreeze(targetPlayer));
+                break;
+            case TrickType.InstantDamage:
+                if (!targetView.IsMine) // Apply to opponent
+                    ApplyInstantDamage(targetPlayer);
+                break;
+        }
+    }
+
+    [PunRPC]
+    void ApplyTreatEffect(int targetViewID, int treatType)
+    {
+        PhotonView targetView = PhotonView.Find(targetViewID);
+        if (targetView == null || !targetView.IsMine) return;
+
+        PlayerCharacter targetPlayer = targetView.GetComponent<PlayerCharacter>();
+        if (targetPlayer == null) return;
+
+        // Apply treat effect based on type
+        switch ((TreatType)treatType)
+        {
+            case TreatType.Shield:
+                ApplyShield();
+                break;
+            case TreatType.Teleport:
+                ExecuteTeleport();
+                break;
+            case TreatType.SpeedBoost:
+                StartCoroutine(ApplySpeedBoost());
                 break;
         }
     }

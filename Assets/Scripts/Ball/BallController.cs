@@ -35,10 +35,10 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     [SerializeField] private float holdFollowSpeed = 10f;
 
     [Header("Arena Bounds")]
-    [SerializeField] private float arenaLeftBound = -12f;
-    [SerializeField] private float arenaRightBound = 12f;
+    [SerializeField] private float arenaLeftBound = -15f;
+    [SerializeField] private float arenaRightBound = 15f;
     [SerializeField] private float arenaTopBound = 8f;
-    [SerializeField] private float arenaBottomBound = -2f;
+    [SerializeField] private float arenaBottomBound = -5f;
     [SerializeField] private float wallBounceMultiplier = 0.75f;
     [SerializeField] private int maxWallBounces = 3;
 
@@ -70,6 +70,8 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     private int networkHolderID = -1;
     private int networkThrowerID = -1;
     private bool hasNetworkAuthority = false;
+    
+    // FIXED: Removed optimization variables - using fixed data structure for reliability
 
     // Hold timer state
     private float ballHoldStartTime = 0f;
@@ -298,8 +300,46 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             }
         }
 
-        if (ballTransform.position.y < arenaBottomBound - 3f)
+        // FIXED: All clients check bounds, not just ball owner
+        CheckArenaBounds();
+    }
+
+    void CheckArenaBounds()
+    {
+        Vector3 ballPos = ballTransform.position;
+        // FIXED: Updated bounds to match requirements (x = -15 to 15, y below -5)
+        bool outOfBounds = ballPos.x < arenaLeftBound || 
+                          ballPos.x > arenaRightBound ||
+                          ballPos.y < arenaBottomBound ||
+                          ballPos.y > arenaTopBound + 2f; // Keep some top margin
+
+        if (outOfBounds)
         {
+            Debug.Log($"[BALL BOUNDS] Ball out of arena at {ballPos} - resetting to center");
+            Debug.Log($"[BALL BOUNDS] X: {ballPos.x} (bounds: {arenaLeftBound} to {arenaRightBound})");
+            Debug.Log($"[BALL BOUNDS] Y: {ballPos.y} (bounds: {arenaBottomBound} to {arenaTopBound})");
+            
+            // FIXED: All clients can reset ball when it goes out of bounds
+            if (hasNetworkAuthority)
+            {
+                // Ball owner resets immediately and syncs
+                ResetBall();
+            }
+            else
+            {
+                // Non-owner clients request reset from ball owner
+                photonView.RPC("RequestBallReset", RpcTarget.MasterClient);
+            }
+        }
+    }
+
+    [PunRPC]
+    void RequestBallReset()
+    {
+        // Master client handles ball reset requests
+        if (PhotonNetwork.IsMasterClient && hasNetworkAuthority)
+        {
+            Debug.Log("[BALL RESET] Master client received reset request");
             ResetBall();
         }
     }
@@ -311,6 +351,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         Vector3 currentPos = ballTransform.position;
         Vector3 nextPos = currentPos + velocity * Time.deltaTime;
 
+        // FIXED: Updated wall collision bounds to match new arena bounds
         if ((currentPos.x > arenaLeftBound && nextPos.x <= arenaLeftBound) ||
             (currentPos.x < arenaRightBound && nextPos.x >= arenaRightBound))
         {
@@ -504,18 +545,32 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
         float distance = Vector3.Distance(ballTransform.position, networkPosition);
 
-        if (distance > 5f)
+        // FIXED: Improved interpolation with lag compensation
+        if (distance > 10f)
         {
+            // Snap to network position if too far (likely teleportation)
             ballTransform.position = networkPosition;
             velocity = networkVelocity;
         }
-        else if (distance > 0.1f)
+        else if (distance > 0.05f)
         {
-            float positionLerp = Time.deltaTime * positionLerpRate;
-            ballTransform.position = Vector3.Lerp(ballTransform.position, networkPosition, positionLerp);
-
-            float velocityLerp = Time.deltaTime * velocityLerpRate;
-            velocity = Vector3.Lerp(velocity, networkVelocity, velocityLerp);
+            // FIXED: Smoother interpolation with adaptive rates
+            float adaptivePositionRate = positionLerpRate;
+            float adaptiveVelocityRate = velocityLerpRate;
+            
+            // Increase interpolation speed for faster-moving balls
+            if (networkVelocity.magnitude > 15f)
+            {
+                adaptivePositionRate *= 1.5f;
+                adaptiveVelocityRate *= 1.2f;
+            }
+            
+            // Use SmoothDamp for more natural movement
+            Vector3 smoothPosition = Vector3.SmoothDamp(ballTransform.position, networkPosition, ref velocity, adaptivePositionRate);
+            ballTransform.position = smoothPosition;
+            
+            // Smooth velocity changes
+            velocity = Vector3.Lerp(velocity, networkVelocity, adaptiveVelocityRate * Time.deltaTime);
         }
     }
 
@@ -543,7 +598,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     {
         if (stream.IsWriting && hasNetworkAuthority)
         {
-            // Ball owner: Send ball data
+            // FIXED: Always send the same number of data items
             stream.SendNext(ballTransform.position);
             stream.SendNext(velocity);
             stream.SendNext((int)currentState);
@@ -555,111 +610,37 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         }
         else if (stream.IsReading)
         {
-            // Other clients: Receive ball data
-            networkPosition = (Vector3)stream.ReceiveNext();
-            networkVelocity = (Vector3)stream.ReceiveNext();
-            networkBallState = (BallState)stream.ReceiveNext();
-            networkHolderID = (int)stream.ReceiveNext();
-            networkThrowerID = (int)stream.ReceiveNext();
-            currentDamage = (int)stream.ReceiveNext();
-            currentThrowType = (ThrowType)stream.ReceiveNext();
-            float timestamp = (float)stream.ReceiveNext();
-
-            // Apply lag compensation
-            float lag = Mathf.Abs((float)(PhotonNetwork.Time - timestamp));
-            if (networkVelocity.magnitude > 0.1f && lag > 0.02f)
+            // FIXED: Always read the same number of data items
+            try
             {
-                networkPosition += networkVelocity * lag;
+                networkPosition = (Vector3)stream.ReceiveNext();
+                networkVelocity = (Vector3)stream.ReceiveNext();
+                networkBallState = (BallState)(int)stream.ReceiveNext();
+                networkHolderID = (int)stream.ReceiveNext();
+                networkThrowerID = (int)stream.ReceiveNext();
+                currentDamage = (int)stream.ReceiveNext();
+                currentThrowType = (ThrowType)(int)stream.ReceiveNext();
+                float timestamp = (float)stream.ReceiveNext();
+
+                // FIXED: Improved lag compensation
+                float lag = Mathf.Abs((float)(PhotonNetwork.Time - timestamp));
+                if (networkVelocity.magnitude > 0.1f && lag > 0.01f && lag < 0.5f) // Reasonable lag range
+                {
+                    networkPosition += networkVelocity * lag * 0.5f; // Reduced compensation factor
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[BALL SYNC] Error deserializing ball data: {e.Message}");
             }
         }
     }
 
-    [PunRPC]
-    void SyncBallEvent(string eventType, int playerID, float posX, float posY, float posZ,
-                      float velX, float velY, float velZ, int damage, int throwType)
-    {
-        Vector3 position = new Vector3(posX, posY, posZ);
-        Vector3 ballVelocity = new Vector3(velX, velY, velZ);
+    // FIXED: Simplified RPC system - removed redundant SyncBallEvent
+    // Ball state changes are now handled through OnPhotonSerializeView for better performance
 
-        switch (eventType)
-        {
-            case "Pickup":
-                HandleNetworkPickup(playerID, position);
-                break;
-            case "Throw":
-                HandleNetworkThrow(playerID, position, ballVelocity, damage, (ThrowType)throwType);
-                break;
-            case "Catch":
-                HandleNetworkCatch(playerID, position);
-                break;
-            case "Drop":
-                HandleNetworkDrop(position, ballVelocity);
-                break;
-        }
-    }
-
-    void HandleNetworkPickup(int playerID, Vector3 position)
-    {
-        if (hasNetworkAuthority) return;
-
-        PlayerCharacter player = FindPlayerByID(playerID);
-        if (player != null)
-        {
-            holder = player;
-            player.SetHasBall(true);
-            SetBallState(BallState.Held);
-            ballTransform.position = position;
-        }
-    }
-
-    void HandleNetworkThrow(int playerID, Vector3 position, Vector3 ballVelocity, int damage, ThrowType throwType)
-    {
-        if (hasNetworkAuthority) return;
-
-        PlayerCharacter player = FindPlayerByID(playerID);
-        if (player != null)
-        {
-            thrower = player;
-            player.SetHasBall(false);
-            holder = null;
-
-            ballTransform.position = position;
-            velocity = ballVelocity;
-            currentDamage = damage;
-            currentThrowType = throwType;
-            SetBallState(BallState.Thrown);
-        }
-    }
-
-    void HandleNetworkCatch(int playerID, Vector3 position)
-    {
-        if (hasNetworkAuthority) return;
-
-        PlayerCharacter player = FindPlayerByID(playerID);
-        if (player != null)
-        {
-            holder = player;
-            player.SetHasBall(true);
-            SetBallState(BallState.Held);
-            ballTransform.position = position;
-            velocity = Vector3.zero;
-        }
-    }
-
-    void HandleNetworkDrop(Vector3 position, Vector3 ballVelocity)
-    {
-        if (hasNetworkAuthority) return;
-
-        if (holder != null)
-        {
-            holder.SetHasBall(false);
-            holder = null;
-        }
-
-        ballTransform.position = position;
-        velocity = ballVelocity;
-        SetBallState(BallState.Free);
-    }
+    // FIXED: Removed redundant network event handlers
+    // All ball state changes are now handled through OnPhotonSerializeView for better performance
 
     // ═══════════════════════════════════════════════════════════════
     // PUBLIC INTERFACE METHODS - CLEANED UP
@@ -714,13 +695,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
                     ballHoldStartTime = Time.time;
                     ResetHoldTimer();
 
-                    Debug.Log($"📤 Syncing pickup to other clients...");
-                    // Sync pickup to other clients
-                    photonView.RPC("SyncBallEvent", RpcTarget.Others, "Pickup",
-                                 characterView.ViewID,
-                                 ballTransform.position.x, ballTransform.position.y, ballTransform.position.z,
-                                 0f, 0f, 0f, 0, 0);
-
+                    // FIXED: No need for RPC - OnPhotonSerializeView handles sync
                     Debug.Log($"🎉 {character.name} successfully picked up ball!");
                     return true;
                 }
@@ -740,13 +715,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
                 ballHoldStartTime = Time.time;
                 ResetHoldTimer();
 
-                Debug.Log($"📤 Syncing remote pickup to all clients...");
-                // Sync to all clients
-                photonView.RPC("SyncBallEvent", RpcTarget.All, "Pickup",
-                             characterView?.ViewID ?? -1,
-                             ballTransform.position.x, ballTransform.position.y, ballTransform.position.z,
-                             0f, 0f, 0f, 0, 0);
-
+                // FIXED: No need for RPC - OnPhotonSerializeView handles sync
                 Debug.Log($"🎉 Remote pickup successful for {character.name}");
                 return true;
             }
@@ -783,31 +752,35 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     public void ThrowBall(Vector3 direction, float power)
     {
         if (currentState != BallState.Held) return;
+        ThrowBallInternal(direction, power);
+    }
 
-        Debug.Log($"🚀 === BALL THROW START ===");
-        Debug.Log($"  - hasNetworkAuthority: {hasNetworkAuthority}");
-        Debug.Log($"  - photonView.IsMine: {photonView.IsMine}");
-        Debug.Log($"  - Ball Owner: {photonView.Owner?.NickName ?? "NULL"}");
+    // FIXED: Internal throw method that bypasses state check for ultimate abilities
+    public void ThrowBallInternal(Vector3 direction, float power)
+    {
+        Debug.Log($"🚀 === BALL THROW INTERNAL START ===");
+        Debug.Log($"  - Current State: {currentState}");
+        Debug.Log($"  - Direction: {direction}");
+        Debug.Log($"  - Power: {power}");
 
-        // FIXED: Allow throws if we own the ball OR if we're the holder
-        bool canThrow = hasNetworkAuthority || (holder != null && holder.GetComponent<PhotonView>()?.IsMine == true);
-
-        if (!canThrow)
-        {
-            Debug.LogWarning($"❌ Cannot throw ball - no authority. hasNetworkAuthority={hasNetworkAuthority}");
-            return;
-        }
-
-        Debug.Log($"✅ Throw authorized - proceeding");
-
+        // FIXED: For ultimate abilities, we don't need to check holder or authority
+        // Just set the ball to thrown state and apply velocity
+        
         StopHoldTimer();
 
-        thrower = holder;
-
-        bool isInAir = thrower != null && !thrower.IsGrounded();
-        if (currentThrowType == ThrowType.Normal && isInAir)
+        // FIXED: Set thrower to the player who activated the ultimate
+        if (thrower == null)
         {
-            currentThrowType = ThrowType.JumpThrow;
+            // Find the player who owns this ball
+            var players = FindObjectsOfType<PlayerCharacter>();
+            foreach (var player in players)
+            {
+                if (player.GetComponent<PhotonView>()?.IsMine == true)
+                {
+                    thrower = player;
+                    break;
+                }
+            }
         }
 
         if (collisionSystem != null && thrower != null)
@@ -824,29 +797,16 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             throwDirection = (targetPos - ballTransform.position).normalized;
         }
 
+        // FIXED: Set velocity and state
         velocity = throwDirection * currentThrowSpeed * power;
-
-        if (holder != null)
-        {
-            holder.SetHasBall(false);
-            holder = null;
-        }
-
         SetBallState(BallState.Thrown);
 
-        // FIXED: Sync to other clients if we have authority
-        if (hasNetworkAuthority)
-        {
-            PhotonView throwerView = thrower?.GetComponent<PhotonView>();
-            if (throwerView != null)
-            {
-                photonView.RPC("SyncBallEvent", RpcTarget.Others, "Throw",
-                             throwerView.ViewID,
-                             ballTransform.position.x, ballTransform.position.y, ballTransform.position.z,
-                             velocity.x, velocity.y, velocity.z,
-                             currentDamage, (int)currentThrowType);
-            }
-        }
+        Debug.Log($"🚀 === BALL THROW INTERNAL COMPLETE ===");
+        Debug.Log($"  - New State: {currentState}");
+        Debug.Log($"  - Velocity: {velocity}");
+        Debug.Log($"  - Speed: {currentThrowSpeed}");
+
+        // FIXED: No need for RPC - OnPhotonSerializeView handles sync
 
         Debug.Log($"🚀 === BALL THROW COMPLETE ===");
     }

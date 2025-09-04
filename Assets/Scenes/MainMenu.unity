@@ -5877,18 +5877,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3f95ed819f8ba5149b887cfd61a52d5c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  roomNameInput: {fileID: 0}
-  roomNameErrorText: {fileID: 1170751267}
   matchLengthDropdown: {fileID: 1295037148}
   matchLengthDescriptionText: {fileID: 1486847311}
   mapSelectionDropdown: {fileID: 886169185}
   mapPreviewImage: {fileID: 697062239}
   mapDescriptionText: {fileID: 1517003061}
   mapSizeText: {fileID: 1184154504}
-  privateRoomToggle: {fileID: 0}
-  passwordPanel: {fileID: 0}
-  passwordInput: {fileID: 0}
-  passwordErrorText: {fileID: 0}
   settingsPreviewText: {fileID: 1378394707}
   settingsPreviewPanel: {fileID: 1307509617}
   createRoomButton: {fileID: 178787254}

@@ -531,31 +531,27 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
     void ResetBallForNewRound()
     {
-        if (PhotonNetwork.IsMasterClient)
+        // FIXED: All clients can reset ball, not just master client
+        BallManager ballManager = FindObjectOfType<BallManager>();
+        if (ballManager != null)
         {
-            // Master client handles ball reset
-            BallManager ballManager = FindObjectOfType<BallManager>();
-            if (ballManager != null)
+            ballManager.ResetBall();
+        }
+        else
+        {
+            // Fallback: Direct ball reset
+            BallController[] balls = FindObjectsOfType<BallController>();
+            foreach (BallController ball in balls)
             {
-                ballManager.ResetBall();
-            }
-            else
-            {
-                // Fallback: Direct ball reset
-                BallController[] balls = FindObjectsOfType<BallController>();
-                foreach (BallController ball in balls)
+                if (ball.photonView.IsMine)
                 {
-                    if (ball.photonView.IsMine)
-                    {
-                        ball.ResetBall();
-                        break; // Only reset one ball
-                    }
+                    ball.ResetBall();
+                    break; // Only reset one ball
                 }
             }
-
-            // Signal ball reset to other clients
-            photonView.RPC("OnBallResetComplete", RpcTarget.Others);
         }
+
+        Debug.Log($"[BALL RESET] Ball reset by client {PhotonNetwork.LocalPlayer.ActorNumber}");
     }
 
     [PunRPC]
@@ -734,6 +730,9 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             matchUI.UpdateRoundInfo(currentRound, player1RoundsWon, player2RoundsWon);
             matchUI.ShowRoundResult(winner);
         }
+
+        // FIXED: Reset ball on ALL clients when round ends
+        ResetBallForNewRound();
 
         PlaySound(roundEndSound);
 

@@ -461,7 +461,7 @@ public class BallManager : MonoBehaviourPunCallbacks
         }
     }
 
-    IEnumerator MultiThrowCoroutine(PlayerCharacter thrower, CharacterData characterData)
+    public IEnumerator MultiThrowCoroutine(PlayerCharacter thrower, CharacterData characterData)
     {
         if (isTimerUIShown)
         {
@@ -484,12 +484,28 @@ public class BallManager : MonoBehaviourPunCallbacks
                 tempBall.SetThrowData(ThrowType.Ultimate, damagePerBall, throwSpeed);
                 tempBall.SetThrower(thrower);
 
+                // FIXED: Calculate direction properly for multi-throw
+                PlayerCharacter opponent = FindOpponent(thrower);
+                Vector3 throwDir;
+                
+                if (opponent != null)
+                {
+                    Vector3 targetDir = (opponent.transform.position - tempBall.transform.position).normalized;
+                    throwDir = characterData.ApplyThrowAccuracy(targetDir);
+                }
+                else
+                {
+                    // Fallback: determine direction based on player position
+                    throwDir = thrower.transform.position.x < 0 ? Vector3.right : Vector3.left;
+                }
+                
+                // Apply spread angle
                 float spreadAngle = characterData.GetMultiThrowSpread();
                 float angleOffset = (i - (throwCount - 1) * 0.5f) * (spreadAngle / throwCount);
-                Vector3 throwDir = Quaternion.Euler(0, angleOffset, 0) * CalculateThrowDirection(thrower);
+                throwDir = Quaternion.Euler(0, angleOffset, 0) * throwDir;
                 throwDir.y = 0.1f;
 
-                tempBall.ThrowBall(throwDir.normalized, 1f);
+                tempBall.ThrowBallInternal(throwDir.normalized, 1f);
 
                 // Auto-destroy temp balls after time
                 StartCoroutine(DestroyTempBall(tempBallObj, 4f));
@@ -545,16 +561,19 @@ public class BallManager : MonoBehaviourPunCallbacks
 
     public void ResetBall()
     {
-        if (PhotonNetwork.IsMasterClient && currentBall != null)
+        // FIXED: All clients can reset ball, not just master client
+        if (currentBall != null)
         {
             if (isTimerUIShown)
             {
                 HideHoldTimerUI();
             }
             currentBall.ResetBall();
+            Debug.Log($"[BALL RESET] Ball reset by client {PhotonNetwork.LocalPlayer.ActorNumber}");
         }
-        else if (currentBall == null)
+        else if (PhotonNetwork.IsMasterClient)
         {
+            // Only master client spawns new ball if none exists
             SpawnBall();
         }
     }
