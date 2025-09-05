@@ -44,6 +44,10 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     [SerializeField] private AudioClip matchWinSound;
     [SerializeField] private AudioClip countdownSound;
 
+    [Header("Camera")]
+    [SerializeField] private CameraManager cameraManager;
+    [SerializeField] private CameraShakeManager cameraShakeManager;
+
     // Match state
     public enum MatchState { Initializing, PreFight, Fighting, RoundEnd, MatchEnd }
     private MatchState currentState = MatchState.Initializing;
@@ -121,7 +125,26 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
     void Start()
     {
-        StartCoroutine(CompleteMatchFlow());
+        if (PhotonNetwork.OfflineMode && RetroDodge.AISessionConfig.Instance.withAI)
+        {
+            StartCoroutine(StartOfflineAIFlow());
+        }
+        else
+        {
+            StartCoroutine(CompleteMatchFlow());
+        }
+    }
+
+    void OnDestroy()
+    {
+        // Stop all coroutines to prevent SerializedObject errors during scene transition
+        StopAllCoroutines();
+        
+        // Clean up any remaining references
+        isReturningToMenu = true;
+        
+        if (debugMode)
+            Debug.Log("[MATCH MANAGER] OnDestroy - cleaned up coroutines and references");
     }
 
     void Update()
@@ -161,9 +184,13 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         // Any client can request round end, but only if round is active
         if (!roundActive) return;
 
-        Debug.Log($"[ROUND END REQUEST] Player {PhotonNetwork.LocalPlayer.ActorNumber} requesting round end. Winner: {winner}, Reason: {reason}");
+        Debug.Log($"[ROUND END REQUEST] Requesting round end. Winner: {winner}, Reason: {reason}, OfflineMode: {PhotonNetwork.OfflineMode}");
 
-        if (PhotonNetwork.IsMasterClient)
+        if (PhotonNetwork.OfflineMode)
+        {
+            EndRound(winner, reason);
+        }
+        else if (PhotonNetwork.IsMasterClient)
         {
             // Master client handles immediately
             photonView.RPC("EndRound", RpcTarget.All, winner, reason);
@@ -214,6 +241,22 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         AssignPlayerSides();
         InitializeUI();
 
+        // Refresh camera to find new players
+        if (cameraManager != null)
+        {
+            cameraManager.RefreshCamera();
+        }
+        
+        // Initialize camera shake manager
+        if (cameraShakeManager == null)
+        {
+            cameraShakeManager = CameraShakeManager.Instance;
+        }
+        if (cameraShakeManager != null)
+        {
+            cameraShakeManager.RefreshCameraController();
+        }
+
         // Sync initial state to all clients
         SyncMatchStateToAll();
 
@@ -222,6 +265,117 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         {
             StartRound(1);
         }
+    }
+
+    IEnumerator StartOfflineAIFlow()
+    {
+        currentState = MatchState.Initializing;
+
+        // Ensure OfflineMode networking is configured
+        PhotonNetwork.AutomaticallySyncScene = false;
+
+        // Spawn two local players without PUN Instantiate to reuse prefabs quickly
+        yield return StartCoroutine(SpawnOfflinePlayers());
+
+        CacheNetworkPlayers();
+        AssignPlayerSides();
+        InitializeUI();
+
+        // Refresh camera to find new players
+        if (cameraManager != null)
+        {
+            cameraManager.RefreshCamera();
+        }
+        
+        // Initialize camera shake manager
+        if (cameraShakeManager == null)
+        {
+            cameraShakeManager = CameraShakeManager.Instance;
+        }
+        if (cameraShakeManager != null)
+        {
+            cameraShakeManager.RefreshCameraController();
+        }
+
+        // Start match with proper round initialization
+        StartRound(1);
+    }
+
+    IEnumerator SpawnOfflinePlayers()
+    {
+        playersSpawned = true;
+
+        // Read from AI session config filled by CharacterSelection
+        var cfg = RetroDodge.AISessionConfig.Instance;
+        int playerIndex = (cfg != null && cfg.playerCharacterIndex >= 0) ? cfg.playerCharacterIndex : GetSelectedCharacterIndex();
+        if (playerIndex < 0 || playerIndex >= availableCharacters.Length) playerIndex = 0;
+        CharacterData playerChar = GetCharacterData(playerIndex);
+
+        // AI character selection
+        int aiIndex = (cfg != null && cfg.aiCharacterIndex >= 0) ? cfg.aiCharacterIndex : -1;
+        if (aiIndex < 0 || aiIndex >= availableCharacters.Length)
+        {
+            aiIndex = Random.Range(0, availableCharacters.Length);
+        }
+        CharacterData aiChar = GetCharacterData(aiIndex);
+
+        // Spawn positions
+        Vector3 p1Pos = player1SpawnPoint != null ? player1SpawnPoint.position : new Vector3(-3f, 0.5f, 0f);
+        Vector3 p2Pos = player2SpawnPoint != null ? player2SpawnPoint.position : new Vector3(3f, 0.5f, 0f);
+
+        // Human player (local) on left
+        GameObject p1 = Instantiate(playerChar.characterPrefab, p1Pos, Quaternion.identity);
+        var p1PC = p1.GetComponent<PlayerCharacter>() ?? p1.GetComponentInChildren<PlayerCharacter>();
+        if (p1PC != null)
+        {
+            p1PC.LoadCharacter(playerChar);
+        }
+        TrackSpawnedPlayer(p1);
+
+        // AI player on right
+        GameObject p2 = Instantiate(aiChar.characterPrefab, p2Pos, Quaternion.identity);
+        var p2PC = p2.GetComponent<PlayerCharacter>() ?? p2.GetComponentInChildren<PlayerCharacter>();
+        if (p2PC != null)
+        {
+            p2PC.LoadCharacter(aiChar);
+        }
+        TrackSpawnedPlayer(p2);
+
+        // Add AI brain to AI object with selected difficulty
+        var brain = p2.AddComponent<RetroDodge.AIControllerBrain>();
+        RetroDodge.AI.AIDifficulty difficulty = (cfg != null) ? cfg.difficulty : RetroDodge.AI.AIDifficulty.Normal;
+        brain.SetDifficulty(difficulty);
+
+        // Disable network flags
+        foreach (var pc in new []{ p1PC, p2PC })
+        {
+            if (pc != null)
+            {
+                var ih = pc.GetInputHandler();
+                if (ih == null) ih = pc.gameObject.AddComponent<PlayerInputHandler>();
+                ih.isPUN2Enabled = false;
+            }
+        }
+
+        // Explicitly set player sides for offline (and configure restrictor)
+        if (p1PC != null)
+        {
+            p1PC.SetPlayerSide(1);
+            var r = p1PC.GetComponent<ArenaMovementRestrictor>();
+            if (r != null) r.SetPlayerSide(ArenaMovementRestrictor.PlayerSide.Left);
+        }
+        if (p2PC != null)
+        {
+            p2PC.SetPlayerSide(2);
+            var r = p2PC.GetComponent<ArenaMovementRestrictor>();
+            if (r != null) r.SetPlayerSide(ArenaMovementRestrictor.PlayerSide.Right);
+        }
+
+        // Ensure a BallManager exists and spawns a ball in OfflineMode
+        var ballManager = FindObjectOfType<BallManager>();
+        // Do not auto-create BallManager here because prefab references would be missing
+
+        yield return null;
     }
 
     /// <summary>
@@ -413,19 +567,37 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     {
         PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
 
-        foreach (PlayerCharacter player in allPlayers)
+        if (PhotonNetwork.OfflineMode)
         {
-            if (player.photonView != null)
+            if (allPlayers.Length >= 2)
             {
-                int actorNumber = player.photonView.Owner.ActorNumber; // FIXED: Capital O
+                // Determine left/right by x-position
+                System.Array.Sort(allPlayers, (a, b) => a.transform.position.x.CompareTo(b.transform.position.x));
+                allPlayers[0].SetPlayerSide(1); // Left
+                allPlayers[1].SetPlayerSide(2); // Right
+            }
+            else if (allPlayers.Length == 1)
+            {
+                // Single player fallback
+                allPlayers[0].SetPlayerSide(1);
+            }
+        }
+        else
+        {
+            foreach (PlayerCharacter player in allPlayers)
+            {
+                if (player.photonView != null && player.photonView.Owner != null)
+                {
+                    int actorNumber = player.photonView.Owner.ActorNumber; // FIXED: Capital O
 
-                if (actorNumber == 1 || PhotonNetwork.PlayerList[0].ActorNumber == actorNumber)
-                {
-                    player.SetPlayerSide(1); // Left player faces right
-                }
-                else
-                {
-                    player.SetPlayerSide(2); // Right player faces left
+                    if (actorNumber == 1 || PhotonNetwork.PlayerList[0].ActorNumber == actorNumber)
+                    {
+                        player.SetPlayerSide(1); // Left player faces right
+                    }
+                    else
+                    {
+                        player.SetPlayerSide(2); // Right player faces left
+                    }
                 }
             }
         }
@@ -448,7 +620,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
     void StartRound(int roundNumber)
     {
-        if (!PhotonNetwork.IsMasterClient) return;
+        if (!PhotonNetwork.OfflineMode && !PhotonNetwork.IsMasterClient) return;
 
         currentRound = roundNumber;
         currentState = MatchState.PreFight;
@@ -456,21 +628,46 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         roundStartTime = 0.0;
         roundEndTime = 0.0;
 
-        UpdateRoomProperties();
+        if (!PhotonNetwork.OfflineMode)
+        {
+            UpdateRoomProperties();
+        }
 
-        // FIXED: For rounds > 1, only reset positions - DON'T respawn
+        // Reset players for new round
         if (roundNumber > 1)
         {
-            photonView.RPC("ResetPlayersForNewRound", RpcTarget.All);
+            // Subsequent rounds - reset positions and health
+            if (PhotonNetwork.OfflineMode)
+            {
+                ResetPlayersForNewRound();
+            }
+            else
+            {
+                photonView.RPC("ResetPlayersForNewRound", RpcTarget.All);
+            }
         }
         else
         {
-            // First round - just enable players
-            photonView.RPC("PreparePlayersForFirstRound", RpcTarget.All);
+            // First round - prepare players
+            if (PhotonNetwork.OfflineMode)
+            {
+                PreparePlayersForFirstRound();
+            }
+            else
+            {
+                photonView.RPC("PreparePlayersForFirstRound", RpcTarget.All);
+            }
         }
 
-        // Start pre-fight sequence
-        photonView.RPC("StartPreFightSequence", RpcTarget.All);
+        // Start countdown sequence for all rounds
+        if (PhotonNetwork.OfflineMode)
+        {
+            StartCoroutine(PreFightSequenceCoroutine());
+        }
+        else
+        {
+            photonView.RPC("StartPreFightSequence", RpcTarget.All);
+        }
     }
 
     /// <summary>
@@ -485,11 +682,21 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
         foreach (PlayerCharacter player in allPlayers)
         {
-            if (player != null && player.photonView != null)
+            if (player != null)
             {
                 // Reset position
-                int actorNumber = player.photonView.Owner.ActorNumber;
-                Vector3 resetPosition = GetSpawnPositionForActor(actorNumber);
+                Vector3 resetPosition;
+                if (PhotonNetwork.OfflineMode)
+                {
+                    int side = player.GetPlayerSide();
+                    resetPosition = side == 2 ? (player2SpawnPoint != null ? player2SpawnPoint.position : new Vector3(3f, 0.5f, 0f))
+                                              : (player1SpawnPoint != null ? player1SpawnPoint.position : new Vector3(-3f, 0.5f, 0f));
+                }
+                else
+                {
+                    int actorNumber = player.photonView.Owner.ActorNumber;
+                    resetPosition = GetSpawnPositionForActor(actorNumber);
+                }
                 player.transform.position = resetPosition;
 
                 // CRITICAL FIX: Reset player state first, THEN health
@@ -497,7 +704,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
                 // FIXED: Properly reset health on the player's owner
                 PlayerHealth health = player.GetComponent<PlayerHealth>();
-                if (health != null && player.photonView.IsMine)
+                if (health != null && (PhotonNetwork.OfflineMode || (player.photonView != null && player.photonView.IsMine)))
                 {
                     health.ResetHealthForNewRound();
                 }
@@ -509,7 +716,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
                     player.LoadCharacter(characterData);
 
                     // Force reapply network color
-                    if (player.photonView.Owner.CustomProperties.ContainsKey("CharacterColor_R"))
+                    if (!PhotonNetwork.OfflineMode && player.photonView.Owner.CustomProperties.ContainsKey("CharacterColor_R"))
                     {
                         float r = (float)player.photonView.Owner.CustomProperties["CharacterColor_R"];
                         float g = (float)player.photonView.Owner.CustomProperties["CharacterColor_G"];
@@ -519,7 +726,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
                     }
                 }
 
-                Debug.Log($"[ROUND RESET] Player {actorNumber} reset to {resetPosition} with health reset");
+                Debug.Log($"[ROUND RESET] Player reset to {resetPosition} with health reset");
             }
         }
 
@@ -543,7 +750,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             BallController[] balls = FindObjectsOfType<BallController>();
             foreach (BallController ball in balls)
             {
-                if (ball.photonView.IsMine)
+                if (PhotonNetwork.OfflineMode || ball.photonView.IsMine)
                 {
                     ball.ResetBall();
                     break; // Only reset one ball
@@ -551,7 +758,14 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             }
         }
 
-        Debug.Log($"[BALL RESET] Ball reset by client {PhotonNetwork.LocalPlayer.ActorNumber}");
+        if (PhotonNetwork.OfflineMode)
+        {
+            Debug.Log($"[BALL RESET] Ball reset in offline mode");
+        }
+        else
+        {
+            Debug.Log($"[BALL RESET] Ball reset by client {PhotonNetwork.LocalPlayer.ActorNumber}");
+        }
     }
 
     [PunRPC]
@@ -572,6 +786,22 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         {
             if (player != null)
             {
+                // Position at spawn points for offline or derive by actor for online
+                Vector3 spawnPos;
+                if (PhotonNetwork.OfflineMode)
+                {
+                    int side = player.GetPlayerSide();
+                    spawnPos = side == 2 ? (player2SpawnPoint != null ? player2SpawnPoint.position : new Vector3(3f, 0.5f, 0f))
+                                          : (player1SpawnPoint != null ? player1SpawnPoint.position : new Vector3(-3f, 0.5f, 0f));
+                }
+                else
+                {
+                    int actorNumber = player.photonView.Owner.ActorNumber;
+                    spawnPos = GetSpawnPositionForActor(actorNumber);
+                }
+                spawnPos.y = Mathf.Max(spawnPos.y, 0.5f);
+                player.transform.position = spawnPos;
+
                 PlayerHealth health = player.GetComponent<PlayerHealth>();
                 if (health != null && health.IsDead())
                 {
@@ -633,8 +863,12 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             matchUI.ShowFightStart();
         }
 
-        // Only Master Client starts the fight phase
-        if (PhotonNetwork.IsMasterClient)
+        // Start the fight phase
+        if (PhotonNetwork.OfflineMode)
+        {
+            StartFightPhase();
+        }
+        else if (PhotonNetwork.IsMasterClient)
         {
             photonView.RPC("StartFightPhase", RpcTarget.All);
         }
@@ -647,14 +881,17 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         roundActive = true;
 
         // FIXED: Master client sets timer, others sync from room properties
-        if (PhotonNetwork.IsMasterClient)
+        if (PhotonNetwork.IsMasterClient || PhotonNetwork.OfflineMode)
         {
             roundStartTime = PhotonNetwork.Time;
             roundEndTime = roundStartTime + GetRoundDuration();
-            UpdateRoomProperties();
-
-            // Immediately sync to all clients
-            photonView.RPC("SyncTimerValues", RpcTarget.Others, roundStartTime, roundEndTime);
+            
+            if (!PhotonNetwork.OfflineMode)
+            {
+                UpdateRoomProperties();
+                // Immediately sync to all clients
+                photonView.RPC("SyncTimerValues", RpcTarget.Others, roundStartTime, roundEndTime);
+            }
         }
 
         // Enable player input
@@ -693,10 +930,17 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
     void EndRoundByTimeOut()
     {
-        if (!PhotonNetwork.IsMasterClient || !roundActive) return;
+        if (!roundActive) return;
 
         int winner = DetermineWinnerByHealth();
-        photonView.RPC("EndRound", RpcTarget.All, winner, "timeout");
+        if (PhotonNetwork.OfflineMode)
+        {
+            EndRound(winner, "timeout");
+        }
+        else if (PhotonNetwork.IsMasterClient)
+        {
+            photonView.RPC("EndRound", RpcTarget.All, winner, "timeout");
+        }
     }
 
     [PunRPC]
@@ -704,15 +948,22 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     {
         if (!roundActive) return;
 
-        Debug.Log($"[END ROUND] Round ended. Winner: {winner}, Reason: {reason}");
+        Debug.Log($"[END ROUND] Round {currentRound} ended. Winner: {winner}, Reason: {reason}. Score: P1={player1RoundsWon}, P2={player2RoundsWon}");
 
         roundActive = false;
         currentState = MatchState.RoundEnd;
         EnablePlayerInput(false);
 
-        // Update round scores (Master Client only manages the data)
-        if (PhotonNetwork.IsMasterClient)
+        // Update round scores
+        if (PhotonNetwork.OfflineMode)
         {
+            // Offline mode: update directly
+            if (winner == 1) player1RoundsWon++;
+            else if (winner == 2) player2RoundsWon++;
+        }
+        else if (PhotonNetwork.IsMasterClient)
+        {
+            // Online mode: Master Client manages the data
             if (winner == 1) player1RoundsWon++;
             else if (winner == 2) player2RoundsWon++;
 
@@ -763,9 +1014,9 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             // FIXED: Show match results on ALL clients
             StartCoroutine(EndMatchSequence());
         }
-        else if (PhotonNetwork.IsMasterClient)
+        else if (PhotonNetwork.OfflineMode || PhotonNetwork.IsMasterClient)
         {
-            // Only master starts next round
+            // Start next round (offline mode or master client)
             StartCoroutine(NextRoundDelay());
         }
     }
@@ -774,7 +1025,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     {
         yield return new WaitForSeconds(postRoundDelay);
 
-        if (PhotonNetwork.IsMasterClient)
+        if (PhotonNetwork.OfflineMode || PhotonNetwork.IsMasterClient)
         {
             StartRound(currentRound + 1);
         }
@@ -813,14 +1064,8 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         }
     }
 
-    public void OnReturnToMenuButtonPressed()
-    {
-        // This will be called by the UI button
-        ReturnToMainMenu();
-    }
-
     /// <summary>
-    /// REFACTORED: Called by MatchUI when return to menu is requested
+    /// Called by MatchUI when return to menu is requested
     /// </summary>
     public void OnReturnToMenuRequested()
     {
@@ -839,13 +1084,53 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     }
 
     /// <summary>
+    /// Sync camera shake across network
+    /// </summary>
+    public void SyncCameraShake(float intensity, float duration, string source)
+    {
+        if (PhotonNetwork.IsConnected && !PhotonNetwork.OfflineMode)
+        {
+            photonView.RPC("SyncCameraShakeRPC", RpcTarget.Others, intensity, duration, source);
+        }
+    }
+    
+    /// <summary>
+    /// RPC to sync camera shake to other clients
+    /// </summary>
+    [PunRPC]
+    void SyncCameraShakeRPC(float intensity, float duration, string source)
+    {
+        if (cameraShakeManager != null)
+        {
+            cameraShakeManager.SyncShakeFromNetwork(intensity, duration, source);
+        }
+    }
+
+    /// <summary>
     /// FIXED: Safe coroutine to handle main menu return without SetProperties errors
     /// </summary>
     IEnumerator SafeReturnToMainMenu()
     {
         yield return null;
 
-        if (PhotonNetwork.InRoom &&
+        // Safety check - ensure this object is still valid
+        if (this == null || gameObject == null)
+        {
+            if (debugMode)
+                Debug.Log("[MATCH MANAGER] Object destroyed, skipping return to menu");
+            yield break;
+        }
+
+        if (PhotonNetwork.OfflineMode)
+        {
+            if (debugMode)
+                Debug.Log("[MATCH MANAGER] Offline mode - returning to main menu directly");
+
+            // In offline mode, go directly to main menu
+            PhotonNetwork.OfflineMode = false; // Reset offline mode
+            SceneManager.LoadScene(mainMenuScene);
+        }
+        else if (PhotonNetwork.InRoom &&
             PhotonNetwork.NetworkClientState != Photon.Realtime.ClientState.Leaving &&
             PhotonNetwork.NetworkClientState != Photon.Realtime.ClientState.Disconnecting)
         {
@@ -864,6 +1149,14 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     // When the room is left, go straight to Main Menu
     public override void OnLeftRoom()
     {
+        // Safety check - ensure this object is still valid
+        if (this == null || gameObject == null)
+        {
+            if (debugMode)
+                Debug.Log("[MATCH MANAGER] Object destroyed, skipping OnLeftRoom");
+            return;
+        }
+
         if (debugMode)
             Debug.Log("[MATCH MANAGER] Left room, loading main menu scene");
 
@@ -1144,18 +1437,40 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         PlayerCharacter[] players = FindObjectsOfType<PlayerCharacter>();
         foreach (PlayerCharacter player in players)
         {
-            PhotonView pv = player.GetComponent<PhotonView>();
-            if (pv != null)
+            if (PhotonNetwork.OfflineMode)
             {
-                int actorNumber = pv.Owner.ActorNumber; // FIXED: Capital O
-                networkPlayers[actorNumber] = player;
+                int side = player.GetPlayerSide();
+                if (side == 0)
+                {
+                    side = player.transform.position.x <= 0 ? 1 : 2;
+                    player.SetPlayerSide(side);
+                }
+
+                networkPlayers[side] = player;
 
                 PlayerHealth health = player.GetComponent<PlayerHealth>();
                 if (health != null)
                 {
-                    networkPlayersHealth[actorNumber] = health;
+                    networkPlayersHealth[side] = health;
                     health.OnPlayerDeath += OnPlayerDeathEvent;
-                    health.OnHealthChanged += (current, max) => OnPlayerHealthChanged(actorNumber, current, max);
+                    health.OnHealthChanged += (current, max) => OnPlayerHealthChanged(side, current, max);
+                }
+            }
+            else
+            {
+                PhotonView pv = player.GetComponent<PhotonView>();
+                if (pv != null && pv.Owner != null)
+                {
+                    int actorNumber = pv.Owner.ActorNumber;
+                    networkPlayers[actorNumber] = player;
+
+                    PlayerHealth health = player.GetComponent<PlayerHealth>();
+                    if (health != null)
+                    {
+                        networkPlayersHealth[actorNumber] = health;
+                        health.OnPlayerDeath += OnPlayerDeathEvent;
+                        health.OnHealthChanged += (current, max) => OnPlayerHealthChanged(actorNumber, current, max);
+                    }
                 }
             }
         }
@@ -1211,12 +1526,29 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
     void EnablePlayerInput(bool enable)
     {
-        foreach (var player in networkPlayers.Values)
+        // Use networkPlayers if available, otherwise find all PlayerCharacters
+        if (networkPlayers.Count > 0)
         {
-            if (player != null)
+            foreach (var player in networkPlayers.Values)
             {
-                player.SetInputEnabled(enable);
-                player.SetMovementEnabled(enable);
+                if (player != null)
+                {
+                    player.SetInputEnabled(enable);
+                    player.SetMovementEnabled(enable);
+                }
+            }
+        }
+        else
+        {
+            // Fallback: find all PlayerCharacters directly (useful for first round)
+            PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
+            foreach (PlayerCharacter player in allPlayers)
+            {
+                if (player != null)
+                {
+                    player.SetInputEnabled(enable);
+                    player.SetMovementEnabled(enable);
+                }
             }
         }
     }

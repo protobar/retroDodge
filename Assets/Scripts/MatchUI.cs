@@ -357,7 +357,26 @@ public class MatchUI : MonoBehaviour
 
         // Get all players in the scene
         PlayerCharacter[] players = FindObjectsOfType<PlayerCharacter>();
-        
+
+        if (PhotonNetwork.OfflineMode)
+        {
+            foreach (PlayerCharacter player in players)
+            {
+                if (player == null) continue;
+
+                int playerNumber = GetPlayerNumber(player);
+                if (playerNumber == -1)
+                {
+                    // Derive from position if side not set
+                    playerNumber = player.transform.position.x <= 0 ? 1 : 2;
+                }
+
+                bool isLocalPlayer = (playerNumber == 1);
+                UpdatePlayerAbilityBars(playerNumber, player, isLocalPlayer);
+            }
+            return;
+        }
+
         foreach (PlayerCharacter player in players)
         {
             if (player == null || player.photonView == null) continue;
@@ -373,22 +392,22 @@ public class MatchUI : MonoBehaviour
 
     int GetPlayerNumber(PlayerCharacter player)
     {
-        if (player.photonView == null) return -1;
+        if (PhotonNetwork.OfflineMode)
+        {
+            int playerSide = player.GetPlayerSide();
+            if (playerSide > 0) return playerSide;
+            return player.transform.position.x <= 0 ? 1 : 2;
+        }
+
+        if (player.photonView == null || player.photonView.Owner == null) return -1;
 
         // Get player number based on actor number or player side
         int actorNumber = player.photonView.Owner.ActorNumber;
-        int playerSide = player.GetPlayerSide();
+        int pSide = player.GetPlayerSide();
 
         // Use player side if available, otherwise use actor number
-        if (playerSide > 0)
-        {
-            return playerSide;
-        }
-        else
-        {
-            // Default: actor number 1 = player 1, actor number 2 = player 2
-            return actorNumber;
-        }
+        if (pSide > 0) return pSide;
+        return actorNumber;
     }
 
     void UpdatePlayerAbilityBars(int playerNumber, PlayerCharacter player, bool isLocalPlayer)

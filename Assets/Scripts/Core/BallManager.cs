@@ -41,15 +41,23 @@ public class BallManager : MonoBehaviourPunCallbacks
 
     void Start()
     {
-        // Only Master Client spawns the ball initially
-        if (PhotonNetwork.IsMasterClient)
+        if (PhotonNetwork.OfflineMode)
         {
+            // Offline single-player: spawn locally
             SpawnBall();
         }
         else
         {
-            // FIXED: Non-master clients should look for existing ball
-            StartCoroutine(FindExistingBall());
+            // Only Master Client spawns the ball initially
+            if (PhotonNetwork.IsMasterClient)
+            {
+                SpawnBall();
+            }
+            else
+            {
+                // FIXED: Non-master clients should look for existing ball
+                StartCoroutine(FindExistingBall());
+            }
         }
     }
 
@@ -140,9 +148,16 @@ public class BallManager : MonoBehaviourPunCallbacks
             }
         }
 
-        // Network spawn ball
-        if (PhotonNetwork.IsMasterClient)
+        if (PhotonNetwork.OfflineMode)
         {
+            // Local spawn in OfflineMode
+            GameObject ballObj = Instantiate(ballPrefab, spawnPosition, Quaternion.identity);
+            currentBall = ballObj.GetComponent<BallController>();
+            Debug.Log("[BallManager] OfflineMode spawned ball locally");
+        }
+        else if (PhotonNetwork.IsMasterClient)
+        {
+            // Network spawn ball
             GameObject ballObj = PhotonNetwork.Instantiate(ballPrefab.name, spawnPosition, Quaternion.identity);
             currentBall = ballObj.GetComponent<BallController>();
 
@@ -474,9 +489,17 @@ public class BallManager : MonoBehaviourPunCallbacks
 
         for (int i = 0; i < throwCount; i++)
         {
-            GameObject tempBallObj = PhotonNetwork.Instantiate(ballPrefab.name,
+            GameObject tempBallObj;
+            if (PhotonNetwork.OfflineMode)
+            {
+                tempBallObj = Instantiate(ballPrefab, thrower.transform.position + Vector3.up * 1.5f, Quaternion.identity);
+            }
+            else
+            {
+                tempBallObj = PhotonNetwork.Instantiate(ballPrefab.name,
                                                              thrower.transform.position + Vector3.up * 1.5f,
                                                              Quaternion.identity);
+            }
             BallController tempBall = tempBallObj.GetComponent<BallController>();
 
             if (tempBall != null)
@@ -520,7 +543,14 @@ public class BallManager : MonoBehaviourPunCallbacks
         yield return new WaitForSeconds(delay);
         if (ballObj != null)
         {
-            PhotonNetwork.Destroy(ballObj);
+            if (PhotonNetwork.OfflineMode)
+            {
+                Destroy(ballObj);
+            }
+            else
+            {
+                PhotonNetwork.Destroy(ballObj);
+            }
         }
     }
 

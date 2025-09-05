@@ -951,6 +951,75 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 95370623}
   m_CullTransparentMesh: 1
+--- !u!1 &96458688
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 96458690}
+  - component: {fileID: 96458689}
+  - component: {fileID: 96458691}
+  m_Layer: 0
+  m_Name: CameraManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &96458689
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 96458688}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8f4bad2b21370d346ba598c92d351305, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cameraController: {fileID: 330585548}
+  matchManager: {fileID: 989184903}
+--- !u!4 &96458690
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 96458688}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 11.363829, y: -0.6926656, z: -0.047377486}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &96458691
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 96458688}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa584fbee541324448dd18d8409c7a41, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ObservedComponentsFoldoutOpen: 1
+  Group: 0
+  prefixField: -1
+  Synchronization: 3
+  OwnershipTransfer: 0
+  observableSearch: 2
+  ObservedComponents: []
+  sceneViewId: 6
+  InstantiationId: 0
+  isRuntimeInstantiated: 0
 --- !u!1 &97823565
 GameObject:
   m_ObjectHideFlags: 0
@@ -2923,6 +2992,7 @@ GameObject:
   - component: {fileID: 330585544}
   - component: {fileID: 330585547}
   - component: {fileID: 330585548}
+  - component: {fileID: 330585549}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -3060,14 +3130,49 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3f50eef2d37b15b4993cf97ee71d0582, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  basePosition: {x: 0, y: 0, z: 0}
+  basePosition: {x: 0, y: 10, z: -6}
+  fixedRotation: {x: 0.104528464, y: 0, z: 0, w: 0.9945219}
   followSpeed: 5
-  fixedRotation: {x: 0.1305262, y: 0, z: 0, w: 0.9914449}
-  leftBound: -15
-  rightBound: 15
+  zoomSpeed: 5
+  minDistance: 8
+  maxDistance: 20
+  idealDistance: 12
+  distanceMultiplier: 0.8
+  leftBound: -5
+  rightBound: 5
+  topBound: 4
+  bottomBound: 2
   enableBounds: 1
-  panFollowStrength: 0.3
-  maxPanOffset: 3
+  positionSmoothing: 0.1
+  zoomSmoothing: 0.1
+  deadZone: 1
+  baseShakeIntensity: 5
+  baseShakeDuration: 5
+  maxShakeIntensity: 5
+  allowShakeStacking: 1
+  showDebugInfo: 0
+--- !u!114 &330585549
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 330585543}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa584fbee541324448dd18d8409c7a41, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ObservedComponentsFoldoutOpen: 1
+  Group: 0
+  prefixField: -1
+  Synchronization: 3
+  OwnershipTransfer: 0
+  observableSearch: 2
+  ObservedComponents: []
+  sceneViewId: 2
+  InstantiationId: 0
+  isRuntimeInstantiated: 0
 --- !u!1 &337977759
 GameObject:
   m_ObjectHideFlags: 0
@@ -6189,7 +6294,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: -0.46, z: 0}
-  m_LocalScale: {x: 15, y: 1, z: 15}
+  m_LocalScale: {x: 6.5409, y: 1, z: 15}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 2136855927}
@@ -6896,6 +7001,8 @@ MonoBehaviour:
   roundEndSound: {fileID: 0}
   matchWinSound: {fileID: 0}
   countdownSound: {fileID: 0}
+  cameraManager: {fileID: 96458689}
+  cameraShakeManager: {fileID: 0}
 --- !u!114 &989184904
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -16534,6 +16641,7 @@ SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
   - {fileID: 330585546}
+  - {fileID: 96458690}
   - {fileID: 410087041}
   - {fileID: 832575519}
   - {fileID: 2083447961}

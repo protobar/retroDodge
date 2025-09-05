@@ -28,10 +28,17 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     [SerializeField] private Button connectButton;
     [SerializeField] private Button quickMatchButton;
     [SerializeField] private Button customRoomButton;
+    [SerializeField] private Button playWithAIButton;
     [SerializeField] private TMP_Text quickMatchButtonText;
     [SerializeField] private TMP_Text statusText;
     [SerializeField] private GameObject loadingIndicator;
     [SerializeField] private TMP_Text countdownText;
+    
+    [Header("=== PLAY WITH AI PANEL ===")]
+    [SerializeField] private GameObject playWithAIPanel;
+    [SerializeField] private TMP_Dropdown aiDifficultyDropdown;
+    [SerializeField] private Button confirmPlayWithAIButton;
+    [SerializeField] private Button backFromAIButton;
 
     [Header("=== CUSTOM ROOM - MAIN OPTIONS ===")]
     [SerializeField] private Button createRoomButton;
@@ -63,6 +70,9 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     [SerializeField] private string characterSelectionScene = "CharacterSelection";
     [SerializeField] private byte maxPlayers = 2;
     [SerializeField] private bool debugMode = true;
+    [SerializeField] private float aiSearchTimer = 20.0f;
+
+
 
     // FIXED: Matchmaking state management
     private bool isMatchmaking = false;
@@ -70,6 +80,8 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     private Coroutine matchmakingCoroutine;
     private Coroutine countdownCoroutine;
     private bool matchFound = false;
+    private Coroutine aiFallbackCoroutine;
+    private bool pendingAIFallback = false;
 
     // FIXED: Custom room state with proper room code system
     private bool isCreatingCustomRoom = false;
@@ -108,6 +120,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         joinRoomPanel.SetActive(false);
         createRoomPanel.SetActive(false);
         roomLobbyPanel.SetActive(false);
+        playWithAIPanel?.SetActive(false);
         matchFoundPanel?.SetActive(false);
         loadingIndicator.SetActive(false);
 
@@ -128,6 +141,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         connectButton?.onClick.AddListener(OnConnectClicked);
         quickMatchButton?.onClick.AddListener(OnQuickMatchClicked);
         customRoomButton?.onClick.AddListener(OnCustomRoomClicked);
+        playWithAIButton?.onClick.AddListener(OnPlayWithAIClicked);
         createRoomButton?.onClick.AddListener(OnCreateRoomClicked);
         joinRoomButton?.onClick.AddListener(OnJoinRoomClicked);
         backFromCustomRoomButton?.onClick.AddListener(OnBackFromCustomRoomClicked);
@@ -139,6 +153,8 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         startGameButton?.onClick.AddListener(OnStartGameClicked);
         leaveRoomButton?.onClick.AddListener(OnLeaveRoomClicked);
         generateRoomCodeButton?.onClick.AddListener(OnGenerateRoomCodeClicked);
+        confirmPlayWithAIButton?.onClick.AddListener(OnConfirmPlayWithAIClicked);
+        backFromAIButton?.onClick.AddListener(OnBackFromAIClicked);
     }
 
     void SetupCustomRoomUI()
@@ -150,6 +166,15 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
             var options = new List<string> { "30 seconds", "1 minute", "2 minutes", "3 minutes", "5 minutes" };
             matchLengthDropdown.AddOptions(options);
             matchLengthDropdown.value = 1; // Default to 1 minute
+        }
+        
+        // Setup AI difficulty dropdown
+        if (aiDifficultyDropdown != null)
+        {
+            aiDifficultyDropdown.ClearOptions();
+            var aiOptions = new List<string> { "Easy", "Normal", "Hard" };
+            aiDifficultyDropdown.AddOptions(aiOptions);
+            aiDifficultyDropdown.value = 1; // Default to Normal
         }
 
         // Setup map selection dropdown - using fallback if MapRegistry doesn't exist
@@ -208,6 +233,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     {
         isMatchmaking = true;
         matchFound = false;
+        pendingAIFallback = false;
         matchmakingTime = 0f;
         quickMatchButtonText.text = "Cancel";
 
@@ -216,6 +242,10 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         if (matchmakingCoroutine != null)
             StopCoroutine(matchmakingCoroutine);
         matchmakingCoroutine = StartCoroutine(MatchmakingTimer());
+
+        // Start 20s fallback to AI
+        if (aiFallbackCoroutine != null) StopCoroutine(aiFallbackCoroutine);
+        aiFallbackCoroutine = StartCoroutine(AIFallbackAfterDelay(aiSearchTimer));
 
         if (debugMode) Debug.Log($"[QUICK MATCH] Starting with JoinRandomRoom");
 
@@ -250,6 +280,11 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
             StopCoroutine(countdownCoroutine);
             countdownCoroutine = null;
         }
+        if (aiFallbackCoroutine != null)
+        {
+            StopCoroutine(aiFallbackCoroutine);
+            aiFallbackCoroutine = null;
+        }
 
         ResetQuickMatchButton();
         UpdateStatus("Matchmaking cancelled");
@@ -278,6 +313,59 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
             yield return new WaitForSeconds(1f);
             matchmakingTime += 1f;
         }
+    }
+
+    IEnumerator AIFallbackAfterDelay(float seconds)
+    {
+        float elapsed = 0f;
+        while (isMatchmaking && !matchFound && elapsed < seconds)
+        {
+            yield return new WaitForSeconds(0.5f);
+            elapsed += 0.5f;
+        }
+
+        if (isMatchmaking && !matchFound)
+        {
+            // Begin safe fallback: leave room, disconnect, then enable OfflineMode
+            isMatchmaking = false;
+            pendingAIFallback = true;
+            ResetQuickMatchButton();
+            matchFoundPanel?.SetActive(false);
+
+            // Avoid PUN auto scene sync during transition
+            PhotonNetwork.AutomaticallySyncScene = false;
+
+            if (PhotonNetwork.InRoom)
+            {
+                PhotonNetwork.LeaveRoom();
+                yield break;
+            }
+
+            if (PhotonNetwork.IsConnected)
+            {
+                PhotonNetwork.Disconnect();
+                yield break;
+            }
+
+            // If already disconnected, start offline AI immediately
+            StartOfflineAIMode();
+        }
+    }
+
+    void StartOfflineAIMode()
+    {
+        if (PhotonNetwork.IsConnected || PhotonNetwork.InRoom) return;
+
+        PhotonNetwork.OfflineMode = true;
+        PhotonNetwork.AutomaticallySyncScene = false;
+
+        // Configure AI session (Normal by default; random AI character at runtime)
+        var cfg = RetroDodge.AISessionConfig.Instance;
+        cfg.SetPlayWithAI(RetroDodge.AI.AIDifficulty.Normal, -1, -1);
+
+        UpdateStatus("No players found. Starting character selection vs AI...");
+        UnityEngine.SceneManagement.SceneManager.LoadScene("CharacterSelection");
+        pendingAIFallback = false;
     }
 
     // FIXED: Proper countdown when match is found
@@ -312,6 +400,69 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     {
         quickMatchButtonText.text = "Find Match";
     }
+    
+    #region Play with AI System
+    void OnPlayWithAIClicked()
+    {
+        mainMenuPanel.SetActive(false);
+        playWithAIPanel.SetActive(true);
+        UpdateStatus("Select AI difficulty");
+    }
+    
+    void OnBackFromAIClicked()
+    {
+        playWithAIPanel.SetActive(false);
+        mainMenuPanel.SetActive(true);
+        UpdateStatus($"Welcome back, {PhotonNetwork.NickName}!");
+    }
+    
+    void OnConfirmPlayWithAIClicked()
+    {
+        if (aiDifficultyDropdown == null) return;
+        
+        // Get selected difficulty
+        RetroDodge.AI.AIDifficulty selectedDifficulty = (RetroDodge.AI.AIDifficulty)aiDifficultyDropdown.value;
+        
+        // Configure AI session
+        var cfg = RetroDodge.AISessionConfig.Instance;
+        cfg.SetPlayWithAI(selectedDifficulty, -1, -1); // Player and AI characters will be selected in character selection
+        
+        UpdateStatus($"Preparing character selection vs {selectedDifficulty} AI...");
+        
+        // Disconnect first if connected, then start offline mode
+        StartCoroutine(StartOfflineAISession());
+    }
+    
+    IEnumerator StartOfflineAISession()
+    {
+        // Disconnect from any existing connection
+        if (PhotonNetwork.InRoom)
+        {
+            PhotonNetwork.LeaveRoom();
+            while (PhotonNetwork.InRoom)
+            {
+                yield return new WaitForSeconds(0.1f);
+            }
+        }
+        
+        if (PhotonNetwork.IsConnected)
+        {
+            PhotonNetwork.Disconnect();
+            while (PhotonNetwork.IsConnected)
+            {
+                yield return new WaitForSeconds(0.1f);
+            }
+        }
+        
+        // Now start offline mode
+        PhotonNetwork.OfflineMode = true;
+        PhotonNetwork.AutomaticallySyncScene = false;
+        
+        UpdateStatus("Starting character selection vs AI...");
+        UnityEngine.SceneManagement.SceneManager.LoadScene("CharacterSelection");
+    }
+    #endregion
+    
     #endregion
 
     #region FIXED: Custom Room System with proper room code sharing
@@ -593,6 +744,12 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         mainMenuPanel.SetActive(false);
         customRoomPanel.SetActive(false);
 
+        if (pendingAIFallback)
+        {
+            StartOfflineAIMode();
+            return;
+        }
+
         UpdateStatus($"Disconnected: {cause}");
         CancelMatchmaking();
         ResetCustomRoomStates();
@@ -796,6 +953,19 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
             generatedRoomCodeText.text = "Click 'Generate Code' to create room";
         }
 
+        if (pendingAIFallback)
+        {
+            if (PhotonNetwork.IsConnected)
+            {
+                PhotonNetwork.Disconnect();
+            }
+            else
+            {
+                StartOfflineAIMode();
+            }
+            return;
+        }
+
         // Hide all panels except main menu
         customRoomPanel.SetActive(false);
         roomLobbyPanel.SetActive(false);
@@ -878,6 +1048,12 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
 
         if (countdownCoroutine != null)
             StopCoroutine(countdownCoroutine);
+            
+        if (aiFallbackCoroutine != null)
+            StopCoroutine(aiFallbackCoroutine);
+            
+        // Stop all coroutines to prevent SerializedObject errors
+        StopAllCoroutines();
     }
     #endregion
 }

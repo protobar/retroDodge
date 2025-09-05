@@ -127,7 +127,7 @@ public class CatchSystem : MonoBehaviourPunCallbacks
 
     void Update()
     {
-        bool isLocalPlayer = photonView?.IsMine != false;
+        bool isLocalPlayer = PhotonNetwork.OfflineMode || (photonView?.IsMine != false);
 
         if (isLocalPlayer)
         {
@@ -192,7 +192,7 @@ public class CatchSystem : MonoBehaviourPunCallbacks
 
     void SendNetworkUpdate()
     {
-        if (photonView?.IsMine == true)
+        if (!PhotonNetwork.OfflineMode && photonView?.IsMine == true)
         {
             bool ballInRange = nearestThrownBall != null;
             photonView.RPC("SyncCatchState", RpcTarget.Others, isCatchingAvailable, ballInRange);

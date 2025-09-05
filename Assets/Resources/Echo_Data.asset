@@ -81,7 +81,7 @@ MonoBehaviour:
   curveballFrequency: 30
   curveballDuration: 2
   ultimateChargeRequired: 50
-  ultimateChargeRate: 3
+  ultimateChargeRate: 0.5
   trickType: 1
   trickEffectVFX: {fileID: 7980599541491969784, guid: ddbc779ed0c2149428a536de6ee267da,
     type: 3}
@@ -91,7 +91,7 @@ MonoBehaviour:
   freezeDuration: 3
   instantDamageAmount: 15
   trickChargeRequired: 30
-  trickChargeRate: 3
+  trickChargeRate: 0.5
   treatType: 1
   treatEffectVFX: {fileID: 5059734141994152730, guid: f6f59fb1229f8334c9663951ccb48969,
     type: 3}
@@ -101,7 +101,7 @@ MonoBehaviour:
   speedBoostMultiplier: 2.5
   speedBoostDuration: 5
   treatChargeRequired: 30
-  treatChargeRate: 3
+  treatChargeRate: 0.5
   throwSounds: []
   jumpSounds: []
   dashSound: {fileID: 0}

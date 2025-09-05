@@ -152,6 +152,7 @@ MonoBehaviour:
   velocityLerpRate: 10
   currentState: 0
   velocity: {x: 0, y: 0, z: 0}
+  maxRoofBounces: 1
   groundLayer:
     serializedVersion: 2
     m_Bits: 5120
@@ -183,8 +184,6 @@ MonoBehaviour:
   knockbackForce: 0
   enableBallBounce: 1
   hitEffectPrefab: {fileID: 100004, guid: 4a9fe5aa7b3b50941a8643c40b733ba9, type: 3}
-  screenShakeIntensity: 0.3
-  screenShakeDuration: 0.2
   damageColor: {r: 1, g: 0, b: 0, a: 1}
   useVFXManager: 1
   enableHitVFXVariety: 1
@@ -196,6 +195,7 @@ MonoBehaviour:
   debugMode: 0
   showCollisionGizmos: 1
   showDuckingVisualization: 1
+  maxRoofBounces: 1
 --- !u!114 &7597494401617177850
 MonoBehaviour:
   m_ObjectHideFlags: 0

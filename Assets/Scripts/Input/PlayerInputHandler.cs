@@ -150,6 +150,13 @@ public class PlayerInputHandler : MonoBehaviourPun
     // FIXED: New ownership determination method
     void DetermineOwnership()
     {
+        if (PhotonNetwork.OfflineMode)
+        {
+            isMyCharacter = true;
+            isNetworkReady = false;
+            return;
+        }
+
         if (forceLocalControl)
         {
             isMyCharacter = true;
@@ -286,6 +293,12 @@ public class PlayerInputHandler : MonoBehaviourPun
             HandleMobileInput();
         }
 
+        // Apply external input override if provided this frame
+        if (useExternalInputOverride)
+        {
+            ApplyExternalFrameToState();
+        }
+
         HandleInputBuffering();
 
         if (showDebugInfo && HasAnyInput())
@@ -294,6 +307,9 @@ public class PlayerInputHandler : MonoBehaviourPun
         }
 
         ResetMobileFrameInputs();
+
+        // External input override is one-frame only
+        useExternalInputOverride = false;
     }
 
     // FIXED: Improved input networking
@@ -382,6 +398,12 @@ public class PlayerInputHandler : MonoBehaviourPun
         // Jump input
         if (Input.GetKeyDown(jumpKey))
         {
+            jumpPressed = true;
+            lastJumpInput = Time.time;
+        }
+        else if (Input.GetKeyDown(KeyCode.Space))
+        {
+            // Fallback jump key for convenience
             jumpPressed = true;
             lastJumpInput = Time.time;
         }
@@ -616,6 +638,49 @@ public class PlayerInputHandler : MonoBehaviourPun
     }
 
     // ===========================================
+    // EXTERNAL INPUT OVERRIDE (for AI/controller replays)
+    // ===========================================
+
+    public struct ExternalInputFrame
+    {
+        public float horizontal;
+        public bool jumpPressed;
+        public bool duckHeld;
+        public bool throwPressed;
+        public bool throwHeld;
+        public bool catchPressed;
+        public bool pickupPressed;
+        public bool dashPressed;
+        public bool ultimatePressed;
+        public bool trickPressed;
+        public bool treatPressed;
+    }
+
+    private bool useExternalInputOverride = false;
+    private ExternalInputFrame externalInputFrame;
+
+    public void ApplyExternalInput(ExternalInputFrame frame)
+    {
+        externalInputFrame = frame;
+        useExternalInputOverride = true;
+    }
+
+    private void ApplyExternalFrameToState()
+    {
+        horizontalInput = Mathf.Clamp(externalInputFrame.horizontal, -1f, 1f);
+        jumpPressed = externalInputFrame.jumpPressed;
+        duckHeld = externalInputFrame.duckHeld;
+        throwPressed = externalInputFrame.throwPressed;
+        throwHeld = externalInputFrame.throwHeld;
+        catchPressed = externalInputFrame.catchPressed;
+        pickupPressed = externalInputFrame.pickupPressed;
+        dashPressed = externalInputFrame.dashPressed;
+        ultimatePressed = externalInputFrame.ultimatePressed;
+        trickPressed = externalInputFrame.trickPressed;
+        treatPressed = externalInputFrame.treatPressed;
+    }
+
+    // ===========================================
     // MOBILE INPUT CALLBACKS (Enhanced)
     // ===========================================
 
@@ -844,6 +909,13 @@ public class PlayerInputHandler : MonoBehaviourPun
     public void ForceOwnershipRefresh()
     {
         DetermineOwnership();
+    }
+
+    // Configure this input handler for AI control (no human inputs)
+    public void ConfigureForAI()
+    {
+        enableKeyboardInput = false;
+        enableMobileInput = false;
     }
 
 

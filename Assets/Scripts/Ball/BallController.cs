@@ -38,8 +38,8 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     [Header("Arena Bounds")]
     [SerializeField] private float arenaLeftBound = -15f;
     [SerializeField] private float arenaRightBound = 15f;
-    [SerializeField] private float arenaTopBound = 8f;
-    [SerializeField] private float arenaBottomBound = -5f;
+    [SerializeField] private float arenaTopBound = 10f;
+    [SerializeField] private float arenaBottomBound = -10f;
     [SerializeField] private float wallBounceMultiplier = 0.75f;
     [SerializeField] private int maxWallBounces = 3;
 
@@ -86,6 +86,8 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     private bool isGrounded = false;
     private bool homingEnabled = false;
     private int currentWallBounces = 0;
+    [SerializeField] private int maxRoofBounces = 1;
+    private int usedRoofBounces = 0;
 
     // References - CLEANED UP: Only PlayerCharacter support
     private Transform ballTransform;
@@ -147,6 +149,14 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
     void Update()
     {
+        // Offline mode: ignore network ownership entirely and run local logic
+        if (PhotonNetwork.OfflineMode)
+        {
+            HandleBallLogic();
+            UpdateVisuals();
+            return;
+        }
+
         // Store previous authority state for change detection
         bool previousAuthority = hasNetworkAuthority;
 
@@ -312,11 +322,12 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     void CheckArenaBounds()
     {
         Vector3 ballPos = ballTransform.position;
-        // FIXED: Updated bounds to match requirements (x = -15 to 15, y below -5)
-        bool outOfBounds = ballPos.x < arenaLeftBound || 
-                          ballPos.x > arenaRightBound ||
-                          ballPos.y < arenaBottomBound ||
-                          ballPos.y > arenaTopBound + 2f; // Keep some top margin
+        
+        // Check if ball is completely outside arena bounds
+        bool outOfBounds = ballPos.x < arenaLeftBound - 1f || 
+                          ballPos.x > arenaRightBound + 1f ||
+                          ballPos.y < arenaBottomBound - 1f ||
+                          ballPos.y > arenaTopBound + 3f; // More generous top margin
 
         if (outOfBounds)
         {
@@ -324,15 +335,14 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             Debug.Log($"[BALL BOUNDS] X: {ballPos.x} (bounds: {arenaLeftBound} to {arenaRightBound})");
             Debug.Log($"[BALL BOUNDS] Y: {ballPos.y} (bounds: {arenaBottomBound} to {arenaTopBound})");
             
-            // FIXED: All clients can reset ball when it goes out of bounds
-            if (hasNetworkAuthority)
+            // Reset ball to center of arena
+            if (PhotonNetwork.OfflineMode || hasNetworkAuthority)
             {
-                // Ball owner resets immediately and syncs
                 ResetBall();
             }
-            else
+            else if (!PhotonNetwork.OfflineMode)
             {
-                // Non-owner clients request reset from ball owner
+                // Online mode: request reset from master client
                 photonView.RPC("RequestBallReset", RpcTarget.MasterClient);
             }
         }
@@ -351,30 +361,64 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
     void CheckWallCollisions()
     {
-        if (velocity.magnitude < 0.1f || currentWallBounces >= maxWallBounces) return;
+        if (velocity.magnitude < 0.1f) return;
 
         Vector3 currentPos = ballTransform.position;
         Vector3 nextPos = currentPos + velocity * Time.deltaTime;
+        bool hitWall = false;
 
-        // FIXED: Updated wall collision bounds to match new arena bounds
+        // Check left/right walls
         if ((currentPos.x > arenaLeftBound && nextPos.x <= arenaLeftBound) ||
             (currentPos.x < arenaRightBound && nextPos.x >= arenaRightBound))
         {
             velocity.x = -velocity.x * wallBounceMultiplier;
-            currentWallBounces++;
+            hitWall = true;
         }
 
+        // Check top/bottom walls
         if ((currentPos.y < arenaTopBound && nextPos.y >= arenaTopBound) ||
             (currentPos.y > arenaBottomBound && nextPos.y <= arenaBottomBound))
         {
-            velocity.y = -velocity.y * wallBounceMultiplier;
+            if (currentPos.y < arenaTopBound && nextPos.y >= arenaTopBound)
+            {
+                // Roof hit - check if we can still bounce
+                if (usedRoofBounces < maxRoofBounces)
+                {
+                    velocity.y = -velocity.y * wallBounceMultiplier;
+                    usedRoofBounces++;
+                    hitWall = true;
+                }
+                else
+                {
+                    // No more roof bounces - clamp to roof and dampen horizontal movement
+                    velocity.y = 0f;
+                    velocity.x *= 0.7f; // Dampen horizontal movement
+                    Vector3 clamped = ballTransform.position;
+                    clamped.y = arenaTopBound - 0.1f;
+                    ballTransform.position = clamped;
+                    hitWall = true;
+                }
+            }
+            else
+            {
+                // Bottom wall hit
+                velocity.y = -velocity.y * wallBounceMultiplier;
+                hitWall = true;
+            }
+        }
+
+        // Count wall bounces
+        if (hitWall)
+        {
             currentWallBounces++;
         }
 
-        if (currentWallBounces >= maxWallBounces || velocity.magnitude < 2f)
+        // Stop bouncing if we've hit too many walls or ball is too slow
+        if (currentWallBounces >= maxWallBounces || velocity.magnitude < 3f)
         {
             SetBallState(BallState.Free);
             currentWallBounces = 0;
+            usedRoofBounces = 0;
         }
     }
 
@@ -427,9 +471,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
         BallHoldTimerUI.Instance?.ShowDanger(this);
 
-        CameraController cameraController = FindObjectOfType<CameraController>();
-        if (cameraController != null)
-            cameraController.ShakeCamera(0.2f, 0.3f);
+        CameraShakeManager.Instance.TriggerShake(0.5f, 0.3f, "BallDanger");
     }
 
     void StartPenaltyPhase()
@@ -443,9 +485,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         ApplyOneTimePenalty();
         BallHoldTimerUI.Instance?.ShowPenalty(this);
 
-        CameraController cameraController = FindObjectOfType<CameraController>();
-        if (cameraController != null)
-            cameraController.ShakeCamera(0.8f, 0.8f);
+        CameraShakeManager.Instance.TriggerShake(1.5f, 0.8f, "BallPenalty");
 
         if (ballDropCoroutine != null)
             StopCoroutine(ballDropCoroutine);
@@ -602,6 +642,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
     public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
     {
+        if (PhotonNetwork.OfflineMode) return;
         if (stream.IsWriting)
         {
             // FIXED: Always send the same number of data items
@@ -672,6 +713,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     public bool TryPickup(PlayerCharacter character)
     {
         Debug.Log($"⚽ === BALLCONTROLLER PICKUP START === {character.name}");
+        Debug.Log($"[PICKUP DEBUG] state:{currentState} hasAuthority:{hasNetworkAuthority} offline:{PhotonNetwork.OfflineMode}");
 
         Debug.Log($"🔍 Ball State Check:");
         Debug.Log($"  - Current State: {currentState}");
@@ -702,7 +744,17 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
                 Debug.Log($"  - Character Owner: {characterView.Owner?.NickName ?? "NULL"}");
             }
 
-            if (characterView != null && characterView.IsMine)
+            if (PhotonNetwork.OfflineMode)
+            {
+                holder = character;
+                SetBallState(BallState.Held);
+                character.SetHasBall(true);
+                ballHoldStartTime = Time.time;
+                ResetHoldTimer();
+                Debug.Log($"🎉 Offline pickup successful for {character.name}");
+                return true;
+            }
+            else if (characterView != null && characterView.IsMine)
             {
                 Debug.Log($"✅ BallController: This is MY character");
                 Debug.Log($"🔐 Authority Check: hasNetworkAuthority = {hasNetworkAuthority}");
@@ -788,17 +840,31 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
         // FIXED: For ultimate abilities, we don't need to check holder or authority
         // Just set the ball to thrown state and apply velocity
-        
+
         StopHoldTimer();
 
-        // FIXED: Set thrower to the player who activated the ultimate
+        // FIXED: Set thrower to the holder if not set
+        if (thrower == null && holder != null)
+        {
+            thrower = holder;
+        }
+        
+        // If still null, find the correct player for offline mode
         if (thrower == null)
         {
-            // Find the player who owns this ball
             var players = FindObjectsOfType<PlayerCharacter>();
             foreach (var player in players)
             {
-                if (player.GetComponent<PhotonView>()?.IsMine == true)
+                if (PhotonNetwork.OfflineMode)
+                {
+                    // In offline mode, use the player who has the ball
+                    if (player.HasBall())
+                    {
+                        thrower = player;
+                        break;
+                    }
+                }
+                else if (player.GetComponent<PhotonView>()?.IsMine == true)
                 {
                     thrower = player;
                     break;
@@ -816,7 +882,8 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
         if (targetOpponent != null)
         {
-            Vector3 targetPos = targetOpponent.position;
+            // IMPROVED: Lead targeting with prediction
+            Vector3 targetPos = CalculateLeadTarget(targetOpponent);
             throwDirection = (targetPos - ballTransform.position).normalized;
         }
 
@@ -840,6 +907,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         ballTransform.position = spawnPosition;
         velocity = Vector3.zero;
         currentWallBounces = 0;
+        usedRoofBounces = 0;
 
         StopHoldTimer();
 
@@ -970,6 +1038,57 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
                 return player.transform;
         }
         return null;
+    }
+    
+    Vector3 CalculateLeadTarget(Transform target)
+    {
+        if (target == null) return Vector3.zero;
+        
+        // Get target's current position and velocity
+        Vector3 targetPos = target.position;
+        Vector3 targetVelocity = Vector3.zero;
+        
+        // Try to get player character for movement data
+        PlayerCharacter targetPlayer = target.GetComponent<PlayerCharacter>();
+        if (targetPlayer != null)
+        {
+            // Estimate velocity from transform movement (simple approach)
+            Vector3 currentPos = target.position;
+            
+            // Use a simple prediction based on movement direction
+            var inputHandler = targetPlayer.GetInputHandler();
+            if (inputHandler != null)
+            {
+                float horizontalInput = inputHandler.GetHorizontal();
+                if (Mathf.Abs(horizontalInput) > 0.1f)
+                {
+                    CharacterData charData = targetPlayer.GetCharacterData();
+                    float moveSpeed = charData != null ? charData.moveSpeed : 5f;
+                    targetVelocity.x = horizontalInput * moveSpeed;
+                }
+            }
+        }
+        
+        // Calculate interception point
+        float ballSpeed = currentThrowSpeed;
+        float timeToTarget = Vector3.Distance(ballTransform.position, targetPos) / ballSpeed;
+        
+        // Predict where target will be
+        Vector3 predictedPos = targetPos + (targetVelocity * timeToTarget);
+        
+        // Add some inaccuracy for fairness (based on difficulty if AI is throwing)
+        if (thrower != null)
+        {
+            var aiBrain = thrower.GetComponent<RetroDodge.AIControllerBrain>();
+            if (aiBrain != null)
+            {
+                // Add AI-specific inaccuracy
+                float inaccuracy = UnityEngine.Random.Range(-1f, 1f) * 2f; // 2 units max error
+                predictedPos.x += inaccuracy;
+            }
+        }
+        
+        return predictedPos;
     }
 
     void CheckGrounded()

@@ -29,6 +29,7 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
     private AudioSource audioSource;
     private Renderer playerRenderer;
     private Color originalColor;
+    private bool isShowingDamageReaction = false;
 
     // Network sync
     private int networkHealth;
@@ -90,7 +91,8 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
     /// </summary>
     public void TakeDamage(int damage, PlayerCharacter attacker)
     {
-        if (!photonView.IsMine || isDead || isInvulnerable) return;
+        if (!PhotonNetwork.OfflineMode && (!photonView.IsMine || isDead || isInvulnerable)) return;
+        if (PhotonNetwork.OfflineMode && (isDead || isInvulnerable)) return;
 
         int actualDamage = Mathf.Min(damage, currentHealth);
         currentHealth -= actualDamage;
@@ -100,7 +102,10 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         playerCharacter?.OnDamageTaken(actualDamage);
 
         // Network sync
-        photonView.RPC("OnDamageReceived", RpcTarget.Others, currentHealth, actualDamage);
+        if (!PhotonNetwork.OfflineMode)
+        {
+            photonView.RPC("OnDamageReceived", RpcTarget.Others, currentHealth, actualDamage);
+        }
 
         // Effects and events
         PlaySound(hurtSound);
@@ -146,7 +151,10 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
 
     public void Die(PlayerCharacter killer)
     {
-        if (isDead || !photonView.IsMine) return;
+        if (isDead) return;
+        if (!PhotonNetwork.OfflineMode && !photonView.IsMine) return;
+
+        Debug.Log($"[DEATH] {gameObject.name} is dying. OfflineMode: {PhotonNetwork.OfflineMode}");
 
         isDead = true;
         currentHealth = 0;
@@ -154,7 +162,10 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         int killerViewID = killer?.GetComponent<PhotonView>()?.ViewID ?? -1;
 
         // Sync death to other clients
-        photonView.RPC("OnPlayerDied", RpcTarget.Others, killerViewID);
+        if (!PhotonNetwork.OfflineMode)
+        {
+            photonView.RPC("OnPlayerDied", RpcTarget.Others, killerViewID);
+        }
 
         // Process death locally
         ProcessDeath(killer);
@@ -163,24 +174,39 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         MatchManager matchManager = FindObjectOfType<MatchManager>();
         if (matchManager != null)
         {
-            // Determine winner based on who died
-            int winnerActorNumber = 0;
-            PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
-
-            foreach (PlayerCharacter player in allPlayers)
+            if (PhotonNetwork.OfflineMode)
             {
-                if (player != playerCharacter && player.photonView != null)
+                // In offline, winner is the other side (1 or 2)
+                int mySide = playerCharacter != null ? playerCharacter.GetPlayerSide() : 0;
+                int winner = mySide == 1 ? 2 : 1;
+                Debug.Log($"[DEATH] Player {mySide} died, winner is {winner}. Requesting round end...");
+                matchManager.RequestRoundEnd(winner, "knockout");
+            }
+            else
+            {
+                // Determine winner based on who died
+                int winnerActorNumber = 0;
+                PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
+
+                foreach (PlayerCharacter player in allPlayers)
                 {
-                    winnerActorNumber = player.photonView.Owner.ActorNumber;
-                    break;
+                    if (player != playerCharacter && player.photonView != null)
+                    {
+                        winnerActorNumber = player.photonView.Owner.ActorNumber;
+                        break;
+                    }
+                }
+
+                if (winnerActorNumber > 0)
+                {
+                    // Use the new RequestRoundEnd method that works for any client
+                    matchManager.RequestRoundEnd(winnerActorNumber, "knockout");
                 }
             }
-
-            if (winnerActorNumber > 0)
-            {
-                // Use the new RequestRoundEnd method that works for any client
-                matchManager.RequestRoundEnd(winnerActorNumber, "knockout");
-            }
+        }
+        else
+        {
+            Debug.LogError("[DEATH] MatchManager not found! Round will not end properly.");
         }
     }
 
@@ -237,7 +263,10 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         }
 
         // Sync revival across network
-        photonView.RPC("OnPlayerRevived", RpcTarget.Others);
+        if (!PhotonNetwork.OfflineMode)
+        {
+            photonView.RPC("OnPlayerRevived", RpcTarget.Others);
+        }
 
         // Trigger events
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
@@ -277,7 +306,7 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
     /// </summary>
     public void ResetHealthForNewRound()
     {
-        if (!photonView.IsMine) return; // Only owner can reset health
+        if (!PhotonNetwork.OfflineMode && !photonView.IsMine) return; // Only owner can reset health in online mode
 
         Debug.Log($"[HEALTH RESET] Resetting health for {gameObject.name}");
 
@@ -287,7 +316,10 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         hasTemporaryInvulnerability = false;
 
         // Sync health reset to other clients
-        photonView.RPC("SyncHealthReset", RpcTarget.Others, maxHealth);
+        if (!PhotonNetwork.OfflineMode)
+        {
+            photonView.RPC("SyncHealthReset", RpcTarget.Others, maxHealth);
+        }
 
         // Trigger health changed event
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
@@ -316,7 +348,14 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
     public void SetTemporaryInvulnerability(float duration)
     {
         if (!photonView.IsMine) return;
-        photonView.RPC("StartTemporaryInvulnerability", RpcTarget.All, duration);
+        if (PhotonNetwork.OfflineMode)
+        {
+            StartTemporaryInvulnerability(duration);
+        }
+        else
+        {
+            photonView.RPC("StartTemporaryInvulnerability", RpcTarget.All, duration);
+        }
     }
 
     [PunRPC]
@@ -333,11 +372,12 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         hasTemporaryInvulnerability = true;
 
         // Simple pulsing effect
+        Color characterColor = GetCharacterIntendedColor();
         float elapsed = 0f;
         while (elapsed < duration && playerRenderer != null)
         {
             float pulse = Mathf.Sin(elapsed * 10f) * 0.3f + 0.7f;
-            playerRenderer.material.color = Color.Lerp(originalColor, Color.yellow, pulse);
+            playerRenderer.material.color = Color.Lerp(characterColor, Color.yellow, pulse);
             elapsed += Time.deltaTime;
             yield return null;
         }
@@ -347,19 +387,50 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         hasTemporaryInvulnerability = false;
         if (playerRenderer != null)
         {
-            playerRenderer.material.color = originalColor;
+            playerRenderer.material.color = characterColor;
         }
     }
 
     IEnumerator DamageReaction()
     {
-        if (playerRenderer != null)
+        if (playerRenderer != null && !isShowingDamageReaction)
         {
-            var originalCol = playerRenderer.material.color;
+            isShowingDamageReaction = true;
+            
+            // Get the character's intended color from CharacterData
+            Color characterIntendedColor = GetCharacterIntendedColor();
+            
+            // Flash red
             playerRenderer.material.color = Color.red;
-            yield return new WaitForSeconds(0.1f);
-            playerRenderer.material.color = originalCol;
+            yield return new WaitForSeconds(0.2f);
+            
+            // Reset to character's intended color
+            if (playerRenderer != null)
+            {
+                playerRenderer.material.color = characterIntendedColor;
+            }
+            
+            isShowingDamageReaction = false;
         }
+    }
+    
+    Color GetCharacterIntendedColor()
+    {
+        // Get the character's intended color from CharacterData
+        var playerCharacter = GetComponent<PlayerCharacter>();
+        if (playerCharacter != null && playerCharacter.GetCharacterData() != null)
+        {
+            return playerCharacter.GetCharacterData().characterColor;
+        }
+        
+        // Fallback to stored original color
+        if (originalColor != Color.clear)
+        {
+            return originalColor;
+        }
+        
+        // Final fallback
+        return Color.white;
     }
 
     void PlaySound(AudioClip clip)
@@ -406,6 +477,13 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
 
     public void SetMaxHealth(int newMaxHealth)
     {
+        if (PhotonNetwork.OfflineMode)
+        {
+            maxHealth = newMaxHealth;
+            currentHealth = Mathf.Min(currentHealth, maxHealth);
+            OnHealthChanged?.Invoke(currentHealth, maxHealth);
+            return;
+        }
         if (PhotonNetwork.IsMasterClient)
         {
             maxHealth = newMaxHealth;
@@ -425,6 +503,16 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
 
     public void SetHealth(int newHealth)
     {
+        if (PhotonNetwork.OfflineMode)
+        {
+            currentHealth = Mathf.Clamp(newHealth, 0, maxHealth);
+            OnHealthChanged?.Invoke(currentHealth, maxHealth);
+            if (currentHealth <= 0 && !isDead)
+            {
+                Die(null);
+            }
+            return;
+        }
         if (PhotonNetwork.IsMasterClient)
         {
             currentHealth = Mathf.Clamp(newHealth, 0, maxHealth);

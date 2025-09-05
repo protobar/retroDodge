@@ -31,8 +31,6 @@ public class CollisionDamageSystem : MonoBehaviour
 
     [Header("Visual Effects - ENHANCED")]
     [SerializeField] private GameObject hitEffectPrefab; // Fallback only
-    [SerializeField] private float screenShakeIntensity = 0.3f;
-    [SerializeField] private float screenShakeDuration = 0.2f;
     [SerializeField] private Color damageColor = Color.red;
 
     [Header("VFX Settings")]
@@ -68,6 +66,8 @@ public class CollisionDamageSystem : MonoBehaviour
 
     // Track collision frame to prevent double hits
     private int lastCollisionFrame = -1;
+    [SerializeField] private int maxRoofBounces = 1;
+    private int usedRoofBounces = 0;
 
     public enum HitType
     {
@@ -140,8 +140,8 @@ public class CollisionDamageSystem : MonoBehaviour
             return;
         }
 
-        // CRITICAL: Only the ball authority should check for collisions
-        if (!ballController.photonView.IsMine)
+        // CRITICAL: Only the ball authority should check for collisions in online; offline always check
+        if (!PhotonNetwork.OfflineMode && !ballController.photonView.IsMine)
         {
             if (debugMode) Debug.Log("CheckForCollisions: Not ball owner, skipping collision check");
             return;
@@ -151,7 +151,7 @@ public class CollisionDamageSystem : MonoBehaviour
         Vector3 ballVelocity = ballController.velocity;
 
         // Early exit if ball is moving too slow (likely bouncing on ground)
-        if (ballVelocity.magnitude < 5f)
+        if (ballVelocity.magnitude < 3f)
         {
             if (debugMode) Debug.Log($"CheckForCollisions: Ball too slow ({ballVelocity.magnitude:F1}), skipping");
             return;
@@ -244,12 +244,7 @@ public class CollisionDamageSystem : MonoBehaviour
     {
         if (debugMode)
         {
-            Debug.Log($"=== ENHANCED COLLISION DAMAGE SYSTEM HIT ===");
-            Debug.Log($"Hit Player: {hitPlayer.name}");
-            Debug.Log($"Hit Type: {hitType}");
-            Debug.Log($"Ball Velocity: {ballController.velocity.magnitude:F1}");
-            Debug.Log($"Thrower: {ballController.GetThrower()?.name}");
-            Debug.Log($"Player Ducking: {hitPlayer.IsDucking()}");
+            Debug.Log($"HIT: {hitPlayer.name} type:{hitType} v:{ballController.velocity.magnitude:F1} thrower:{ballController.GetThrower()?.name} duck:{hitPlayer.IsDucking()}");
         }
 
         // Check if player is trying to catch
@@ -343,8 +338,8 @@ public class CollisionDamageSystem : MonoBehaviour
 
     void ApplyDamage(PlayerCharacter hitPlayer, HitType hitType, bool attemptedCatch)
     {
-        // CRITICAL: Only ball authority should apply damage
-        if (!ballController.photonView.IsMine)
+        // CRITICAL: Only ball authority should apply damage (offline mode or ball owner)
+        if (!PhotonNetwork.OfflineMode && !ballController.photonView.IsMine)
         {
             if (debugMode)
             {
@@ -371,57 +366,67 @@ public class CollisionDamageSystem : MonoBehaviour
             damage = Mathf.RoundToInt(damage * characterData.damageResistance);
         }
 
-        // Better damage reduction for attempted catches
+        // Damage reduction for attempted catches
         if (attemptedCatch)
         {
-            damage = Mathf.RoundToInt(damage * 0.5f); // 50% damage reduction for attempted catch
+            damage = Mathf.RoundToInt(damage * 0.7f); // 30% reduction for attempted catch (tunable)
             if (debugMode)
             {
                 Debug.Log($"Damage reduced for attempted catch: {damage}");
             }
         }
 
-        // Use RPC to tell the hit player's client to damage themselves
-        PhotonView hitPlayerView = hitPlayer.GetComponent<PhotonView>();
-        if (hitPlayerView != null)
+        if (PhotonNetwork.OfflineMode)
         {
-            // Get the thrower's PhotonView for attacker reference
+            // Offline: apply damage locally with proper attacker reference
             PlayerCharacter thrower = ballController.GetThrower();
-            int attackerViewID = -1;
-            if (thrower != null)
-            {
-                PhotonView throwerView = thrower.GetComponent<PhotonView>();
-                if (throwerView != null)
-                {
-                    attackerViewID = throwerView.ViewID;
-                }
-            }
-
+            playerHealth.TakeDamage(damage, thrower);
             if (debugMode)
             {
-                Debug.Log($"DAMAGE RPC: Sending {damage} damage to {hitPlayer.name} (ViewID: {hitPlayerView.ViewID}) from thrower ViewID: {attackerViewID}");
-                Debug.Log($"  - Ball Owner: {ballController.photonView.Owner?.NickName}");
-                Debug.Log($"  - Hit Type: {hitType}");
-                Debug.Log($"  - Attempted Catch: {attemptedCatch}");
+                Debug.Log($"Applied {damage} damage OFFLINE to {hitPlayer.name} from {thrower?.name ?? "unknown"}");
             }
-
-            // Send RPC ONLY to the hit player's client (not RpcTarget.All)
-            hitPlayerView.RPC("TakeDamageFromBall", hitPlayerView.Owner, damage, attackerViewID);
         }
         else
         {
-            // Fallback for local damage (shouldn't happen in multiplayer)
-            Debug.LogWarning($"No PhotonView found on {hitPlayer.name}, applying local damage");
-            playerHealth.TakeDamage(damage, null);
+            // Use RPC to tell the hit player's client to damage themselves
+            PhotonView hitPlayerView = hitPlayer.GetComponent<PhotonView>();
+            if (hitPlayerView != null)
+            {
+                // Get the thrower's PhotonView for attacker reference
+                PlayerCharacter thrower = ballController.GetThrower();
+                int attackerViewID = -1;
+                if (thrower != null)
+                {
+                    PhotonView throwerView = thrower.GetComponent<PhotonView>();
+                    if (throwerView != null)
+                    {
+                        attackerViewID = throwerView.ViewID;
+                    }
+                }
+
+                if (debugMode)
+                {
+                    Debug.Log($"DAMAGE RPC: Sending {damage} damage to {hitPlayer.name} (ViewID: {hitPlayerView.ViewID}) from thrower ViewID: {attackerViewID}");
+                    Debug.Log($"  - Ball Owner: {ballController.photonView.Owner?.NickName}");
+                    Debug.Log($"  - Hit Type: {hitType}");
+                    Debug.Log($"  - Attempted Catch: {attemptedCatch}");
+                }
+
+                // Send RPC ONLY to the hit player's client (not RpcTarget.All)
+                hitPlayerView.RPC("TakeDamageFromBall", hitPlayerView.Owner, damage, attackerViewID);
+            }
+            else
+            {
+                // Fallback for local damage (shouldn't happen in multiplayer)
+                Debug.LogWarning($"No PhotonView found on {hitPlayer.name}, applying local damage");
+                playerHealth.TakeDamage(damage, null);
+            }
         }
 
         // Visual feedback (this can run on all clients, but let's limit it to the ball owner to prevent duplication)
         StartCoroutine(DamageFlash(hitPlayer));
 
-        if (debugMode)
-        {
-            Debug.Log($"Applied {damage} damage to {hitPlayer.name} via RPC");
-        }
+        if (debugMode) Debug.Log($"Applied {damage} damage to {hitPlayer.name}");
     }
 
     /// <summary>
@@ -467,38 +472,35 @@ public class CollisionDamageSystem : MonoBehaviour
             }
         }
 
-        // Screen shake (enhanced based on hit type)
-        CameraController cameraController = FindObjectOfType<CameraController>();
-        if (cameraController != null)
+        // Screen shake (centralized through CameraShakeManager)
+        // Base shake values (more intense than before)
+        float shakeIntensity = 0.8f;
+        float shakeDuration = 0.4f;
+
+        switch (hitType)
         {
-            // Scale screen shake based on hit type
-            float shakeIntensity = screenShakeIntensity;
-            float shakeDuration = screenShakeDuration;
-
-            switch (hitType)
-            {
-                case HitType.Ultimate:
-                    shakeIntensity *= 3f; // Massive shake for ultimate
-                    shakeDuration *= 2f;
-                    break;
-                case HitType.JumpThrow:
-                    shakeIntensity *= 1.5f;
-                    shakeDuration *= 1.2f;
-                    break;
-                case HitType.Basic:
-                    // Normal shake values
-                    break;
-            }
-
-            // Reduce shake if attempted catch
-            if (attemptedCatch)
-            {
-                shakeIntensity *= 0.7f;
-                shakeDuration *= 0.8f;
-            }
-
-            cameraController.ShakeCamera(shakeIntensity, shakeDuration);
+            case HitType.Ultimate:
+                shakeIntensity = 2.0f; // Massive shake for ultimate
+                shakeDuration = 0.8f;
+                break;
+            case HitType.JumpThrow:
+                shakeIntensity = 1.2f;
+                shakeDuration = 0.5f;
+                break;
+            case HitType.Basic:
+                shakeIntensity = 0.8f;
+                shakeDuration = 0.4f;
+                break;
         }
+
+        // Reduce shake if attempted catch
+        if (attemptedCatch)
+        {
+            shakeIntensity *= 0.6f;
+            shakeDuration *= 0.7f;
+        }
+
+        CameraShakeManager.Instance.TriggerShake(shakeIntensity, shakeDuration, $"Damage_{hitType}_{hitPlayer?.name ?? "Unknown"}");
 
         // Play hit sound (VFXManager handles audio automatically through SpawnHitVFX)
         if (!useVFXManager || VFXManager.Instance == null)

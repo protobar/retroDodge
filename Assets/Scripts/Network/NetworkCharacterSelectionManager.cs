@@ -101,11 +101,15 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     void InitializeCharacterSelection()
     {
-        if (!PhotonNetwork.InRoom)
+        // Allow OfflineMode character selection
+        if (!PhotonNetwork.OfflineMode)
         {
-            Debug.LogError("Not in a Photon room! Returning to main menu.");
-            ReturnToMainMenu();
-            return;
+            if (!PhotonNetwork.InRoom)
+            {
+                Debug.LogError("Not in a Photon room! Returning to main menu.");
+                ReturnToMainMenu();
+                return;
+            }
         }
 
         SetPanelActive(characterSelectionPanel, true);
@@ -125,8 +129,12 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         timeRemaining = selectionTimeLimit;
         UpdateTimerDisplay();
 
-        // FIXED: Use centralized room state manager with fallback
-        RoomStateManager.GetOrCreateInstance()?.SetPlayerSelectionState(-1, false);
+        // Skip room state when offline
+        if (!PhotonNetwork.OfflineMode)
+        {
+            // FIXED: Use centralized room state manager with fallback
+            RoomStateManager.GetOrCreateInstance()?.SetPlayerSelectionState(-1, false);
+        }
 
         SetupButtonListeners();
     }
@@ -283,17 +291,20 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         UpdateCharacterDisplay(selectedCharacter);
         UpdateCharacterButtons();
 
-        // FIXED: Use centralized room state manager with fallback
-        bool success = RoomStateManager.GetOrCreateInstance()?.SetPlayerProperty(RoomStateManager.PLAYER_CHARACTER_KEY, characterIndex) ?? false;
-        if (debugMode) Debug.Log($"[CHAR SELECT] Set character property: {success}, CharacterIndex: {characterIndex}");
-        
-        // FIXED: If property update failed, try to reset the leaving flag
-        if (!success && RoomStateManager.GetOrCreateInstance() != null)
+        if (!PhotonNetwork.OfflineMode)
         {
-            RoomStateManager.GetOrCreateInstance().ResetLeavingFlag();
-            // Try again after resetting the flag
-            success = RoomStateManager.GetOrCreateInstance().SetPlayerProperty(RoomStateManager.PLAYER_CHARACTER_KEY, characterIndex);
-            if (debugMode) Debug.Log($"[CHAR SELECT] Retry after reset flag: {success}");
+            // FIXED: Use centralized room state manager with fallback
+            bool success = RoomStateManager.GetOrCreateInstance()?.SetPlayerProperty(RoomStateManager.PLAYER_CHARACTER_KEY, characterIndex) ?? false;
+            if (debugMode) Debug.Log($"[CHAR SELECT] Set character property: {success}, CharacterIndex: {characterIndex}");
+            
+            // FIXED: If property update failed, try to reset the leaving flag
+            if (!success && RoomStateManager.GetOrCreateInstance() != null)
+            {
+                RoomStateManager.GetOrCreateInstance().ResetLeavingFlag();
+                // Try again after resetting the flag
+                success = RoomStateManager.GetOrCreateInstance().SetPlayerProperty(RoomStateManager.PLAYER_CHARACTER_KEY, characterIndex);
+                if (debugMode) Debug.Log($"[CHAR SELECT] Retry after reset flag: {success}");
+            }
         }
 
         PlaySound(characterSelectSound);
@@ -382,17 +393,20 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         isCharacterLocked = true;
         CharacterData lockedCharacter = availableCharacters[selectedCharacterIndex];
 
-        // FIXED: Use centralized room state manager with fallback
-        bool success = RoomStateManager.GetOrCreateInstance()?.SetPlayerSelectionState(selectedCharacterIndex, true) ?? false;
-        if (debugMode) Debug.Log($"[CHAR SELECT] Set lock-in property: {success}, CharacterIndex: {selectedCharacterIndex}");
-        
-        // FIXED: If property update failed, try to reset the leaving flag
-        if (!success && RoomStateManager.GetOrCreateInstance() != null)
+        if (!PhotonNetwork.OfflineMode)
         {
-            RoomStateManager.GetOrCreateInstance().ResetLeavingFlag();
-            // Try again after resetting the flag
-            success = RoomStateManager.GetOrCreateInstance().SetPlayerSelectionState(selectedCharacterIndex, true);
-            if (debugMode) Debug.Log($"[CHAR SELECT] Retry after reset flag: {success}");
+            // FIXED: Use centralized room state manager with fallback
+            bool success = RoomStateManager.GetOrCreateInstance()?.SetPlayerSelectionState(selectedCharacterIndex, true) ?? false;
+            if (debugMode) Debug.Log($"[CHAR SELECT] Set lock-in property: {success}, CharacterIndex: {selectedCharacterIndex}");
+            
+            // FIXED: If property update failed, try to reset the leaving flag
+            if (!success && RoomStateManager.GetOrCreateInstance() != null)
+            {
+                RoomStateManager.GetOrCreateInstance().ResetLeavingFlag();
+                // Try again after resetting the flag
+                success = RoomStateManager.GetOrCreateInstance().SetPlayerSelectionState(selectedCharacterIndex, true);
+                if (debugMode) Debug.Log($"[CHAR SELECT] Retry after reset flag: {success}");
+            }
         }
 
         if (lockInButton != null)
@@ -405,7 +419,19 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         PlaySound(lockInSound);
         UpdatePlayerStatus();
 
-        CheckBothPlayersReady();
+        if (PhotonNetwork.OfflineMode)
+        {
+            // Offline: set AISessionConfig with player selection and random AI, then start gameplay
+            var cfg = RetroDodge.AISessionConfig.Instance;
+            int aiIndex = availableCharacters != null && availableCharacters.Length > 0 ? Random.Range(0, availableCharacters.Length) : 0;
+            cfg.SetPlayWithAI(cfg.difficulty, selectedCharacterIndex, aiIndex);
+
+            TransitionToGameplay();
+        }
+        else
+        {
+            CheckBothPlayersReady();
+        }
     }
     
 
@@ -415,6 +441,12 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     void StartSelectionTimer()
     {
+        if (PhotonNetwork.OfflineMode)
+        {
+            // No timer needed offline
+            timerPanel?.SetActive(false);
+            return;
+        }
         if (timerStarted) return;
 
         selectionStartTime = PhotonNetwork.Time;
@@ -434,7 +466,7 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     void UpdateTimer()
     {
-        if (!timerStarted) return;
+        if (!timerStarted || PhotonNetwork.OfflineMode) return;
 
         double elapsedTime = PhotonNetwork.Time - selectionStartTime;
         timeRemaining = selectionTimeLimit - (float)elapsedTime;
@@ -551,6 +583,17 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
     void UpdatePlayerStatus()
     {
+        if (PhotonNetwork.OfflineMode)
+        {
+            if (localPlayerStatusText != null)
+                localPlayerStatusText.text = "You: Selecting (Offline)";
+            if (remotePlayerStatusText != null)
+                remotePlayerStatusText.text = "Opponent: AI (Random)";
+            if (roomInfoText != null)
+                roomInfoText.text = "Mode: Offline vs AI";
+            return;
+        }
+
         string localStatus = GetPlayerStatusText(PhotonNetwork.LocalPlayer);
         if (localPlayerStatusText != null)
             localPlayerStatusText.text = $"You: {localStatus}";
@@ -565,7 +608,7 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         if (remotePlayerStatusText != null)
             remotePlayerStatusText.text = $"Opponent: {remoteStatus}";
 
-        if (roomInfoText != null)
+        if (roomInfoText != null && PhotonNetwork.CurrentRoom != null)
         {
             roomInfoText.text = $"Room: {PhotonNetwork.CurrentRoom.Name} | Players: {PhotonNetwork.CurrentRoom.PlayerCount}/2";
         }
@@ -675,7 +718,11 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
         yield return new WaitForSeconds(2f);
 
-        if (PhotonNetwork.IsMasterClient)
+        if (PhotonNetwork.OfflineMode)
+        {
+            SceneManager.LoadScene(gameplayScene);
+        }
+        else if (PhotonNetwork.IsMasterClient)
         {
             PhotonNetwork.LoadLevel(gameplayScene);
         }

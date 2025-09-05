@@ -43,6 +43,12 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     private bool canDash = true;
     private float lastDashTime;
     public bool isDashing, isTeleporting = false;
+    
+    // Speed boost state - per player instance
+    private float originalMoveSpeed = -1f;
+    private bool isSpeedBoostActive = false;
+    private bool isSlowSpeedActive = false;
+    private float slowSpeedMultiplier = 1f;
 
     // Match integration
     private MatchManager currentMatch;
@@ -156,6 +162,11 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     void SetupNetworkBehavior()
     {
+        if (PhotonNetwork.OfflineMode)
+        {
+            if (inputHandler != null) inputHandler.isPUN2Enabled = false;
+            return;
+        }
         if (photonView?.IsMine == true && inputHandler != null)
         {
             inputHandler.isPUN2Enabled = true;
@@ -195,7 +206,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         // FIXED: Only process if character data is loaded
         if (characterData == null || (!IsLocalPlayer() && !isDataSyncComplete)) return;
 
-        if (photonView?.IsMine != false) // Local player or no network
+        if (PhotonNetwork.OfflineMode || photonView?.IsMine != false) // Local player or no network
         {
             HandleInput();
             CheckGrounded();
@@ -226,7 +237,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         ApplyCharacterStats();
         OnCharacterLoaded?.Invoke(characterData);
 
-        Debug.Log($"[CHARACTER LOADED] {characterData.characterName} loaded for player {photonView.Owner.ActorNumber}");
+        int actor = 0;
+        try { actor = photonView?.Owner != null ? photonView.Owner.ActorNumber : 0; } catch { actor = 0; }
+        Debug.Log($"[CHARACTER LOADED] {characterData.characterName} loaded for player {(actor != 0 ? actor.ToString() : "LOCAL")}" );
     }
 
     /// <summary>
@@ -317,12 +330,16 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         if (side == 1) // Left player (Master Client)
         {
             facingRight = true; // Left player faces right towards opponent
-            Debug.Log($"[FACING] Player {photonView.Owner.ActorNumber} set as LEFT player - facing RIGHT");
+            int actor = 0;
+            try { actor = photonView?.Owner != null ? photonView.Owner.ActorNumber : 0; } catch { actor = 0; }
+            Debug.Log($"[FACING] Player {(actor != 0 ? actor.ToString() : "LOCAL")} set as LEFT player - facing RIGHT");
         }
         else if (side == 2) // Right player (Remote Client)
         {
             facingRight = false; // Right player faces left towards opponent
-            Debug.Log($"[FACING] Player {photonView.Owner.ActorNumber} set as RIGHT player - facing LEFT");
+            int actor = 0;
+            try { actor = photonView?.Owner != null ? photonView.Owner.ActorNumber : 0; } catch { actor = 0; }
+            Debug.Log($"[FACING] Player {(actor != 0 ? actor.ToString() : "LOCAL")} set as RIGHT player - facing LEFT");
 
             // CRITICAL: Flip the character model for right player
             FlipCharacterModel();
@@ -417,7 +434,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         // Jump system with character data integration
         if (inputHandler.GetJumpPressed())
         {
-            Debug.Log($"[JUMP INPUT] Jump pressed - isGrounded: {isGrounded}, isDucking: {isDucking}, canDoubleJump: {characterData?.canDoubleJump}, hasDoubleJumped: {hasDoubleJumped}");
+            Debug.Log($"[INPUT] Jump pressed - grounded:{isGrounded} ducking:{isDucking} canDJ:{characterData?.canDoubleJump} hasDJ:{hasDoubleJumped}");
             
             if (isGrounded && !isDucking)
             {
@@ -449,7 +466,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     bool ShouldProcessInput()
     {
         return inputHandler != null && characterData != null &&
-               inputEnabled && (photonView?.IsMine != false);
+               inputEnabled && (PhotonNetwork.OfflineMode || (photonView?.IsMine != false));
     }
 
     void HandleMovement()
@@ -461,7 +478,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         // Horizontal movement using character data
         if (horizontal != 0)
         {
-            Vector3 moveDir = Vector3.right * horizontal * characterData.moveSpeed;
+            Vector3 moveDir = Vector3.right * horizontal * GetEffectiveMoveSpeed();
             characterTransform.position += moveDir * Time.deltaTime;
         }
 
@@ -532,8 +549,8 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         // FIXED: Sync double jump to other players
         if (photonView.IsMine)
         {
-            PlayCharacterSound(CharacterAudioType.Jump);
-            SyncPlayerAction("DoubleJump");
+        PlayCharacterSound(CharacterAudioType.Jump);
+        SyncPlayerAction("DoubleJump");
             // FIXED: Also sync the double jump state
             photonView.RPC("SyncDoubleJumpState", RpcTarget.Others, hasDoubleJumped);
         }
@@ -708,6 +725,12 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
             abilityCooldowns[i] = false;
         }
 
+        // Reset speed effects
+        isSpeedBoostActive = false;
+        isSlowSpeedActive = false;
+        slowSpeedMultiplier = 1f;
+        originalMoveSpeed = -1f; // Reset to force recalculation
+
         // Re-enable movement and input
         movementEnabled = true;
         inputEnabled = true;
@@ -807,7 +830,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     {
         abilityCharges[0] = 0f;
         StartCoroutine(AbilityCooldown(0));
-        SyncPlayerAction("Ultimate");
+        if (!PhotonNetwork.OfflineMode) SyncPlayerAction("Ultimate");
 
         SpawnUltimateVFX();
 
@@ -825,30 +848,45 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         StartCoroutine(AbilityCooldown(1));
 
         // FIXED: Sync trick activation to other players
-        if (photonView.IsMine)
+        if (!PhotonNetwork.OfflineMode && photonView.IsMine)
         {
             photonView.RPC("SyncPlayerAction", RpcTarget.Others, "Trick");
         }
-
-        var opponent = FindOpponent();
-        if (opponent != null)
+        else if (PhotonNetwork.OfflineMode)
         {
-            SpawnTrickVFX(opponent);
-            ExecuteTrick(opponent);
+            // In offline mode, execute directly
+            var opponent = FindOpponent();
+            if (opponent != null)
+            {
+                SpawnTrickVFX(opponent);
+                ExecuteTrick(opponent);
+            }
+        }
+
+        // For online mode, also execute locally for immediate feedback
+        if (!PhotonNetwork.OfflineMode)
+        {
+            var opponent = FindOpponent();
+            if (opponent != null)
+            {
+                SpawnTrickVFX(opponent);
+                ExecuteTrick(opponent);
+            }
         }
     }
 
-    void ActivateTreat()
+    public void ActivateTreat()
     {
         abilityCharges[2] = 0f;
         StartCoroutine(AbilityCooldown(2));
 
         // FIXED: Sync treat activation to other players
-        if (photonView.IsMine)
+        if (!PhotonNetwork.OfflineMode && photonView.IsMine)
         {
             photonView.RPC("SyncPlayerAction", RpcTarget.Others, "Treat");
         }
 
+        // Always execute treat locally (affects self)
         SpawnTreatVFX();
         ExecuteTreat();
     }
@@ -864,13 +902,16 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
             float speed = characterData.GetUltimateSpeed();
             Vector3 throwDirection = GetThrowDirection(); // FIXED: Use proper direction
 
+            // Enhanced power for airborne throws (jump ultimates)
+            float powerMultiplier = isGrounded ? 1.5f : 2.0f;
+
             ball.SetThrowData(ThrowType.Ultimate, damage, speed);
-            ball.ThrowBall(throwDirection, 1.5f);
+            ball.ThrowBall(throwDirection, powerMultiplier);
             SetHasBall(false); // FIXED: Set hasBall to false after throwing
 
-            // Screen shake
-            var camera = FindObjectOfType<CameraController>();
-            camera?.ShakeCamera(characterData.GetPowerThrowScreenShake(), 0.8f);
+            // Screen shake (centralized through CameraShakeManager)
+            float shakeIntensity = characterData.GetPowerThrowScreenShake() * 1.5f; // More intense
+            CameraShakeManager.Instance.TriggerShake(shakeIntensity, 0.8f, $"PowerThrow_{characterData?.characterName ?? "Unknown"}");
         }
     }
 
@@ -907,25 +948,25 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         else
         {
             // Fallback: Create balls locally (for testing)
-            for (int i = 0; i < count; i++)
+        for (int i = 0; i < count; i++)
+        {
+            var ballObj = Instantiate(BallManager.Instance.ballPrefab,
+                transform.position + characterData.GetMultiThrowSpawnOffset(), Quaternion.identity);
+
+            var ballController = ballObj.GetComponent<BallController>();
+            if (ballController != null)
             {
-                var ballObj = Instantiate(BallManager.Instance.ballPrefab,
-                    transform.position + characterData.GetMultiThrowSpawnOffset(), Quaternion.identity);
+                float angleOffset = (i - (count - 1) * 0.5f) * (characterData.GetMultiThrowSpread() / count);
+                Vector3 spreadDir = Quaternion.Euler(0, angleOffset, 0) * throwDir;
 
-                var ballController = ballObj.GetComponent<BallController>();
-                if (ballController != null)
-                {
-                    float angleOffset = (i - (count - 1) * 0.5f) * (characterData.GetMultiThrowSpread() / count);
-                    Vector3 spreadDir = Quaternion.Euler(0, angleOffset, 0) * throwDir;
-
-                    ballController.SetThrowData(ThrowType.Ultimate, damage, speed);
-                    ballController.SetThrower(this);
+                ballController.SetThrowData(ThrowType.Ultimate, damage, speed);
+                ballController.SetThrower(this);
                     ballController.ThrowBallInternal(spreadDir.normalized, 1f);
 
-                    Destroy(ballObj, 4f);
-                }
+                Destroy(ballObj, 4f);
+            }
 
-                yield return new WaitForSeconds(delay);
+            yield return new WaitForSeconds(delay);
             }
         }
     }
@@ -970,9 +1011,16 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     void ExecuteTrick(PlayerCharacter opponent)
     {
-        // FIXED: Sync trick effects across network
-        if (photonView.IsMine && opponent != null)
+        if (opponent == null) return;
+
+        if (PhotonNetwork.OfflineMode)
         {
+            // Offline mode: apply trick effect directly
+            ApplyTrickEffectLocal(opponent, characterData.trickType);
+        }
+        else if (photonView.IsMine)
+        {
+            // Online mode: sync trick effects across network
             PhotonView opponentView = opponent.GetComponent<PhotonView>();
             if (opponentView != null)
             {
@@ -983,24 +1031,71 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     void ExecuteTreat()
     {
-        // FIXED: Sync treat effects across network
-        if (photonView.IsMine)
+        if (PhotonNetwork.OfflineMode)
         {
+            // Offline mode: apply treat effect directly
+            ApplyTreatEffectLocal(this, characterData.treatType);
+        }
+        else if (photonView.IsMine)
+        {
+            // Online mode: sync treat effects across network
             photonView.RPC("ApplyTreatEffect", RpcTarget.All, photonView.ViewID, (int)characterData.treatType);
         }
     }
 
     IEnumerator ApplySlowSpeed(PlayerCharacter opponent)
     {
-        if (opponent.characterData == null) yield break;
+        if (opponent.characterData == null || opponent.isSlowSpeedActive) yield break;
 
-        float original = opponent.characterData.moveSpeed;
-        opponent.characterData.moveSpeed = original * characterData.GetSlowSpeedMultiplier();
+        // Apply slow speed to opponent using per-player system
+        opponent.isSlowSpeedActive = true;
+        opponent.slowSpeedMultiplier = characterData.GetSlowSpeedMultiplier();
 
         yield return new WaitForSeconds(characterData.GetSlowSpeedDuration());
 
-        if (opponent.characterData != null)
-            opponent.characterData.moveSpeed = original;
+        // Restore opponent's speed
+        if (opponent != null)
+        {
+            opponent.isSlowSpeedActive = false;
+            opponent.slowSpeedMultiplier = 1f;
+        }
+    }
+
+    // Local versions for offline mode
+    void ApplyTrickEffectLocal(PlayerCharacter targetPlayer, TrickType trickType)
+    {
+        if (targetPlayer == null) return;
+
+        switch (trickType)
+        {
+            case TrickType.SlowSpeed:
+                StartCoroutine(ApplySlowSpeed(targetPlayer));
+                break;
+            case TrickType.Freeze:
+                StartCoroutine(ApplyFreeze(targetPlayer));
+                break;
+            case TrickType.InstantDamage:
+                ApplyInstantDamage(targetPlayer);
+                break;
+        }
+    }
+
+    void ApplyTreatEffectLocal(PlayerCharacter targetPlayer, TreatType treatType)
+    {
+        if (targetPlayer == null) return;
+
+        switch (treatType)
+        {
+            case TreatType.Shield:
+                targetPlayer.ApplyShield();
+                break;
+            case TreatType.Teleport:
+                targetPlayer.ExecuteTeleport();
+                break;
+            case TreatType.SpeedBoost:
+                targetPlayer.StartCoroutine(targetPlayer.ApplySpeedBoost());
+                break;
+        }
     }
 
     IEnumerator ApplyFreeze(PlayerCharacter opponent)
@@ -1084,15 +1179,44 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     IEnumerator ApplySpeedBoost()
     {
-        if (characterData == null) yield break;
+        if (characterData == null || isSpeedBoostActive) yield break;
 
-        float original = characterData.moveSpeed;
-        characterData.moveSpeed = original * characterData.GetSpeedBoostMultiplier();
+        // Store original speed if not already stored
+        if (originalMoveSpeed < 0f)
+        {
+            originalMoveSpeed = characterData.moveSpeed;
+        }
+
+        // Apply speed boost to this player instance only
+        isSpeedBoostActive = true;
+        // Don't modify the shared characterData, use a multiplier in movement calculation instead
+        // The actual speed modification will be handled in the movement code
 
         yield return new WaitForSeconds(characterData.GetSpeedBoostDuration());
 
-        if (characterData != null)
-            characterData.moveSpeed = original;
+        // Restore original speed
+        isSpeedBoostActive = false;
+    }
+    
+    // Get the effective move speed for this player (includes speed boost and slow effects)
+    public float GetEffectiveMoveSpeed()
+    {
+        if (characterData == null) return 5f; // Default speed
+        
+        float baseSpeed = characterData.moveSpeed;
+        float multiplier = 1f;
+        
+        if (isSpeedBoostActive)
+        {
+            multiplier *= characterData.GetSpeedBoostMultiplier();
+        }
+        
+        if (isSlowSpeedActive)
+        {
+            multiplier *= slowSpeedMultiplier;
+        }
+        
+        return baseSpeed * multiplier;
     }
 
     // ══════════════════════════════════════════════════════════
@@ -1262,11 +1386,11 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
             networkIsGrounded = (bool)stream.ReceiveNext();
             networkIsDucking = (bool)stream.ReceiveNext();
             networkHasBall = (bool)stream.ReceiveNext();
-            
+
             // Handle facing direction changes
             bool networkFacingRight = (bool)stream.ReceiveNext();
             int networkPlayerSide = (int)stream.ReceiveNext();
-            
+
             if (facingRight != networkFacingRight || playerSide != networkPlayerSide)
             {
                 facingRight = networkFacingRight;
@@ -1385,7 +1509,8 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     bool IsMatchStateAllowingAbilities()
     {
-        return currentMatch?.GetMatchState() == MatchManager.MatchState.Fighting;
+        if (currentMatch == null) return true; // Offline fallback: allow
+        return currentMatch.GetMatchState() == MatchManager.MatchState.Fighting;
     }
 
     PlayerCharacter FindOpponent()
@@ -1456,7 +1581,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     public bool IsDucking() => duckSystem?.IsDucking() ?? isDucking;
     public bool HasBall() => hasBall;
     public void SetHasBall(bool value) => hasBall = value;
-    public bool IsLocalPlayer() => photonView?.IsMine != false;
+    public bool IsLocalPlayer() => PhotonNetwork.OfflineMode || (photonView?.IsMine != false);
     public PlayerInputHandler GetInputHandler() => inputHandler;
     public void SetInputEnabled(bool enabled) => inputEnabled = enabled;
     public void SetMovementEnabled(bool enabled) => movementEnabled = enabled;
