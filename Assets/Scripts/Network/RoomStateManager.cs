@@ -53,6 +53,16 @@ public class RoomStateManager : MonoBehaviourPunCallbacks
     public const string ROOM_ALLOW_SPECTATORS = "AllowSpectators";
     public const string ROOM_IS_VISIBLE = "IsVisible";
     
+    // Competitive Mode Properties
+    public const string ROOM_TYPE_KEY = "RoomType"; // 0=QuickMatch, 1=Custom, 2=Competitive
+    public const string COMPETITIVE_SERIES = "CompetitiveSeries";
+    public const string SERIES_WINS_PLAYER1 = "SeriesWinsP1";
+    public const string SERIES_WINS_PLAYER2 = "SeriesWinsP2";
+    public const string CURRENT_MATCH = "CurrentMatch";
+    public const string SERIES_WINNER = "SeriesWinner";
+    public const string SERIES_MAX_MATCHES = "SeriesMaxMatches";
+    public const string SERIES_COMPLETED = "SeriesCompleted";
+    
     // ═══════════════════════════════════════════════════════════════
     // SINGLETON PATTERN
     // ═══════════════════════════════════════════════════════════════
@@ -306,6 +316,70 @@ public class RoomStateManager : MonoBehaviourPunCallbacks
         };
         
         return SetPlayerProperties(props);
+    }
+    
+    /// <summary>
+    /// Set competitive series state in one call
+    /// </summary>
+    public bool SetCompetitiveSeriesState(int currentMatch, int p1Wins, int p2Wins, int maxMatches, bool seriesCompleted, int seriesWinner = -1)
+    {
+        Hashtable props = new Hashtable
+        {
+            [COMPETITIVE_SERIES] = true,
+            [CURRENT_MATCH] = currentMatch,
+            [SERIES_WINS_PLAYER1] = p1Wins,
+            [SERIES_WINS_PLAYER2] = p2Wins,
+            [SERIES_MAX_MATCHES] = maxMatches,
+            [SERIES_COMPLETED] = seriesCompleted,
+            [ROOM_TYPE_KEY] = 2 // Competitive mode
+        };
+        
+        if (seriesWinner >= 0)
+        {
+            props[SERIES_WINNER] = seriesWinner;
+        }
+        
+        return SetRoomProperties(props);
+    }
+    
+    /// <summary>
+    /// Initialize competitive series
+    /// </summary>
+    public bool InitializeCompetitiveSeries(int maxMatches = 9)
+    {
+        return SetCompetitiveSeriesState(1, 0, 0, maxMatches, false);
+    }
+    
+    /// <summary>
+    /// Update series after a match result
+    /// </summary>
+    public bool UpdateSeriesResult(int winnerPlayerNumber)
+    {
+        int currentMatch = GetRoomProperty(CURRENT_MATCH, 1);
+        int p1Wins = GetRoomProperty(SERIES_WINS_PLAYER1, 0);
+        int p2Wins = GetRoomProperty(SERIES_WINS_PLAYER2, 0);
+        int maxMatches = GetRoomProperty(SERIES_MAX_MATCHES, 9);
+        
+        // Update wins
+        if (winnerPlayerNumber == 1)
+            p1Wins++;
+        else if (winnerPlayerNumber == 2)
+            p2Wins++;
+        
+        // Check if series is complete
+        int winsNeeded = (maxMatches + 1) / 2; // Best of maxMatches
+        bool seriesCompleted = (p1Wins >= winsNeeded) || (p2Wins >= winsNeeded);
+        
+        int seriesWinner = -1;
+        if (seriesCompleted)
+        {
+            seriesWinner = (p1Wins >= winsNeeded) ? 1 : 2;
+        }
+        
+        // Update current match for next round
+        int nextMatch = seriesCompleted ? currentMatch : currentMatch + 1;
+        
+        return SetCompetitiveSeriesState(nextMatch, p1Wins, p2Wins, maxMatches, seriesCompleted, seriesWinner);
     }
     
     // ═══════════════════════════════════════════════════════════════

@@ -125,11 +125,12 @@ public class SimpleAFKDetector : MonoBehaviourPun, IPunObservable
         // Show AFK message using UI manager
         if (afkUIManager != null)
         {
-            afkUIManager.ShowAFKMessage(playerCharacter.name, true);
-            afkUIManager.UpdateAFKStatus(playerCharacter.name, true);
+            string playerName = PhotonNetwork.NickName ?? playerCharacter.name;
+            afkUIManager.ShowAFKMessage(playerName, true);
+            afkUIManager.UpdateAFKStatus(playerName, true);
         }
         
-        Debug.Log($"[AFK] {playerCharacter.name} is now AFK!");
+        Debug.Log($"[AFK] {PhotonNetwork.NickName ?? playerCharacter.name} is now AFK!");
     }
     
     /// <summary>
@@ -148,11 +149,12 @@ public class SimpleAFKDetector : MonoBehaviourPun, IPunObservable
         // Show normal message using UI manager
         if (afkUIManager != null)
         {
-            afkUIManager.ShowAFKMessage(playerCharacter.name, false);
-            afkUIManager.UpdateAFKStatus(playerCharacter.name, false);
+            string playerName = PhotonNetwork.NickName ?? playerCharacter.name;
+            afkUIManager.ShowAFKMessage(playerName, false);
+            afkUIManager.UpdateAFKStatus(playerName, false);
         }
         
-        Debug.Log($"[AFK] {playerCharacter.name} is no longer AFK!");
+        Debug.Log($"[AFK] {PhotonNetwork.NickName ?? playerCharacter.name} is no longer AFK!");
     }
     
     /// <summary>
@@ -166,7 +168,7 @@ public class SimpleAFKDetector : MonoBehaviourPun, IPunObservable
         if (Time.time - lastActivityTime >= damageInterval)
         {
             playerHealth.TakeDamage(afkDamage, null);
-            Debug.Log($"[AFK] {playerCharacter.name} took {afkDamage} AFK damage");
+            Debug.Log($"[AFK] {PhotonNetwork.NickName ?? playerCharacter.name} took {afkDamage} AFK damage");
             
             // Reset timer for next damage
             lastActivityTime = Time.time;

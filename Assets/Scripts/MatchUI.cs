@@ -44,6 +44,11 @@ public class MatchUI : MonoBehaviour
     [SerializeField] private GameObject[] player1RoundWins;
     [SerializeField] private GameObject[] player2RoundWins;
     [SerializeField] private TextMeshProUGUI matchScoreText;
+    
+    [Header("Competitive Series Info")]
+    [SerializeField] private GameObject competitiveSeriesPanel;
+    [SerializeField] private TextMeshProUGUI seriesMatchText;
+    [SerializeField] private TextMeshProUGUI seriesScoreText;
 
     [Header("Timer")]
     [SerializeField] private TextMeshProUGUI timerText;
@@ -69,6 +74,9 @@ public class MatchUI : MonoBehaviour
 
     [Header("Match End UI")]
     public Button returnToMenuButton;
+    
+    [Header("Debug")]
+    [SerializeField] private bool debugMode = false;
 
     [Header("Visual Effects")]
     [SerializeField] private Color healthBarHealthyColor = Color.green;
@@ -218,9 +226,84 @@ public class MatchUI : MonoBehaviour
             matchScoreText.text = $"{player1Rounds} - {player2Rounds}";
         }
 
+        if (debugMode)
+        {
+            Debug.Log($"[ROUND UI] UpdateRoundInfo called - Round: {currentRound}, P1 Rounds: {player1Rounds}, P2 Rounds: {player2Rounds}");
+        }
+
         // Update round win indicators
         UpdateRoundWinIndicators(player1RoundWins, player1Rounds);
         UpdateRoundWinIndicators(player2RoundWins, player2Rounds);
+    }
+    
+    public void ShowCompetitiveSeries(int currentMatch, int maxMatches, int player1Wins, int player2Wins)
+    {
+        if (competitiveSeriesPanel != null)
+        {
+            competitiveSeriesPanel.SetActive(true);
+        }
+        
+        if (seriesMatchText != null)
+        {
+            seriesMatchText.text = $"Match {currentMatch} of {maxMatches}";
+        }
+        
+        if (seriesScoreText != null)
+        {
+            seriesScoreText.text = $"{player1Wins} - {player2Wins}";
+        }
+        
+        if (debugMode)
+        {
+            Debug.Log($"[SERIES UI] ShowCompetitiveSeries called - P1 Wins: {player1Wins}, P2 Wins: {player2Wins}");
+            Debug.Log($"[SERIES UI] Using Round Indicators for Series - P1 Array Length: {(player1RoundWins != null ? player1RoundWins.Length : 0)}");
+            Debug.Log($"[SERIES UI] Using Round Indicators for Series - P2 Array Length: {(player2RoundWins != null ? player2RoundWins.Length : 0)}");
+        }
+        
+        // Update series win indicators using the round win indicator arrays
+        // NOTE: The round win arrays need to be expanded to 9 elements in Unity Inspector for competitive mode
+        UpdateSeriesWinIndicators(player1RoundWins, player1Wins);
+        UpdateSeriesWinIndicators(player2RoundWins, player2Wins);
+    }
+    
+    public void HideCompetitiveSeries()
+    {
+        if (competitiveSeriesPanel != null)
+        {
+            competitiveSeriesPanel.SetActive(false);
+        }
+    }
+    
+    void UpdateSeriesWinIndicators(GameObject[] indicators, int wins)
+    {
+        if (indicators == null) 
+        {
+            if (debugMode) Debug.LogWarning("[SERIES UI] UpdateSeriesWinIndicators: indicators array is null!");
+            return;
+        }
+        
+        if (debugMode) Debug.Log($"[SERIES UI] UpdateSeriesWinIndicators called - Array Length: {indicators.Length}, Wins: {wins}");
+        
+        for (int i = 0; i < indicators.Length; i++)
+        {
+            if (indicators[i] != null)
+            {
+                // Show indicator if this win slot should be active (0-based index)
+                bool shouldShow = i < wins;
+                indicators[i].SetActive(shouldShow);
+                
+                if (debugMode)
+                {
+                    Debug.Log($"[SERIES UI] Indicator {i + 1}: {(shouldShow ? "ACTIVATED" : "DEACTIVATED")} (wins={wins}, i={i})");
+                }
+            }
+            else
+            {
+                if (debugMode) Debug.LogWarning($"[SERIES UI] Indicator {i + 1} is null!");
+            }
+        }
+        
+        if (debugMode) Debug.Log($"[SERIES UI] UpdateSeriesWinIndicators completed - {wins} wins, {indicators.Length} total indicators");
     }
 
     public void UpdateTimer(float timeRemaining)
@@ -300,6 +383,52 @@ public class MatchUI : MonoBehaviour
         if (winnerPortrait != null && winnerCharacter.characterIcon != null)
         {
             winnerPortrait.sprite = winnerCharacter.characterIcon;
+        }
+
+        PlaySound(matchEndSound);
+    }
+    
+    public void ShowCompetitiveMatchResult(int winner, CharacterData winnerCharacter, int currentMatch, int maxMatches, int player1Wins, int player2Wins)
+    {
+        if (resultsPanel == null) return;
+
+        resultsPanel.SetActive(true);
+
+        if (resultsText != null)
+        {
+            resultsText.text = $"{winnerCharacter.characterName} Wins Match {currentMatch}!";
+        }
+
+        if (winnerName != null)
+        {
+            winnerName.text = winnerCharacter.characterName;
+        }
+
+        if (winnerPortrait != null && winnerCharacter.characterIcon != null)
+        {
+            winnerPortrait.sprite = winnerCharacter.characterIcon;
+        }
+        
+        // Show series progress
+        ShowCompetitiveSeries(currentMatch, maxMatches, player1Wins, player2Wins);
+
+        PlaySound(matchEndSound);
+    }
+    
+    public void ShowSeriesCompleteResult(int seriesWinner, int player1Wins, int player2Wins)
+    {
+        if (resultsPanel == null) return;
+
+        resultsPanel.SetActive(true);
+
+        if (resultsText != null)
+        {
+            resultsText.text = $"Series Complete!";
+        }
+
+        if (winnerName != null)
+        {
+            winnerName.text = $"Player {seriesWinner} Wins Series {player1Wins}-{player2Wins}!";
         }
 
         PlaySound(matchEndSound);
@@ -474,15 +603,33 @@ public class MatchUI : MonoBehaviour
 
     void UpdateRoundWinIndicators(GameObject[] indicators, int wins)
     {
-        if (indicators == null) return;
+        if (indicators == null) 
+        {
+            if (debugMode) Debug.LogWarning("[ROUND UI] UpdateRoundWinIndicators: indicators array is null!");
+            return;
+        }
+
+        if (debugMode) Debug.Log($"[ROUND UI] UpdateRoundWinIndicators called - Array Length: {indicators.Length}, Wins: {wins}");
 
         for (int i = 0; i < indicators.Length; i++)
         {
             if (indicators[i] != null)
             {
-                indicators[i].SetActive(i < wins);
+                bool shouldShow = i < wins;
+                indicators[i].SetActive(shouldShow);
+                
+                if (debugMode)
+                {
+                    Debug.Log($"[ROUND UI] Indicator {i + 1}: {(shouldShow ? "ACTIVATED" : "DEACTIVATED")} (wins={wins}, i={i})");
+                }
+            }
+            else
+            {
+                if (debugMode) Debug.LogWarning($"[ROUND UI] Indicator {i + 1} is null!");
             }
         }
+        
+        if (debugMode) Debug.Log($"[ROUND UI] UpdateRoundWinIndicators completed - {wins} wins, {indicators.Length} total indicators");
     }
 
     // ═══════════════════════════════════════════════════════════════

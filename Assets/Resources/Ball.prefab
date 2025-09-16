@@ -193,8 +193,8 @@ MonoBehaviour:
   deflectSound: {fileID: 0}
   catchFailSound: {fileID: 0}
   debugMode: 0
-  showCollisionGizmos: 1
-  showDuckingVisualization: 1
+  showCollisionGizmos: 0
+  showDuckingVisualization: 0
   maxRoofBounces: 1
 --- !u!114 &7597494401617177850
 MonoBehaviour:

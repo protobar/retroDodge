@@ -10,11 +10,15 @@ using System.Collections;
 public class ConnectionUI : MonoBehaviour
 {
     [Header("Main Panels")]
+    [SerializeField] private GameObject splashPanel;
     [SerializeField] private GameObject mainPanel;
     [SerializeField] private GameObject signInPanel;
     [SerializeField] private GameObject signUpPanel;
     [SerializeField] private GameObject loadingPanel;
     [SerializeField] private GameObject errorPanel;
+
+    [Header("Splash Panel Elements")]
+    [SerializeField] private Button splashClickArea;
 
     [Header("Main Panel Elements")]
     [SerializeField] private Button signInButton;
@@ -52,12 +56,13 @@ public class ConnectionUI : MonoBehaviour
     // State management
     private GameObject currentActivePanel;
     private Coroutine panelTransitionCoroutine;
+    private bool splashScreenActive = true;
 
     void Start()
     {
         SetupUI();
         SetupButtonListeners();
-        ShowMainPanel();
+        ShowSplashScreen();
     }
 
     #region UI Setup
@@ -78,6 +83,10 @@ public class ConnectionUI : MonoBehaviour
 
     private void SetupButtonListeners()
     {
+        // Splash panel button
+        if (splashClickArea != null)
+            splashClickArea.onClick.AddListener(() => OnSplashClicked());
+
         // Main panel buttons
         if (signInButton != null)
             signInButton.onClick.AddListener(() => ShowSignInPanel());
@@ -159,11 +168,32 @@ public class ConnectionUI : MonoBehaviour
 
     private void HideAllPanels()
     {
+        if (splashPanel != null) splashPanel.SetActive(false);
         if (mainPanel != null) mainPanel.SetActive(false);
         if (signInPanel != null) signInPanel.SetActive(false);
         if (signUpPanel != null) signUpPanel.SetActive(false);
         if (loadingPanel != null) loadingPanel.SetActive(false);
         if (errorPanel != null) errorPanel.SetActive(false);
+    }
+
+    public void ShowSplashScreen()
+    {
+        if (debugMode) Debug.Log("[CONNECTION UI] Showing splash screen");
+        
+        splashScreenActive = true;
+        SwitchToPanel(splashPanel);
+    }
+
+    private void OnSplashClicked()
+    {
+        if (!splashScreenActive) return;
+        
+        if (debugMode) Debug.Log("[CONNECTION UI] Splash screen clicked");
+        
+        splashScreenActive = false;
+        
+        // Transition to main panel
+        ShowMainPanel();
     }
 
     public void ShowMainPanel()

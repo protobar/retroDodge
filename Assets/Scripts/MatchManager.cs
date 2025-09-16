@@ -18,6 +18,16 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     [SerializeField] private float preFightCountdown = 3f;
     [SerializeField] private float postRoundDelay = 3f;
     [SerializeField] private float matchEndDelay = 5f;
+    
+    [Header("Competitive Series Settings")]
+    [SerializeField] private bool isCompetitiveMode = false;
+    [SerializeField] private int currentSeriesMatch = 1;
+    [SerializeField] private int player1SeriesWins = 0;
+    [SerializeField] private int player2SeriesWins = 0;
+    [SerializeField] private int maxSeriesMatches = 9;
+    [SerializeField] private bool seriesCompleted = false;
+    [SerializeField] private int seriesWinner = -1;
+    [SerializeField] private int competitiveRoundsToWin = 3; // Competitive matches are best of 3 rounds
 
     [Header("Character Setup")]
     [SerializeField] private CharacterData[] availableCharacters;
@@ -125,6 +135,9 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
     void Start()
     {
+        // Check if this is a competitive series
+        CheckCompetitiveMode();
+        
         if (PhotonNetwork.OfflineMode && RetroDodge.AISessionConfig.Instance.withAI)
         {
             StartCoroutine(StartOfflineAIFlow());
@@ -133,6 +146,46 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         {
             StartCoroutine(CompleteMatchFlow());
         }
+    }
+    
+    void CheckCompetitiveMode()
+    {
+        if (PhotonNetwork.OfflineMode) return;
+        
+        if (PhotonNetwork.CurrentRoom?.CustomProperties != null)
+        {
+            // Check if this is a competitive room
+            int roomType = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.ROOM_TYPE_KEY) ? 
+                          (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.ROOM_TYPE_KEY] : 0;
+            
+            if (roomType == 2) // Competitive mode
+            {
+                isCompetitiveMode = true;
+                
+                // Load series data from room properties
+                currentSeriesMatch = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.CURRENT_MATCH) ? 
+                                   (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.CURRENT_MATCH] : 1;
+                player1SeriesWins = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_WINS_PLAYER1) ? 
+                                   (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINS_PLAYER1] : 0;
+                player2SeriesWins = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_WINS_PLAYER2) ? 
+                                   (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINS_PLAYER2] : 0;
+                maxSeriesMatches = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_MAX_MATCHES) ? 
+                                  (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_MAX_MATCHES] : 9;
+                seriesCompleted = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_COMPLETED) ? 
+                                (bool)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_COMPLETED] : false;
+                seriesWinner = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_WINNER) ? 
+                              (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINNER] : -1;
+                
+                if (debugMode) Debug.Log($"[COMPETITIVE] Series Match {currentSeriesMatch}/{maxSeriesMatches}, P1: {player1SeriesWins}, P2: {player2SeriesWins}");
+            }
+        }
+    }
+    
+    int GetRoundsToWin()
+    {
+        int rounds = isCompetitiveMode ? competitiveRoundsToWin : roundsToWin;
+        if (debugMode) Debug.Log($"[ROUNDS] GetRoundsToWin - IsCompetitive: {isCompetitiveMode}, CompetitiveRounds: {competitiveRoundsToWin}, QuickRounds: {roundsToWin}, Returning: {rounds}");
+        return rounds;
     }
 
     void OnDestroy()
@@ -1006,10 +1059,14 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     {
         yield return new WaitForSeconds(1f); // Wait for all clients to sync
 
+        int requiredRounds = GetRoundsToWin();
+        
         // All clients can check for match end
-        if (player1RoundsWon >= roundsToWin || player2RoundsWon >= roundsToWin)
+        if (player1RoundsWon >= requiredRounds || player2RoundsWon >= requiredRounds)
         {
-            matchWinner = player1RoundsWon >= roundsToWin ? 1 : 2;
+            matchWinner = player1RoundsWon >= requiredRounds ? 1 : 2;
+
+            if (debugMode) Debug.Log($"[MATCH END] {(isCompetitiveMode ? "Competitive" : "Quick")} match ended - P1: {player1RoundsWon}, P2: {player2RoundsWon}, Required: {requiredRounds}, Winner: {matchWinner}");
 
             // FIXED: Show match results on ALL clients
             StartCoroutine(EndMatchSequence());
@@ -1035,10 +1092,39 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     {
         currentState = MatchState.MatchEnd;
 
+        // Disable AFK detection for all players
+        DisableAFKDetectionForAllPlayers();
+
         // FIXED: Only update room properties if we're still connected and able to
         if (PhotonNetwork.IsMasterClient && PhotonNetwork.IsConnected && PhotonNetwork.InRoom)
         {
             UpdateRoomProperties();
+        }
+
+        // Handle competitive series progression
+        if (isCompetitiveMode && PhotonNetwork.IsMasterClient)
+        {
+            if (debugMode) Debug.Log($"[COMPETITIVE] Calling HandleCompetitiveSeriesProgression - Match Winner: {matchWinner}");
+            HandleCompetitiveSeriesProgression();
+        }
+        else if (isCompetitiveMode && !PhotonNetwork.IsMasterClient)
+        {
+            // Non-master clients: sync series data from room properties
+            if (PhotonNetwork.CurrentRoom?.CustomProperties != null)
+            {
+                player1SeriesWins = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_WINS_PLAYER1) ? 
+                                   (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINS_PLAYER1] : player1SeriesWins;
+                player2SeriesWins = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_WINS_PLAYER2) ? 
+                                   (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINS_PLAYER2] : player2SeriesWins;
+                currentSeriesMatch = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.CURRENT_MATCH) ? 
+                                   (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.CURRENT_MATCH] : currentSeriesMatch;
+                seriesCompleted = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_COMPLETED) ? 
+                                 (bool)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_COMPLETED] : false;
+                seriesWinner = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_WINNER) ? 
+                              (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINNER] : -1;
+                
+                if (debugMode) Debug.Log($"[COMPETITIVE] Non-master synced series data - P1: {player1SeriesWins}, P2: {player2SeriesWins}");
+            }
         }
 
         // Show match results
@@ -1051,16 +1137,77 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
                 winnerCharacter = networkPlayers[2].GetCharacterData();
 
             if (winnerCharacter != null)
-                matchUI.ShowMatchResult(matchWinner, winnerCharacter);
+            {
+                if (isCompetitiveMode)
+                {
+                    // FIXED: Reload series wins from room properties to get updated values
+                    if (PhotonNetwork.CurrentRoom?.CustomProperties != null)
+                    {
+                        player1SeriesWins = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_WINS_PLAYER1) ? 
+                                           (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINS_PLAYER1] : player1SeriesWins;
+                        player2SeriesWins = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_WINS_PLAYER2) ? 
+                                           (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINS_PLAYER2] : player2SeriesWins;
+                    }
+                    
+                    // Show series progress in competitive mode
+                    if (debugMode) Debug.Log($"[COMPETITIVE] Showing match result - P1 Wins: {player1SeriesWins}, P2 Wins: {player2SeriesWins}");
+                    matchUI.ShowCompetitiveMatchResult(matchWinner, winnerCharacter, currentSeriesMatch, maxSeriesMatches, player1SeriesWins, player2SeriesWins);
+                }
+                else
+                {
+                    matchUI.ShowMatchResult(matchWinner, winnerCharacter);
+                }
+            }
         }
 
         PlaySound(matchWinSound);
         yield return new WaitForSeconds(2f); // Show result briefly
 
+        // Check if series is complete
+        if (isCompetitiveMode && seriesCompleted)
+        {
+            // Series is complete, show final results
+            if (matchUI != null)
+            {
+                matchUI.ShowSeriesCompleteResult(seriesWinner, player1SeriesWins, player2SeriesWins);
+            }
+            yield return new WaitForSeconds(3f);
+        }
+
         // Enable the "Return to Menu" button
         if (matchUI != null)
         {
             matchUI.ShowReturnToMenuButton(true);
+        }
+    }
+    
+    void HandleCompetitiveSeriesProgression()
+    {
+        if (!isCompetitiveMode || !PhotonNetwork.IsMasterClient) return;
+        
+        // Update series result
+        bool success = RoomStateManager.GetOrCreateInstance()?.UpdateSeriesResult(matchWinner) ?? false;
+        
+        if (success)
+        {
+            // Reload series data from room properties
+            currentSeriesMatch = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.CURRENT_MATCH) ? 
+                               (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.CURRENT_MATCH] : currentSeriesMatch;
+            player1SeriesWins = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_WINS_PLAYER1) ? 
+                               (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINS_PLAYER1] : player1SeriesWins;
+            player2SeriesWins = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_WINS_PLAYER2) ? 
+                               (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINS_PLAYER2] : player2SeriesWins;
+            seriesCompleted = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_COMPLETED) ? 
+                             (bool)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_COMPLETED] : false;
+            seriesWinner = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.SERIES_WINNER) ? 
+                          (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINNER] : -1;
+            
+            if (debugMode) Debug.Log($"[COMPETITIVE] Series updated - Match {currentSeriesMatch}/{maxSeriesMatches}, P1: {player1SeriesWins}, P2: {player2SeriesWins}, Completed: {seriesCompleted}");
+            if (debugMode) Debug.Log($"[COMPETITIVE] Room properties - P1 Wins: {PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINS_PLAYER1]}, P2 Wins: {PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.SERIES_WINS_PLAYER2]}");
+        }
+        else
+        {
+            if (debugMode) Debug.LogError("[COMPETITIVE] Failed to update series result");
         }
     }
 
@@ -1306,13 +1453,14 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
         // Update round scores to reflect forfeit win
         // Give winner enough rounds to win the match
+        int requiredRounds = GetRoundsToWin();
         if (winnerActorNumber == 1)
         {
-            player1RoundsWon = roundsToWin; // Instant match win
+            player1RoundsWon = requiredRounds; // Instant match win
         }
         else if (winnerActorNumber == 2)
         {
-            player2RoundsWon = roundsToWin; // Instant match win
+            player2RoundsWon = requiredRounds; // Instant match win
         }
 
         // Update room properties
@@ -1508,10 +1656,34 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
         if (player1Data != null && player2Data != null)
         {
-            matchUI.InitializeMatch(player1Data, player2Data, player1RoundsWon, player2RoundsWon, roundsToWin);
+            int roundsToWinForUI = GetRoundsToWin();
+            matchUI.InitializeMatch(player1Data, player2Data, player1RoundsWon, player2RoundsWon, roundsToWinForUI);
+            
+            // Show competitive series info if in competitive mode
+            if (isCompetitiveMode)
+            {
+                matchUI.ShowCompetitiveSeries(currentSeriesMatch, maxSeriesMatches, player1SeriesWins, player2SeriesWins);
+                if (debugMode) Debug.Log($"[COMPETITIVE] Showing series UI - Match {currentSeriesMatch}/{maxSeriesMatches}, P1: {player1SeriesWins}, P2: {player2SeriesWins}, Rounds to Win: {roundsToWinForUI}");
+            }
         }
 
         Debug.Log("[UI] Match UI initialized");
+    }
+    
+    void DisableAFKDetectionForAllPlayers()
+    {
+        // Find all AFK detectors and disable them
+        SimpleAFKDetector[] afkDetectors = FindObjectsOfType<SimpleAFKDetector>();
+        foreach (var detector in afkDetectors)
+        {
+            if (detector != null)
+            {
+                detector.enabled = false;
+                if (debugMode) Debug.Log($"[AFK] Disabled AFK detection for {PhotonNetwork.NickName ?? detector.name}");
+            }
+        }
+        
+        if (debugMode) Debug.Log($"[AFK] Disabled AFK detection for {afkDetectors.Length} players");
     }
 
     int DetermineWinnerByHealth()

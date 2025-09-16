@@ -26,9 +26,11 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     [Header("=== MAIN MENU ===")]
     [SerializeField] private TMP_Text playerInfoText;
     [SerializeField] private Button quickMatchButton;
+    [SerializeField] private Button competitiveButton;
     [SerializeField] private Button customRoomButton;
     [SerializeField] private Button playWithAIButton;
     [SerializeField] private TMP_Text quickMatchButtonText;
+    [SerializeField] private TMP_Text competitiveButtonText;
     [SerializeField] private TMP_Text statusText;
     [SerializeField] private GameObject loadingIndicator;
     [SerializeField] private TMP_Text countdownText;
@@ -70,6 +72,10 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     [SerializeField] private byte maxPlayers = 2;
     [SerializeField] private bool debugMode = true;
     [SerializeField] private float aiSearchTimer = 20.0f;
+    
+    [Header("=== COMPETITIVE MODE SETTINGS ===")]
+    [SerializeField] private int competitiveMaxMatches = 9; // Best of 9 (editable)
+    [SerializeField] private int competitiveLevelRequirement = 20; // Level requirement (editable)
 
 
 
@@ -81,6 +87,10 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     private bool matchFound = false;
     private Coroutine aiFallbackCoroutine;
     private bool pendingAIFallback = false;
+    
+    // Competitive mode state management
+    private bool isCompetitiveMatchmaking = false;
+    private Coroutine competitiveMatchmakingCoroutine;
 
     // FIXED: Custom room state with proper room code system
     private bool isCreatingCustomRoom = false;
@@ -91,7 +101,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     private const string ROOM_CODE_KEY = "RC"; // Room Code
     private const string MATCH_LENGTH_KEY = "ML"; // Match Length
     private const string SELECTED_MAP_KEY = "SM"; // Selected Map
-    private const string ROOM_TYPE_KEY = "RT"; // Room Type (0=QuickMatch, 1=Custom)
+    // Note: Using RoomStateManager.ROOM_TYPE_KEY instead of local constant for consistency
 
     void Start()
     {
@@ -156,6 +166,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     void SetupButtonListeners()
     {
         quickMatchButton?.onClick.AddListener(OnQuickMatchClicked);
+        competitiveButton?.onClick.AddListener(OnCompetitiveClicked);
         customRoomButton?.onClick.AddListener(OnCustomRoomClicked);
         playWithAIButton?.onClick.AddListener(OnPlayWithAIClicked);
         createRoomButton?.onClick.AddListener(OnCreateRoomClicked);
@@ -228,6 +239,120 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         else
             StartQuickMatch();
     }
+    
+    #region Competitive Mode Implementation
+    void OnCompetitiveClicked()
+    {
+        if (!PhotonNetwork.IsConnectedAndReady)
+        {
+            UpdateStatus("Not connected to servers!");
+            return;
+        }
+
+        if (isCompetitiveMatchmaking)
+            CancelCompetitiveMatchmaking();
+        else
+            StartCompetitiveMatch();
+    }
+    
+    void StartCompetitiveMatch()
+    {
+        // For now, skip level check - you mentioned "regardless of what lvl player is rn"
+        // TODO: Add PlayFab level check when implementing PlayFab integration
+        
+        isCompetitiveMatchmaking = true;
+        matchFound = false;
+        pendingAIFallback = false;
+        matchmakingTime = 0f;
+        
+        if (competitiveButtonText != null)
+            competitiveButtonText.text = "Cancel";
+        
+        UpdateStatus("Finding Competitive Match...");
+        
+        if (competitiveMatchmakingCoroutine != null)
+            StopCoroutine(competitiveMatchmakingCoroutine);
+        competitiveMatchmakingCoroutine = StartCoroutine(CompetitiveMatchmakingTimer());
+        
+        // Start AI fallback for competitive mode
+        if (aiFallbackCoroutine != null) StopCoroutine(aiFallbackCoroutine);
+        aiFallbackCoroutine = StartCoroutine(AIFallbackAfterDelay(aiSearchTimer));
+        
+        if (debugMode) Debug.Log($"[COMPETITIVE] Starting competitive matchmaking with JoinRandomRoom");
+        
+        // Join random competitive room
+        Hashtable expectedProps = new Hashtable { { RoomStateManager.ROOM_TYPE_KEY, 2 } }; // Only join competitive rooms
+        PhotonNetwork.JoinRandomRoom(expectedProps, maxPlayers);
+        
+        if (debugMode) Debug.Log($"[COMPETITIVE] JoinRandomRoom called with RoomType=2");
+    }
+    
+    void CancelCompetitiveMatchmaking()
+    {
+        isCompetitiveMatchmaking = false;
+        matchFound = false;
+        
+        if (competitiveMatchmakingCoroutine != null)
+        {
+            StopCoroutine(competitiveMatchmakingCoroutine);
+            competitiveMatchmakingCoroutine = null;
+        }
+        
+        if (countdownCoroutine != null)
+        {
+            StopCoroutine(countdownCoroutine);
+            countdownCoroutine = null;
+        }
+        
+        if (aiFallbackCoroutine != null)
+        {
+            StopCoroutine(aiFallbackCoroutine);
+            aiFallbackCoroutine = null;
+        }
+        
+        ResetCompetitiveButton();
+        UpdateStatus("Competitive matchmaking cancelled");
+        
+        // Leave room if we're in one
+        if (PhotonNetwork.InRoom)
+            PhotonNetwork.LeaveRoom();
+        
+        // Hide match found panel
+        matchFoundPanel?.SetActive(false);
+    }
+    
+    IEnumerator CompetitiveMatchmakingTimer()
+    {
+        while (isCompetitiveMatchmaking && !matchFound)
+        {
+            matchmakingTime += Time.deltaTime;
+            
+            int minutes = Mathf.FloorToInt(matchmakingTime / 60);
+            int seconds = Mathf.FloorToInt(matchmakingTime % 60);
+            
+            if (competitiveButtonText != null)
+                competitiveButtonText.text = $"Cancel ({minutes:00}:{seconds:00})";
+            
+            yield return null;
+        }
+    }
+    
+    void ResetCompetitiveButton()
+    {
+        if (competitiveButtonText != null)
+            competitiveButtonText.text = "Competitive";
+    }
+    
+    Hashtable CreateCompetitiveRoomProperties()
+    {
+        return new Hashtable
+        {
+            { RoomStateManager.ROOM_TYPE_KEY, 2 }, // 2 = Competitive
+            { RoomStateManager.ROOM_MATCH_LENGTH, 90 }, // 90 seconds for competitive
+            { RoomStateManager.ROOM_SELECTED_MAP, "Arena1" }
+        };
+    }
+    #endregion
 
     void StartQuickMatch()
     {
@@ -250,7 +375,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         if (debugMode) Debug.Log($"[QUICK MATCH] Starting with JoinRandomRoom");
 
         // FIXED: Use proper PUN2 pattern - JoinRandomRoom with room type filter
-        Hashtable expectedProps = new Hashtable { { ROOM_TYPE_KEY, 0 } }; // Only join quick match rooms
+        Hashtable expectedProps = new Hashtable { { RoomStateManager.ROOM_TYPE_KEY, 0 } }; // Only join quick match rooms
         PhotonNetwork.JoinRandomRoom(expectedProps, maxPlayers);
     }
 
@@ -258,7 +383,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     {
         return new Hashtable
         {
-            { ROOM_TYPE_KEY, 0 }, // 0 = Quick Match
+            { RoomStateManager.ROOM_TYPE_KEY, 0 }, // 0 = Quick Match
             { MATCH_LENGTH_KEY, 60 }, // 60 seconds default
             { SELECTED_MAP_KEY, "Arena1" }
         };
@@ -295,6 +420,12 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
 
         // Hide match found panel
         matchFoundPanel?.SetActive(false);
+    }
+    
+    void CancelAllMatchmaking()
+    {
+        CancelMatchmaking();
+        CancelCompetitiveMatchmaking();
     }
 
     IEnumerator MatchmakingTimer()
@@ -394,6 +525,35 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         {
             PhotonNetwork.LoadLevel(characterSelectionScene);
         }
+    }
+    
+    IEnumerator CompetitiveMatchCountdown()
+    {
+        matchFoundPanel?.SetActive(true);
+
+        // Countdown from 3 to 1
+        for (int i = 3; i >= 1; i--)
+        {
+            if (countdownText != null)
+                countdownText.text = i.ToString();
+
+            UpdateStatus($"Competitive match found! Starting in {i}...");
+            yield return new WaitForSeconds(1f);
+        }
+
+        if (countdownText != null)
+            countdownText.text = "GO!";
+
+        UpdateStatus("Starting competitive series...");
+        yield return new WaitForSeconds(0.5f);
+
+        // Only master client loads scene
+        if (PhotonNetwork.IsMasterClient)
+        {
+            PhotonNetwork.LoadLevel(characterSelectionScene);
+        }
+        
+        if (debugMode) Debug.Log("[COMPETITIVE] Loading character selection for competitive series");
     }
 
     void ResetQuickMatchButton()
@@ -522,7 +682,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
             PlayerTtl = 5000, // FIXED: Shorter TTL to clean up faster
             EmptyRoomTtl = 2000, // FIXED: Much shorter empty room TTL
             CustomRoomProperties = customProps,
-            CustomRoomPropertiesForLobby = new string[] { ROOM_CODE_KEY, ROOM_TYPE_KEY, MATCH_LENGTH_KEY, SELECTED_MAP_KEY }
+            CustomRoomPropertiesForLobby = new string[] { ROOM_CODE_KEY, RoomStateManager.ROOM_TYPE_KEY, MATCH_LENGTH_KEY, SELECTED_MAP_KEY }
         };
 
         // FIXED: Use a predictable room name based on room code
@@ -541,7 +701,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         return new Hashtable
         {
             { ROOM_CODE_KEY, currentRoomCode },
-            { ROOM_TYPE_KEY, 1 }, // 1 = Custom Room
+            { RoomStateManager.ROOM_TYPE_KEY, 1 }, // 1 = Custom Room
             { MATCH_LENGTH_KEY, matchLength },
             { SELECTED_MAP_KEY, selectedMap }
         };
@@ -698,8 +858,8 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
             string selectedMap = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(SELECTED_MAP_KEY) ?
                                (string)PhotonNetwork.CurrentRoom.CustomProperties[SELECTED_MAP_KEY] : "Arena1";
 
-            int roomType = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(ROOM_TYPE_KEY) ?
-                          (int)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_TYPE_KEY] : 0;
+            int roomType = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.ROOM_TYPE_KEY) ?
+                          (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.ROOM_TYPE_KEY] : 0;
 
             string roomTypeText = roomType == 0 ? "Quick Match" : "Custom Room";
             string matchLengthText = matchLength < 60 ? $"{matchLength}s" : $"{matchLength / 60}m";
@@ -768,6 +928,12 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         {
             StartMatchFoundSequence();
         }
+        // Check for full room in competitive matchmaking
+        else if (isCompetitiveMatchmaking && PhotonNetwork.CurrentRoom.PlayerCount >= PhotonNetwork.CurrentRoom.MaxPlayers)
+        {
+            if (debugMode) Debug.Log($"[COMPETITIVE] Player entered room, now {PhotonNetwork.CurrentRoom.PlayerCount}/{PhotonNetwork.CurrentRoom.MaxPlayers} players - starting match found sequence");
+            StartCompetitiveMatchFoundSequence();
+        }
     }
 
     public override void OnPlayerLeftRoom(Player otherPlayer)
@@ -786,6 +952,17 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         if (isMatchmaking)
         {
             UpdateStatus("Waiting for players...");
+        }
+        else if (isCompetitiveMatchmaking)
+        {
+            UpdateStatus("Waiting for competitive players...");
+            
+            // Initialize competitive series
+            if (RoomStateManager.GetOrCreateInstance() != null)
+            {
+                RoomStateManager.GetOrCreateInstance().InitializeCompetitiveSeries(competitiveMaxMatches);
+                if (debugMode) Debug.Log($"[COMPETITIVE] Initialized series with {competitiveMaxMatches} max matches");
+            }
         }
         else if (isCreatingCustomRoom)
         {
@@ -812,12 +989,27 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         if (isMatchmaking)
         {
             // Check if this is actually a quick match room
-            int roomType = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(ROOM_TYPE_KEY) ? 
-                          (int)PhotonNetwork.CurrentRoom.CustomProperties[ROOM_TYPE_KEY] : -1;
+            int roomType = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.ROOM_TYPE_KEY) ? 
+                          (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.ROOM_TYPE_KEY] : -1;
             
             if (roomType != 0) // Not a quick match room
             {
                 if (debugMode) Debug.LogWarning($"[QUICK MATCH] Joined wrong room type: {roomType}, leaving...");
+                PhotonNetwork.LeaveRoom();
+                return;
+            }
+        }
+        else if (isCompetitiveMatchmaking)
+        {
+            // Check if this is actually a competitive room
+            int roomType = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.ROOM_TYPE_KEY) ? 
+                          (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.ROOM_TYPE_KEY] : -1;
+            
+            if (debugMode) Debug.Log($"[COMPETITIVE] Joined room with type: {roomType}");
+            
+            if (roomType != 2) // Not a competitive room
+            {
+                if (debugMode) Debug.LogWarning($"[COMPETITIVE] Joined wrong room type: {roomType}, leaving...");
                 PhotonNetwork.LeaveRoom();
                 return;
             }
@@ -848,6 +1040,36 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
             {
                 // Room not full yet, keep waiting
                 UpdateStatus($"Waiting for players ({PhotonNetwork.CurrentRoom.PlayerCount}/{PhotonNetwork.CurrentRoom.MaxPlayers})...");
+            }
+        }
+        else if (isCompetitiveMatchmaking)
+        {
+            // FIXED: Reset RoomStateManager leaving flag and clear character properties
+            RoomStateManager.GetOrCreateInstance()?.ResetLeavingFlag();
+            
+            if (PhotonNetwork.IsConnectedAndReady)
+            {
+                Hashtable clearProps = new Hashtable
+                {
+                    { RoomStateManager.PLAYER_CHARACTER_KEY, -1 },
+                    { RoomStateManager.PLAYER_LOCKED_KEY, false }
+                };
+                PhotonNetwork.LocalPlayer.SetCustomProperties(clearProps);
+            }
+
+            // Competitive match logic - check if room is full
+            if (debugMode) Debug.Log($"[COMPETITIVE] Room has {PhotonNetwork.CurrentRoom.PlayerCount}/{PhotonNetwork.CurrentRoom.MaxPlayers} players");
+            
+            if (PhotonNetwork.CurrentRoom.PlayerCount >= PhotonNetwork.CurrentRoom.MaxPlayers)
+            {
+                // Room is full, start competitive match found sequence
+                if (debugMode) Debug.Log("[COMPETITIVE] Room is full, starting match found sequence");
+                StartCompetitiveMatchFoundSequence();
+            }
+            else
+            {
+                // Room not full yet, keep waiting
+                UpdateStatus($"Waiting for competitive players ({PhotonNetwork.CurrentRoom.PlayerCount}/{PhotonNetwork.CurrentRoom.MaxPlayers})...");
             }
         }
         else if (isCreatingCustomRoom)
@@ -899,10 +1121,28 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
                 PlayerTtl = 30000, // 30 seconds
                 EmptyRoomTtl = 10000, // 10 seconds
                 CustomRoomProperties = CreateQuickMatchProperties(),
-                CustomRoomPropertiesForLobby = new string[] { ROOM_TYPE_KEY, MATCH_LENGTH_KEY }
+                CustomRoomPropertiesForLobby = new string[] { RoomStateManager.ROOM_TYPE_KEY, RoomStateManager.ROOM_MATCH_LENGTH }
             };
             
             PhotonNetwork.CreateRoom($"QuickMatch_{System.DateTime.Now.Ticks}", quickMatchOptions);
+        }
+        else if (isCompetitiveMatchmaking)
+        {
+            if (debugMode) Debug.Log($"[COMPETITIVE] No random competitive room found, creating new one");
+            
+            // Create a new competitive room when no random room is available
+            RoomOptions competitiveOptions = new RoomOptions
+            {
+                MaxPlayers = maxPlayers,
+                IsVisible = true,
+                IsOpen = true,
+                PlayerTtl = 30000, // 30 seconds
+                EmptyRoomTtl = 10000, // 10 seconds
+                CustomRoomProperties = CreateCompetitiveRoomProperties(),
+                CustomRoomPropertiesForLobby = new string[] { RoomStateManager.ROOM_TYPE_KEY, RoomStateManager.ROOM_MATCH_LENGTH }
+            };
+            
+            PhotonNetwork.CreateRoom($"Competitive_{System.DateTime.Now.Ticks}", competitiveOptions);
         }
     }
 
@@ -996,6 +1236,30 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         if (countdownCoroutine != null)
             StopCoroutine(countdownCoroutine);
         countdownCoroutine = StartCoroutine(QuickMatchCountdown());
+    }
+    
+    void StartCompetitiveMatchFoundSequence()
+    {
+        if (matchFound) return; // Prevent multiple calls
+
+        matchFound = true;
+        isCompetitiveMatchmaking = false;
+        
+        // Stop competitive matchmaking timer
+        if (competitiveMatchmakingCoroutine != null)
+        {
+            StopCoroutine(competitiveMatchmakingCoroutine);
+            competitiveMatchmakingCoroutine = null;
+        }
+        
+        ResetCompetitiveButton();
+        matchFoundPanel?.SetActive(true);
+
+        if (countdownCoroutine != null)
+            StopCoroutine(countdownCoroutine);
+        countdownCoroutine = StartCoroutine(CompetitiveMatchCountdown());
+        
+        if (debugMode) Debug.Log("[COMPETITIVE] Match found sequence started");
     }
     #endregion
 
