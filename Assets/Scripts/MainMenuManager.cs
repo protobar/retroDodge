@@ -9,13 +9,13 @@ using Photon.Realtime;
 using Hashtable = ExitGames.Client.Photon.Hashtable;
 
 /// <summary>
-/// FIXED MainMenuManager with proper PUN2 matchmaking and custom room sharing
-/// Key fixes: JoinRandomOrCreateRoom, custom properties for lobby, proper room code system
+/// UPDATED MainMenuManager - Authentication moved to Connection scene
+/// Now assumes user is already authenticated when this scene loads
+/// Handles only matchmaking, custom rooms, and AI gameplay
 /// </summary>
 public class MainMenuManager : MonoBehaviourPunCallbacks
 {
     [Header("=== MAIN UI PANELS ===")]
-    [SerializeField] private GameObject connectionPanel;
     [SerializeField] private GameObject mainMenuPanel;
     [SerializeField] private GameObject customRoomPanel;
     [SerializeField] private GameObject joinRoomPanel;
@@ -23,9 +23,8 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     [SerializeField] private GameObject roomLobbyPanel;
     [SerializeField] private GameObject matchFoundPanel;
 
-    [Header("=== CONNECTION & MAIN MENU ===")]
-    [SerializeField] private TMP_InputField nicknameInput;
-    [SerializeField] private Button connectButton;
+    [Header("=== MAIN MENU ===")]
+    [SerializeField] private TMP_Text playerInfoText;
     [SerializeField] private Button quickMatchButton;
     [SerializeField] private Button customRoomButton;
     [SerializeField] private Button playWithAIButton;
@@ -100,22 +99,33 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         SetupButtonListeners();
         SetupCustomRoomUI();
 
-        // FIXED: Proper PUN2 setup
-        PhotonNetwork.AutomaticallySyncScene = true;
-        PhotonNetwork.GameVersion = "1.0";
-        PhotonNetwork.SendRate = 20; // Default is good
-        PhotonNetwork.SerializationRate = 10; // Default is good
+        // Check if user is authenticated
+        if (!PlayFabAuthManager.Instance.IsAuthenticated)
+        {
+            Debug.LogError("[MAIN MENU] User not authenticated! Returning to Connection scene.");
+            SceneManager.LoadScene("Connection");
+            return;
+        }
 
-        if (debugMode) Debug.Log("[MAIN MENU] Initialized with PUN2 best practices");
+        // Check Photon connection
+        if (!PhotonNetwork.IsConnectedAndReady)
+        {
+            UpdateStatus("Reconnecting to servers...");
+            PhotonNetwork.ConnectUsingSettings();
+        }
+        else
+        {
+            ShowMainMenu();
+        }
+
+        if (debugMode) Debug.Log("[MAIN MENU] Initialized - user authenticated");
     }
 
     #region UI Setup
     void SetupUI()
     {
-        bool isReturning = PhotonNetwork.IsConnectedAndReady && !string.IsNullOrEmpty(PhotonNetwork.NickName);
-
-        connectionPanel.SetActive(!isReturning);
-        mainMenuPanel.SetActive(isReturning);
+        // Hide all panels except main menu initially
+        mainMenuPanel.SetActive(false);
         customRoomPanel.SetActive(false);
         joinRoomPanel.SetActive(false);
         createRoomPanel.SetActive(false);
@@ -124,21 +134,27 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         matchFoundPanel?.SetActive(false);
         loadingIndicator.SetActive(false);
 
-        if (nicknameInput != null)
-        {
-            if (isReturning)
-                nicknameInput.text = PhotonNetwork.NickName;
-            else
-                nicknameInput.text = PlayerPrefs.GetString("PlayerNickname", $"Player{Random.Range(1000, 9999)}");
-        }
-
-        UpdateStatus(isReturning ? $"Welcome back, {PhotonNetwork.NickName}!" : "Enter nickname to connect");
         ResetQuickMatchButton();
+    }
+
+    private void ShowMainMenu()
+    {
+        mainMenuPanel.SetActive(true);
+        UpdatePlayerInfo();
+        UpdateStatus($"Welcome back, {PlayFabAuthManager.Instance.PlayerDisplayName}!");
+    }
+
+    private void UpdatePlayerInfo()
+    {
+        if (playerInfoText != null)
+        {
+            string guestStatus = PlayFabAuthManager.Instance.IsGuest ? " (Guest)" : "";
+            playerInfoText.text = $"{PlayFabAuthManager.Instance.PlayerDisplayName}{guestStatus}";
+        }
     }
 
     void SetupButtonListeners()
     {
-        connectButton?.onClick.AddListener(OnConnectClicked);
         quickMatchButton?.onClick.AddListener(OnQuickMatchClicked);
         customRoomButton?.onClick.AddListener(OnCustomRoomClicked);
         playWithAIButton?.onClick.AddListener(OnPlayWithAIClicked);
@@ -193,25 +209,9 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     }
     #endregion
 
-    #region Connection
-    void OnConnectClicked()
-    {
-        string nickname = nicknameInput?.text?.Trim() ?? "";
-
-        if (string.IsNullOrEmpty(nickname) || nickname.Length < 2)
-        {
-            UpdateStatus("Enter a valid nickname (2+ characters)");
-            return;
-        }
-
-        PhotonNetwork.NickName = nickname;
-        PlayerPrefs.SetString("PlayerNickname", nickname);
-
-        loadingIndicator.SetActive(true);
-        UpdateStatus("Connecting...");
-
-        PhotonNetwork.ConnectUsingSettings();
-    }
+    #region Photon Connection Management
+    // Connection is now handled in Connection scene
+    // This section only handles reconnection if needed
     #endregion
 
     #region FIXED: Quick Match with proper PUN2 patterns
@@ -730,17 +730,14 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     public override void OnConnectedToMaster()
     {
         loadingIndicator.SetActive(false);
-        connectionPanel.SetActive(false);
-        mainMenuPanel.SetActive(true);
-
-        UpdateStatus($"Connected as {PhotonNetwork.NickName}");
+        ShowMainMenu();
+        
         if (debugMode) Debug.Log("[MAIN MENU] Connected to master server");
     }
 
     public override void OnDisconnected(DisconnectCause cause)
     {
         loadingIndicator.SetActive(false);
-        connectionPanel.SetActive(true);
         mainMenuPanel.SetActive(false);
         customRoomPanel.SetActive(false);
 
@@ -754,7 +751,9 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         CancelMatchmaking();
         ResetCustomRoomStates();
 
-        if (debugMode) Debug.Log($"[MAIN MENU] Disconnected: {cause}");
+        // If disconnected, return to Connection scene
+        Debug.Log($"[MAIN MENU] Disconnected: {cause} - Returning to Connection scene");
+        SceneManager.LoadScene("Connection");
     }
 
     public override void OnPlayerEnteredRoom(Player newPlayer)
@@ -970,9 +969,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         customRoomPanel.SetActive(false);
         roomLobbyPanel.SetActive(false);
         matchFoundPanel?.SetActive(false);
-        mainMenuPanel.SetActive(true);
-
-        UpdateStatus($"Welcome back, {PhotonNetwork.NickName}!");
+        ShowMainMenu();
 
         if (debugMode) Debug.Log("[LEFT ROOM] Returned to main menu and cleared player properties");
     }
@@ -1028,7 +1025,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     {
         if (!debugMode) return;
 
-        if (Input.GetKeyDown(KeyCode.F1)) OnConnectClicked();
+        if (Input.GetKeyDown(KeyCode.F1)) Debug.Log("[DEBUG] F1 pressed - authentication handled in Connection scene");
         if (Input.GetKeyDown(KeyCode.F2)) OnQuickMatchClicked();
         if (Input.GetKeyDown(KeyCode.L) && PhotonNetwork.InRoom) PhotonNetwork.LeaveRoom();
         if (Input.GetKeyDown(KeyCode.Escape))
