@@ -381,6 +381,17 @@ public class CollisionDamageSystem : MonoBehaviour
             // Offline: apply damage locally with proper attacker reference
             PlayerCharacter thrower = ballController.GetThrower();
             playerHealth.TakeDamage(damage, thrower);
+            
+            // Track damage dealt for progression
+            if (thrower != null)
+            {
+                var throwerHealth = thrower.GetComponent<PlayerHealth>();
+                if (throwerHealth != null)
+                {
+                    throwerHealth.damageDealt += damage;
+                }
+            }
+            
             if (debugMode)
             {
                 Debug.Log($"Applied {damage} damage OFFLINE to {hitPlayer.name} from {thrower?.name ?? "unknown"}");
@@ -401,6 +412,13 @@ public class CollisionDamageSystem : MonoBehaviour
                     if (throwerView != null)
                     {
                         attackerViewID = throwerView.ViewID;
+                    }
+                    
+                    // Track damage dealt for progression
+                    var throwerHealth = thrower.GetComponent<PlayerHealth>();
+                    if (throwerHealth != null)
+                    {
+                        throwerHealth.damageDealt += damage;
                     }
                 }
 

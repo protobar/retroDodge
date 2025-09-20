@@ -14,6 +14,7 @@ public class ConnectionUI : MonoBehaviour
     [SerializeField] private GameObject mainPanel;
     [SerializeField] private GameObject signInPanel;
     [SerializeField] private GameObject signUpPanel;
+    [SerializeField] private GameObject forgotPasswordPanel;
     [SerializeField] private GameObject loadingPanel;
     [SerializeField] private GameObject errorPanel;
 
@@ -28,6 +29,8 @@ public class ConnectionUI : MonoBehaviour
     [Header("Sign In Panel Elements")]
     [SerializeField] private TMP_InputField signInEmailInput;
     [SerializeField] private TMP_InputField signInPasswordInput;
+    [SerializeField] private Button signInPasswordToggleButton;
+    [SerializeField] private Button signInForgotPasswordButton;
     [SerializeField] private Button signInLoginButton;
     [SerializeField] private Button signInBackButton;
     [SerializeField] private TMP_Text signInErrorText;
@@ -36,7 +39,9 @@ public class ConnectionUI : MonoBehaviour
     [SerializeField] private TMP_InputField signUpDisplayNameInput;
     [SerializeField] private TMP_InputField signUpEmailInput;
     [SerializeField] private TMP_InputField signUpPasswordInput;
+    [SerializeField] private Button signUpPasswordToggleButton;
     [SerializeField] private TMP_InputField signUpConfirmPasswordInput;
+    [SerializeField] private Button signUpConfirmPasswordToggleButton;
     [SerializeField] private Button signUpRegisterButton;
     [SerializeField] private Button signUpBackButton;
     [SerializeField] private TMP_Text signUpErrorText;
@@ -44,6 +49,13 @@ public class ConnectionUI : MonoBehaviour
     [Header("Loading Panel Elements")]
     [SerializeField] private TMP_Text loadingStatusText;
     [SerializeField] private GameObject loadingSpinner;
+
+    [Header("Forgot Password Panel Elements")]
+    [SerializeField] private TMP_InputField forgotPasswordEmailInput;
+    [SerializeField] private Button forgotPasswordSendButton;
+    [SerializeField] private Button forgotPasswordBackButton;
+    [SerializeField] private TMP_Text forgotPasswordErrorText;
+    [SerializeField] private TMP_Text forgotPasswordSuccessText;
 
     [Header("Error Panel Elements")]
     [SerializeField] private TMP_Text errorMessageText;
@@ -57,6 +69,11 @@ public class ConnectionUI : MonoBehaviour
     private GameObject currentActivePanel;
     private Coroutine panelTransitionCoroutine;
     private bool splashScreenActive = true;
+    
+    // Password toggle states
+    private bool signInPasswordVisible = false;
+    private bool signUpPasswordVisible = false;
+    private bool signUpConfirmPasswordVisible = false;
 
     void Start()
     {
@@ -98,6 +115,12 @@ public class ConnectionUI : MonoBehaviour
             guestButton.onClick.AddListener(() => LoginAsGuest());
 
         // Sign in panel buttons
+        if (signInPasswordToggleButton != null)
+            signInPasswordToggleButton.onClick.AddListener(() => ToggleSignInPasswordVisibility());
+        
+        if (signInForgotPasswordButton != null)
+            signInForgotPasswordButton.onClick.AddListener(() => ShowForgotPasswordPanel());
+        
         if (signInLoginButton != null)
             signInLoginButton.onClick.AddListener(() => AttemptSignIn());
         
@@ -105,11 +128,24 @@ public class ConnectionUI : MonoBehaviour
             signInBackButton.onClick.AddListener(() => ShowMainPanel());
 
         // Sign up panel buttons
+        if (signUpPasswordToggleButton != null)
+            signUpPasswordToggleButton.onClick.AddListener(() => ToggleSignUpPasswordVisibility());
+        
+        if (signUpConfirmPasswordToggleButton != null)
+            signUpConfirmPasswordToggleButton.onClick.AddListener(() => ToggleSignUpConfirmPasswordVisibility());
+        
         if (signUpRegisterButton != null)
             signUpRegisterButton.onClick.AddListener(() => AttemptSignUp());
         
         if (signUpBackButton != null)
             signUpBackButton.onClick.AddListener(() => ShowMainPanel());
+
+        // Forgot password panel buttons
+        if (forgotPasswordSendButton != null)
+            forgotPasswordSendButton.onClick.AddListener(() => AttemptPasswordReset());
+        
+        if (forgotPasswordBackButton != null)
+            forgotPasswordBackButton.onClick.AddListener(() => ShowSignInPanel());
 
         // Error panel buttons
         if (errorCloseButton != null)
@@ -172,6 +208,7 @@ public class ConnectionUI : MonoBehaviour
         if (mainPanel != null) mainPanel.SetActive(false);
         if (signInPanel != null) signInPanel.SetActive(false);
         if (signUpPanel != null) signUpPanel.SetActive(false);
+        if (forgotPasswordPanel != null) forgotPasswordPanel.SetActive(false);
         if (loadingPanel != null) loadingPanel.SetActive(false);
         if (errorPanel != null) errorPanel.SetActive(false);
     }
@@ -209,6 +246,7 @@ public class ConnectionUI : MonoBehaviour
         if (debugMode) Debug.Log("[CONNECTION UI] Showing sign in panel");
         SwitchToPanel(signInPanel);
         ClearSignInErrors();
+        ResetPasswordVisibilityStates();
     }
 
     public void ShowSignUpPanel()
@@ -216,6 +254,15 @@ public class ConnectionUI : MonoBehaviour
         if (debugMode) Debug.Log("[CONNECTION UI] Showing sign up panel");
         SwitchToPanel(signUpPanel);
         ClearSignUpErrors();
+        ResetPasswordVisibilityStates();
+    }
+
+    public void ShowForgotPasswordPanel()
+    {
+        if (debugMode) Debug.Log("[CONNECTION UI] Showing forgot password panel");
+        SwitchToPanel(forgotPasswordPanel);
+        ClearForgotPasswordErrors();
+        ClearForgotPasswordSuccess();
     }
 
     public void ShowLoadingPanel(string statusMessage = "Loading...")
@@ -280,6 +327,56 @@ public class ConnectionUI : MonoBehaviour
 
     #endregion
 
+    #region Password Toggle Methods
+
+    private void ToggleSignInPasswordVisibility()
+    {
+        signInPasswordVisible = !signInPasswordVisible;
+        UpdatePasswordFieldVisibility(signInPasswordInput, signInPasswordVisible);
+        
+        if (debugMode) Debug.Log($"[CONNECTION UI] Sign in password visibility toggled: {signInPasswordVisible}");
+    }
+
+    private void ToggleSignUpPasswordVisibility()
+    {
+        signUpPasswordVisible = !signUpPasswordVisible;
+        UpdatePasswordFieldVisibility(signUpPasswordInput, signUpPasswordVisible);
+        
+        if (debugMode) Debug.Log($"[CONNECTION UI] Sign up password visibility toggled: {signUpPasswordVisible}");
+    }
+
+    private void ToggleSignUpConfirmPasswordVisibility()
+    {
+        signUpConfirmPasswordVisible = !signUpConfirmPasswordVisible;
+        UpdatePasswordFieldVisibility(signUpConfirmPasswordInput, signUpConfirmPasswordVisible);
+        
+        if (debugMode) Debug.Log($"[CONNECTION UI] Sign up confirm password visibility toggled: {signUpConfirmPasswordVisible}");
+    }
+
+    private void UpdatePasswordFieldVisibility(TMP_InputField passwordField, bool isVisible)
+    {
+        if (passwordField == null) return;
+
+        passwordField.contentType = isVisible ? TMP_InputField.ContentType.Standard : TMP_InputField.ContentType.Password;
+        passwordField.ForceLabelUpdate();
+    }
+
+    private void ResetPasswordVisibilityStates()
+    {
+        signInPasswordVisible = false;
+        signUpPasswordVisible = false;
+        signUpConfirmPasswordVisible = false;
+        
+        // Reset all password fields to hidden
+        UpdatePasswordFieldVisibility(signInPasswordInput, false);
+        UpdatePasswordFieldVisibility(signUpPasswordInput, false);
+        UpdatePasswordFieldVisibility(signUpConfirmPasswordInput, false);
+        
+        if (debugMode) Debug.Log("[CONNECTION UI] Password visibility states reset");
+    }
+
+    #endregion
+
     #region Authentication Methods
 
     private void AttemptSignIn()
@@ -336,6 +433,33 @@ public class ConnectionUI : MonoBehaviour
     {
         ShowLoadingPanel("Logging in as guest...");
         PlayFabAuthManager.Instance.LoginAsGuest();
+    }
+
+    private void AttemptPasswordReset()
+    {
+        string email = forgotPasswordEmailInput?.text?.Trim() ?? "";
+
+        if (debugMode) Debug.Log($"[CONNECTION UI] Attempting password reset - Email: '{email}'");
+
+        // Clear previous errors and success messages
+        ClearForgotPasswordErrors();
+        ClearForgotPasswordSuccess();
+
+        if (string.IsNullOrEmpty(email))
+        {
+            ShowForgotPasswordError("Email is required");
+            return;
+        }
+
+        if (!IsValidEmail(email))
+        {
+            ShowForgotPasswordError("Invalid email format");
+            return;
+        }
+
+        if (debugMode) Debug.Log("[CONNECTION UI] Validation passed, proceeding with password reset");
+        ShowLoadingPanel("Sending password reset email...");
+        PlayFabAuthManager.Instance.SendPasswordResetEmail(email);
     }
 
     #endregion
@@ -478,6 +602,8 @@ public class ConnectionUI : MonoBehaviour
     {
         ClearSignInErrors();
         ClearSignUpErrors();
+        ClearForgotPasswordErrors();
+        ClearForgotPasswordSuccess();
         HideErrorPanel();
     }
 
@@ -499,6 +625,42 @@ public class ConnectionUI : MonoBehaviour
         }
     }
 
+    private void ShowForgotPasswordError(string errorMessage)
+    {
+        if (forgotPasswordErrorText != null)
+        {
+            forgotPasswordErrorText.text = errorMessage;
+            forgotPasswordErrorText.gameObject.SetActive(true);
+        }
+    }
+
+    private void ShowForgotPasswordSuccess(string successMessage)
+    {
+        if (forgotPasswordSuccessText != null)
+        {
+            forgotPasswordSuccessText.text = successMessage;
+            forgotPasswordSuccessText.gameObject.SetActive(true);
+        }
+    }
+
+    private void ClearForgotPasswordErrors()
+    {
+        if (forgotPasswordErrorText != null)
+        {
+            forgotPasswordErrorText.text = "";
+            forgotPasswordErrorText.gameObject.SetActive(false);
+        }
+    }
+
+    private void ClearForgotPasswordSuccess()
+    {
+        if (forgotPasswordSuccessText != null)
+        {
+            forgotPasswordSuccessText.text = "";
+            forgotPasswordSuccessText.gameObject.SetActive(false);
+        }
+    }
+
     private void HideErrorPanel()
     {
         if (errorPanel != null)
@@ -515,6 +677,7 @@ public class ConnectionUI : MonoBehaviour
     {
         ClearSignInInputs();
         ClearSignUpInputs();
+        ClearForgotPasswordInputs();
     }
 
     private void ClearSignInInputs()
@@ -529,6 +692,11 @@ public class ConnectionUI : MonoBehaviour
         if (signUpEmailInput != null) signUpEmailInput.text = "";
         if (signUpPasswordInput != null) signUpPasswordInput.text = "";
         if (signUpConfirmPasswordInput != null) signUpConfirmPasswordInput.text = "";
+    }
+
+    private void ClearForgotPasswordInputs()
+    {
+        if (forgotPasswordEmailInput != null) forgotPasswordEmailInput.text = "";
     }
 
     #endregion
@@ -575,9 +743,25 @@ public class ConnectionUI : MonoBehaviour
         {
             ShowSignUpError(message);
         }
+        else if (currentActivePanel == forgotPasswordPanel)
+        {
+            ShowForgotPasswordError(message);
+        }
         else
         {
             ShowErrorPanel(message);
+        }
+    }
+
+    public void ShowSuccessMessage(string message)
+    {
+        if (currentActivePanel == forgotPasswordPanel)
+        {
+            ShowForgotPasswordSuccess(message);
+        }
+        else
+        {
+            ShowErrorPanel(message); // Fallback to error panel for success messages
         }
     }
 

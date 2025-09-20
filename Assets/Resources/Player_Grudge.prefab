@@ -194,6 +194,8 @@ MonoBehaviour:
   hurtSound: {fileID: 0}
   deathSound: {fileID: 0}
   invulnerabilitySound: {fileID: 0}
+  damageDealt: 0
+  damageTaken: 0
 --- !u!114 &2194072730587793859
 MonoBehaviour:
   m_ObjectHideFlags: 0

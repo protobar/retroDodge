@@ -73,6 +73,15 @@ public class PlayFabAuthManager : MonoBehaviour
         // Check for auto-login on startup
         CheckStoredCredentials();
     }
+    
+    void OnApplicationFocus(bool hasFocus)
+    {
+        // In Unity editor, OnApplicationFocus can help with auto-login timing
+        if (hasFocus && !IsAuthenticated)
+        {
+            CheckStoredCredentials();
+        }
+    }
 
     #region Public Authentication Methods
 
@@ -136,6 +145,9 @@ public class PlayFabAuthManager : MonoBehaviour
             return;
         }
 
+        // Store credentials before registration so they're available in the callback
+        StoreCredentials(email, password, displayName);
+
         var request = new RegisterPlayFabUserRequest
         {
             Email = email,
@@ -188,6 +200,69 @@ public class PlayFabAuthManager : MonoBehaviour
 
         Debug.Log("[PLAYFAB AUTH] Logged out successfully");
     }
+    
+    /// <summary>
+    /// Manually trigger auto-login check (useful for debugging)
+    /// </summary>
+    [ContextMenu("Force Auto-Login Check")]
+    public void ForceAutoLoginCheck()
+    {
+        Debug.Log("[PLAYFAB AUTH] Force checking auto-login");
+        CheckStoredCredentials();
+    }
+
+    /// <summary>
+    /// Send password reset email to user
+    /// </summary>
+    public void SendPasswordResetEmail(string email)
+    {
+        if (!IsValidEmail(email))
+        {
+            OnAuthenticationResult?.Invoke(false, "Invalid email format");
+            return;
+        }
+
+        var request = new SendAccountRecoveryEmailRequest
+        {
+            Email = email,
+            TitleId = PlayFabSettings.staticSettings.TitleId
+        };
+
+        Debug.Log($"[PLAYFAB AUTH] Sending password reset email to: {email}");
+        PlayFabClientAPI.SendAccountRecoveryEmail(request, OnPasswordResetSuccess, OnPasswordResetError);
+    }
+
+    private void OnPasswordResetSuccess(SendAccountRecoveryEmailResult result)
+    {
+        Debug.Log("[PLAYFAB AUTH] Password reset email sent successfully");
+        OnAuthenticationResult?.Invoke(true, "Password reset email sent! Please check your inbox and follow the instructions to reset your password.");
+    }
+
+    private void OnPasswordResetError(PlayFabError error)
+    {
+        string errorMessage = GetPasswordResetErrorMessage(error);
+        Debug.LogWarning($"[PLAYFAB AUTH] Password reset failed: {errorMessage}");
+        OnAuthenticationResult?.Invoke(false, errorMessage);
+    }
+
+    private string GetPasswordResetErrorMessage(PlayFabError error)
+    {
+        switch (error.Error)
+        {
+            case PlayFabErrorCode.InvalidEmailAddress:
+                return "Please enter a valid email address";
+            case PlayFabErrorCode.EmailAddressNotAvailable:
+                return "No account found with this email address";
+            case PlayFabErrorCode.InvalidParams:
+                return "Invalid email address format";
+            case PlayFabErrorCode.AccountNotFound:
+                return "No account found with this email address";
+            case PlayFabErrorCode.InvalidTitleId:
+                return "Invalid game configuration";
+            default:
+                return $"Failed to send password reset email: {error.ErrorMessage}";
+        }
+    }
 
     #endregion
 
@@ -198,20 +273,49 @@ public class PlayFabAuthManager : MonoBehaviour
     /// </summary>
     private void CheckStoredCredentials()
     {
+        // Don't attempt auto-login if already authenticated
+        if (IsAuthenticated)
+        {
+            Debug.Log("[PLAYFAB AUTH] Already authenticated, skipping auto-login");
+            return;
+        }
+        
         string email = PlayerPrefs.GetString(EMAIL_KEY, "");
         string password = PlayerPrefs.GetString(PASSWORD_KEY, "");
         string guestId = PlayerPrefs.GetString(GUEST_ID_KEY, "");
 
+        Debug.Log($"[PLAYFAB AUTH] Checking stored credentials - Email: {(string.IsNullOrEmpty(email) ? "None" : "Found")}, Password: {(string.IsNullOrEmpty(password) ? "None" : "Found")}, Guest: {(string.IsNullOrEmpty(guestId) ? "None" : "Found")}");
+
         if (!string.IsNullOrEmpty(email) && !string.IsNullOrEmpty(password))
         {
             Debug.Log("[PLAYFAB AUTH] Found stored credentials, attempting auto-login");
-            LoginWithEmail(email, password);
+            // Add a small delay to ensure PlayFab is ready
+            StartCoroutine(AutoLoginWithDelay(email, password));
         }
         else if (!string.IsNullOrEmpty(guestId))
         {
             Debug.Log("[PLAYFAB AUTH] Found guest ID, attempting guest login");
-            LoginAsGuest();
+            // Add a small delay to ensure PlayFab is ready
+            StartCoroutine(AutoGuestLoginWithDelay());
         }
+        else
+        {
+            Debug.Log("[PLAYFAB AUTH] No stored credentials found");
+        }
+    }
+    
+    private System.Collections.IEnumerator AutoLoginWithDelay(string email, string password)
+    {
+        // Wait a frame to ensure PlayFab is ready
+        yield return null;
+        LoginWithEmail(email, password);
+    }
+    
+    private System.Collections.IEnumerator AutoGuestLoginWithDelay()
+    {
+        // Wait a frame to ensure PlayFab is ready
+        yield return null;
+        LoginAsGuest();
     }
 
     /// <summary>
@@ -347,7 +451,12 @@ public class PlayFabAuthManager : MonoBehaviour
     private void OnRegisterSuccessCallback(RegisterPlayFabUserResult result)
     {
         PlayFabId = result.PlayFabId;
-        PlayerDisplayName = result.Username;
+        // For registration, we need to get the display name from the stored credentials
+        // since RegisterPlayFabUserResult doesn't include InfoResultPayload
+        string storedDisplayName = PlayerPrefs.GetString(DISPLAY_NAME_KEY, "");
+        PlayerDisplayName = !string.IsNullOrEmpty(storedDisplayName) ? storedDisplayName : 
+                          result.Username ?? 
+                          "Player_" + PlayFabId.Substring(0, 8);
         Email = PlayerPrefs.GetString(EMAIL_KEY, ""); // Get email from stored credentials
         IsAuthenticated = true;
         IsGuest = false;

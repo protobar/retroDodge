@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using Photon.Pun;
 using Photon.Realtime;
 using Hashtable = ExitGames.Client.Photon.Hashtable;
+using RetroDodge.Progression;
 
 /// <summary>
 /// FIXED: MatchManager with NO DUPLICATE SPAWNING and proper UI sync
@@ -46,6 +47,9 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
     [Header("UI References")]
     [SerializeField] private MatchUI matchUI;
+    
+    [Header("Progression System")]
+    [SerializeField] private MatchResultHandler matchResultHandler;
 
     [Header("Audio")]
     [SerializeField] private AudioSource audioSource;
@@ -198,6 +202,126 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         
         if (debugMode)
             Debug.Log("[MATCH MANAGER] OnDestroy - cleaned up coroutines and references");
+    }
+
+    /// <summary>
+    /// Apply progression rewards when a match ends
+    /// </summary>
+    private void ApplyProgressionRewards()
+    {
+        // Try to find MatchResultHandler if not assigned
+        if (matchResultHandler == null)
+        {
+            matchResultHandler = FindObjectOfType<RetroDodge.Progression.MatchResultHandler>();
+            if (matchResultHandler == null)
+            {
+                Debug.LogWarning("[MatchManager] MatchResultHandler not found. Progression rewards will not be applied.");
+                return;
+            }
+            else
+            {
+                Debug.Log("[MatchManager] Found MatchResultHandler and assigned it.");
+            }
+        }
+
+        // Determine game mode
+        GameMode gameMode = GameMode.Casual;
+        if (isCompetitiveMode)
+        {
+            gameMode = GameMode.Competitive;
+        }
+        else if (PhotonNetwork.IsMasterClient && networkPlayers.ContainsKey(2) && 
+                 networkPlayers[2].GetComponent<RetroDodge.AIControllerBrain>() != null)
+        {
+            gameMode = GameMode.AI;
+        }
+        else if (PhotonNetwork.CurrentRoom?.CustomProperties != null)
+        {
+            // Check for custom room type
+            int roomType = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(RoomStateManager.ROOM_TYPE_KEY) ? 
+                          (int)PhotonNetwork.CurrentRoom.CustomProperties[RoomStateManager.ROOM_TYPE_KEY] : 0;
+            
+            if (roomType == 1) // Custom room type
+            {
+                gameMode = GameMode.Custom;
+            }
+        }
+        
+        if (debugMode) Debug.Log($"[MatchManager] Detected game mode: {gameMode}");
+
+        // Get match data
+        bool localPlayerWon = (matchWinner == 1 && PhotonNetwork.IsMasterClient) || 
+                             (matchWinner == 2 && !PhotonNetwork.IsMasterClient);
+        
+        int localPlayerRoundsWon = PhotonNetwork.IsMasterClient ? player1RoundsWon : player2RoundsWon;
+        int opponentRoundsWon = PhotonNetwork.IsMasterClient ? player2RoundsWon : player1RoundsWon;
+        
+        // Calculate match duration
+        float matchDuration = (float)(PhotonNetwork.Time - roundStartTime);
+        
+        // Get character used by local player
+        string characterUsed = "Unknown";
+        if (PhotonNetwork.IsMasterClient && networkPlayers.ContainsKey(1))
+        {
+            var characterData = networkPlayers[1].GetCharacterData();
+            characterUsed = characterData != null ? characterData.characterName : "Unknown";
+        }
+        else if (!PhotonNetwork.IsMasterClient && networkPlayers.ContainsKey(2))
+        {
+            var characterData = networkPlayers[2].GetCharacterData();
+            characterUsed = characterData != null ? characterData.characterName : "Unknown";
+        }
+        
+        // Get damage dealt/taken by local player
+        int damageDealt = 0;
+        int damageTaken = 0;
+        if (PhotonNetwork.IsMasterClient && networkPlayers.ContainsKey(1))
+        {
+            var playerHealth = networkPlayers[1].GetComponent<PlayerHealth>();
+            if (playerHealth != null)
+            {
+                damageDealt = playerHealth.damageDealt;
+                damageTaken = playerHealth.damageTaken;
+            }
+        }
+        else if (!PhotonNetwork.IsMasterClient && networkPlayers.ContainsKey(2))
+        {
+            var playerHealth = networkPlayers[2].GetComponent<PlayerHealth>();
+            if (playerHealth != null)
+            {
+                damageDealt = playerHealth.damageDealt;
+                damageTaken = playerHealth.damageTaken;
+            }
+        }
+        
+        // Get opponent SR for competitive matches
+        int opponentSR = 0;
+        if (gameMode == GameMode.Competitive && PlayerDataManager.Instance != null)
+        {
+            var playerData = PlayerDataManager.Instance.GetPlayerData();
+            opponentSR = playerData.competitiveSR; // Use current SR as opponent SR for now
+        }
+        
+        // Create and process match result
+        var matchResult = matchResultHandler.CreateMatchResult(
+            gameMode: gameMode,
+            isWin: localPlayerWon,
+            finalScore: localPlayerRoundsWon,
+            matchDuration: matchDuration,
+            characterUsed: characterUsed,
+            damageDealt: damageDealt,
+            damageTaken: damageTaken,
+            opponentSR: opponentSR,
+            currentSeriesMatch: isCompetitiveMode ? currentSeriesMatch : 1,
+            totalSeriesMatches: isCompetitiveMode ? maxSeriesMatches : 1,
+            seriesCompleted: isCompetitiveMode ? seriesCompleted : true,
+            seriesWinner: isCompetitiveMode ? seriesWinner : (localPlayerWon ? 1 : 2)
+        );
+        
+        // Process the match result
+        matchResultHandler.ProcessMatchResult(matchResult);
+        
+        if (debugMode) Debug.Log($"[MatchManager] Applied progression rewards for {gameMode} match. Win: {localPlayerWon}");
     }
 
     void Update()
@@ -1162,6 +1286,9 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
         PlaySound(matchWinSound);
         yield return new WaitForSeconds(2f); // Show result briefly
+
+        // Apply progression rewards
+        ApplyProgressionRewards();
 
         // Check if series is complete
         if (isCompetitiveMode && seriesCompleted)

@@ -36,6 +36,7 @@ public class ConnectionManager : MonoBehaviourPunCallbacks
         // Subscribe to PlayFab authentication events
         PlayFabAuthManager.Instance.OnLoginSuccess += OnAuthenticationSuccess;
         PlayFabAuthManager.Instance.OnLoginError += OnAuthenticationError;
+        PlayFabAuthManager.Instance.OnAuthenticationResult += OnAuthenticationResult;
 
         // Check if already authenticated
         if (PlayFabAuthManager.Instance.IsAuthenticated)
@@ -66,6 +67,7 @@ public class ConnectionManager : MonoBehaviourPunCallbacks
         {
             PlayFabAuthManager.Instance.OnLoginSuccess -= OnAuthenticationSuccess;
             PlayFabAuthManager.Instance.OnLoginError -= OnAuthenticationError;
+            PlayFabAuthManager.Instance.OnAuthenticationResult -= OnAuthenticationResult;
         }
     }
 
@@ -90,6 +92,38 @@ public class ConnectionManager : MonoBehaviourPunCallbacks
         if (connectionUI != null)
         {
             connectionUI.ShowError(errorMessage);
+        }
+    }
+
+    private void OnAuthenticationResult(bool success, string message)
+    {
+        Debug.Log($"[CONNECTION MANAGER] Authentication result - Success: {success}, Message: {message}");
+        
+        if (connectionUI != null)
+        {
+            if (success)
+            {
+                // Check if this is a password reset success (not a login success)
+                if (message.Contains("password reset email sent") || message.Contains("Password reset email sent"))
+                {
+                    // Hide loading panel and show success message
+                    connectionUI.HideLoadingPanel();
+                    connectionUI.ShowSuccessMessage(message);
+                    Debug.Log("[CONNECTION MANAGER] Password reset success - not proceeding with login");
+                }
+                else
+                {
+                    // This is a login success, proceed with Photon connection
+                    Debug.Log("[CONNECTION MANAGER] Login success - proceeding with Photon connection");
+                    OnAuthenticationSuccess();
+                }
+            }
+            else
+            {
+                // Hide loading panel and show error message
+                connectionUI.HideLoadingPanel();
+                connectionUI.ShowErrorMessage(message);
+            }
         }
     }
 

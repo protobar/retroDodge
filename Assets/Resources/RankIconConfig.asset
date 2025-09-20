@@ -1,0 +1,58 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8f8506b8a68a7b446a8b7cca64afc9a4, type: 3}
+  m_Name: RankIconConfig
+  m_EditorClassIdentifier: 
+  rankIcons:
+  - rankName: Bronze
+    iconSprite: {fileID: 21300000, guid: dbc39402914be99468158a37e45d063b, type: 3}
+    smallIcon: {fileID: 0}
+    largeIcon: {fileID: 0}
+    iconColor: {r: 1, g: 1, b: 1, a: 1}
+    sizeMultiplier: 1
+  - rankName: Silver
+    iconSprite: {fileID: 21300000, guid: 3adca7e1f029d5140a3e5fab86f57798, type: 3}
+    smallIcon: {fileID: 0}
+    largeIcon: {fileID: 0}
+    iconColor: {r: 1, g: 1, b: 1, a: 1}
+    sizeMultiplier: 1
+  - rankName: Gold
+    iconSprite: {fileID: 21300000, guid: 6fbb475d7f92fbf40be8a97489422545, type: 3}
+    smallIcon: {fileID: 0}
+    largeIcon: {fileID: 0}
+    iconColor: {r: 1, g: 1, b: 1, a: 1}
+    sizeMultiplier: 1
+  - rankName: Platinum
+    iconSprite: {fileID: 21300000, guid: 463b871d91ee30c439c5abce02753544, type: 3}
+    smallIcon: {fileID: 0}
+    largeIcon: {fileID: 0}
+    iconColor: {r: 1, g: 1, b: 1, a: 1}
+    sizeMultiplier: 1
+  - rankName: Diamond
+    iconSprite: {fileID: 21300000, guid: 53ec4b2c73862a94d984b82a3c0a043e, type: 3}
+    smallIcon: {fileID: 0}
+    largeIcon: {fileID: 0}
+    iconColor: {r: 1, g: 1, b: 1, a: 1}
+    sizeMultiplier: 1
+  - rankName: Dodger
+    iconSprite: {fileID: 21300000, guid: fde8f1d8f7709ff44b291fe557784a21, type: 3}
+    smallIcon: {fileID: 0}
+    largeIcon: {fileID: 0}
+    iconColor: {r: 1, g: 1, b: 1, a: 1}
+    sizeMultiplier: 1
+  - rankName: Rumbler
+    iconSprite: {fileID: 21300000, guid: 68eae47e57391b64d8cfbe9c5e69c070, type: 3}
+    smallIcon: {fileID: 0}
+    largeIcon: {fileID: 0}
+    iconColor: {r: 1, g: 1, b: 1, a: 1}
+    sizeMultiplier: 1
+  enableDebugLogs: 1

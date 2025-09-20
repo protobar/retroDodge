@@ -1,0 +1,165 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a2051b5a6c5b71d43a4efba98c267889, type: 3}
+  m_Name: DefaultProgressionConfig
+  m_EditorClassIdentifier: 
+  casualWinXP: 140
+  casualLossXP: 70
+  competitiveWinXP: 200
+  competitiveLossXP: 100
+  aiXPMultiplier: 0.85
+  casualWinCoins: 95
+  casualLossCoins: 45
+  competitiveWinCoins: 120
+  competitiveLossCoins: 55
+  aiCurrencyMultiplier: 0.4
+  rumbleTokensPerLevel: 1
+  firstWinBonusXP: 400
+  winStreakBonusXP: 35
+  maxStreakBonusXP: 175
+  comebackBonusXP: 50
+  dominantWinBonusXP: 75
+  baseSRWin: 22
+  baseSRLoss: -14
+  placementBonusSR: 40
+  streakBonusSR: 6
+  srDecayAmount: 12
+  srDecayDays: 10
+  minSRForDecay: 1000
+  levelCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1000
+      inSlope: 0
+      outSlope: 980
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 50
+      value: 50000
+      inSlope: 980
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  maxLevel: 100
+  startingXPRequirement: 1000
+  xpGrowthMultiplier: 1.15
+  rankThresholds:
+  - rankName: Bronze
+    minSR: 0
+    maxSR: 599
+    color: {r: 0.5698112, g: 0.2644079, b: 0, a: 1}
+  - rankName: Silver
+    minSR: 600
+    maxSR: 1199
+    color: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+  - rankName: Gold
+    minSR: 1200
+    maxSR: 1799
+    color: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  - rankName: Platinum
+    minSR: 1800
+    maxSR: 2399
+    color: {r: 0.49401283, g: 0, b: 1, a: 1}
+  - rankName: Diamond
+    minSR: 2400
+    maxSR: 2999
+    color: {r: 0, g: 0, b: 1, a: 1}
+  - rankName: Dodger
+    minSR: 3000
+    maxSR: 3599
+    color: {r: 0.8941177, g: 0.12941177, b: 0.3137255, a: 1}
+  - rankName: Rumbler
+    minSR: 3600
+    maxSR: 2147483647
+    color: {r: 0.03137255, g: 0.60784316, b: 0.654902, a: 1}
+  achievementDefinitions:
+  - id: ACH_FIRST_WIN
+    name: First Blood
+    description: Win your first match.
+    xpReward: 100
+    rumbleTokensReward: 5
+    dodgeCoinsReward: 0
+  - id: ACH_WIN_10_COMP
+    name: Competitive Rookie
+    description: Win 10 competitive matches.
+    xpReward: 500
+    rumbleTokensReward: 20
+    dodgeCoinsReward: 0
+  - id: ACH_LEVEL_10
+    name: Rising Star
+    description: Reach level 10.
+    xpReward: 200
+    rumbleTokensReward: 10
+    dodgeCoinsReward: 0
+  - id: ACH_LEVEL_25
+    name: Veteran
+    description: Reach level 25.
+    xpReward: 500
+    rumbleTokensReward: 25
+    dodgeCoinsReward: 0
+  - id: ACH_LEVEL_50
+    name: Elite
+    description: Reach level 50.
+    xpReward: 1000
+    rumbleTokensReward: 50
+    dodgeCoinsReward: 0
+  casualRewardsEnabled: 1
+  competitiveRewardsEnabled: 1
+  aiRewardsEnabled: 1
+  customRewardsEnabled: 0
+  characterUnlocks:
+  - characterIndex: 0
+    unlockLevel: 1
+    unlockType: 2
+    additionalRequirement: 
+  - characterIndex: 1
+    unlockLevel: 5
+    unlockType: 0
+    additionalRequirement: 
+  - characterIndex: 2
+    unlockLevel: 10
+    unlockType: 0
+    additionalRequirement: 
+  - characterIndex: 3
+    unlockLevel: 15
+    unlockType: 0
+    additionalRequirement: 
+  - characterIndex: 4
+    unlockLevel: 20
+    unlockType: 0
+    additionalRequirement: 
+  achievementsEnabled: 0
+  achievementXPReward: 200
+  achievementCurrencyReward: 100
+  challengesEnabled: 0
+  dailyChallengeCount: 3
+  weeklyChallengeCount: 2
+  dailyChallengeXPReward: 150
+  weeklyChallengeXPReward: 500
+  dailyChallengeCurrencyReward: 75
+  weeklyChallengeCurrencyReward: 250
+  highDamageRatioSRBonus: 3
+  lowDamageRatioSRPenalty: -3
+  dominantWinSRBonus: 2
+  closeLossSRBonus: 1
+  highDamageRatioThreshold: 1.5
+  lowDamageRatioThreshold: 0.7

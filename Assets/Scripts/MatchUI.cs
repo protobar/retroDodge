@@ -4,6 +4,7 @@ using TMPro;
 using System.Collections;
 using Photon.Pun;
 using Photon.Realtime;
+using RetroDodge.Progression;
 
 /// <summary>
 /// REFACTORED: Pure UI Display Component for Match
@@ -71,6 +72,14 @@ public class MatchUI : MonoBehaviour
     [SerializeField] private TextMeshProUGUI resultsText;
     [SerializeField] private Image winnerPortrait;
     [SerializeField] private TextMeshProUGUI winnerName;
+    
+    [Header("Progression Results")]
+    [SerializeField] private GameObject progressionResultsPanel;
+    [SerializeField] private TextMeshProUGUI xpGainedText;
+    [SerializeField] private TextMeshProUGUI coinsGainedText;
+    [SerializeField] private TextMeshProUGUI srChangeText;
+    [SerializeField] private TextMeshProUGUI rankChangeText;
+    [SerializeField] private TextMeshProUGUI levelUpText;
 
     [Header("Match End UI")]
     public Button returnToMenuButton;
@@ -144,6 +153,7 @@ public class MatchUI : MonoBehaviour
         if (announcementPanel != null) announcementPanel.SetActive(false);
         if (countdownPanel != null) countdownPanel.SetActive(false);
         if (resultsPanel != null) resultsPanel.SetActive(false);
+        if (progressionResultsPanel != null) progressionResultsPanel.SetActive(false);
         if (messagePanel != null) messagePanel.SetActive(false);
         if (returnToMenuButton != null) returnToMenuButton.gameObject.SetActive(false);
     }
@@ -370,14 +380,21 @@ public class MatchUI : MonoBehaviour
 
         resultsPanel.SetActive(true);
 
+        // Determine if local player won
+        bool localPlayerWon = (winner == 1 && PhotonNetwork.IsMasterClient) || 
+                             (winner == 2 && !PhotonNetwork.IsMasterClient);
+
         if (resultsText != null)
         {
-            resultsText.text = $"{winnerCharacter.characterName} Wins!";
+            resultsText.text = localPlayerWon ? "VICTORY!" : "DEFEAT";
+            resultsText.color = localPlayerWon ? Color.green : Color.red;
         }
 
         if (winnerName != null)
         {
-            winnerName.text = winnerCharacter.characterName;
+            // Show player name alongside character name
+            string playerName = PhotonNetwork.NickName ?? "Player";
+            winnerName.text = $"{playerName} ({winnerCharacter.characterName})";
         }
 
         if (winnerPortrait != null && winnerCharacter.characterIcon != null)
@@ -385,7 +402,173 @@ public class MatchUI : MonoBehaviour
             winnerPortrait.sprite = winnerCharacter.characterIcon;
         }
 
+        // Show progression results for LOCAL PLAYER only
+        StartCoroutine(ShowProgressionResultsDelayed(localPlayerWon));
+
         PlaySound(matchEndSound);
+    }
+    
+    /// <summary>
+    /// Show progression results for the LOCAL PLAYER only
+    /// </summary>
+    public void ShowLocalPlayerProgressionResults(bool localPlayerWon)
+    {
+        if (progressionResultsPanel == null) 
+        {
+            Debug.LogWarning("[MatchUI] ProgressionResultsPanel is null!");
+            return;
+        }
+        
+        // Get last match rewards for local player
+        var rewards = PlayerDataManager.Instance?.GetLastMatchRewards();
+        if (!rewards.HasValue) 
+        {
+            Debug.LogWarning("[MatchUI] No match rewards found! PlayerDataManager: " + (PlayerDataManager.Instance != null ? "Found" : "Null"));
+            return;
+        }
+        
+        // Check if this was a custom match (no rewards)
+        if (rewards.Value.xpGained == 0 && rewards.Value.dodgeCoinsGained == 0 && rewards.Value.srChange == 0)
+        {
+            Debug.Log("[MatchUI] Custom match detected - hiding progression results");
+            progressionResultsPanel.SetActive(false);
+            return;
+        }
+        
+        Debug.Log($"[MatchUI] Showing progression results - XP: {rewards.Value.xpGained}, Coins: {rewards.Value.dodgeCoinsGained}, SR: {rewards.Value.srChange}");
+        
+        progressionResultsPanel.SetActive(true);
+        
+        // XP gained
+        if (xpGainedText != null)
+        {
+            xpGainedText.text = $"+{rewards.Value.xpGained} XP";
+            xpGainedText.color = rewards.Value.xpGained > 0 ? Color.green : Color.white;
+            Debug.Log($"[MatchUI] Updated XP text: {xpGainedText.text}");
+        }
+        else
+        {
+            Debug.LogWarning("[MatchUI] XP Gained Text is null!");
+        }
+        
+        // Coins gained
+        if (coinsGainedText != null)
+        {
+            coinsGainedText.text = $"+{rewards.Value.dodgeCoinsGained} Coins";
+            coinsGainedText.color = rewards.Value.dodgeCoinsGained > 0 ? Color.yellow : Color.white;
+            Debug.Log($"[MatchUI] Updated Coins text: {coinsGainedText.text}");
+        }
+        else
+        {
+            Debug.LogWarning("[MatchUI] Coins Gained Text is null!");
+        }
+        
+        // SR change (competitive only)
+        if (srChangeText != null)
+        {
+            // Only show SR for competitive matches
+            if (rewards.Value.srChange != 0)
+            {
+                srChangeText.text = rewards.Value.srChange > 0 ? $"+{rewards.Value.srChange} SR" : $"{rewards.Value.srChange} SR";
+                srChangeText.color = rewards.Value.srChange > 0 ? Color.green : Color.red;
+                srChangeText.gameObject.SetActive(true);
+            }
+            else
+            {
+                // Hide SR text for casual matches
+                srChangeText.gameObject.SetActive(false);
+            }
+        }
+        
+        // Rank change (competitive only)
+        if (rankChangeText != null)
+        {
+            // Only show rank for competitive matches
+            if (rewards.Value.srChange != 0)
+            {
+                if (rewards.Value.rankedUp)
+                {
+                    rankChangeText.text = $"RANK UP!\n{rewards.Value.oldRank} → {rewards.Value.newRank}";
+                    rankChangeText.color = Color.green;
+                }
+                else if (rewards.Value.rankedDown)
+                {
+                    rankChangeText.text = $"RANK DOWN\n{rewards.Value.oldRank} → {rewards.Value.newRank}";
+                    rankChangeText.color = Color.red;
+                }
+                else
+                {
+                    rankChangeText.text = rewards.Value.newRank;
+                    rankChangeText.color = Color.white;
+                }
+                rankChangeText.gameObject.SetActive(true);
+            }
+            else
+            {
+                // Hide rank text for casual matches
+                rankChangeText.gameObject.SetActive(false);
+            }
+        }
+        
+        // Level up notification
+        if (levelUpText != null)
+        {
+            if (rewards.Value.leveledUp)
+            {
+                levelUpText.text = $"LEVEL UP!\nLevel {rewards.Value.newLevel}";
+                levelUpText.color = Color.cyan;
+                levelUpText.gameObject.SetActive(true);
+            }
+            else
+            {
+                levelUpText.gameObject.SetActive(false);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Show progression results with a small delay to ensure rewards are processed
+    /// </summary>
+    private IEnumerator ShowProgressionResultsDelayed(bool localPlayerWon)
+    {
+        // Wait longer to ensure rewards are fully processed
+        yield return new WaitForSeconds(0.5f);
+        
+        // Try to show progression results with retries
+        int attempts = 0;
+        const int maxAttempts = 10;
+        
+        while (attempts < maxAttempts)
+        {
+            var rewards = PlayerDataManager.Instance?.GetLastMatchRewards();
+            if (rewards.HasValue)
+            {
+                Debug.Log($"[MatchUI] Found rewards after {attempts + 1} attempts, showing progression results");
+                ShowLocalPlayerProgressionResults(localPlayerWon);
+                break;
+            }
+            
+            attempts++;
+            if (attempts < maxAttempts)
+            {
+                Debug.Log($"[MatchUI] No rewards found, retrying in 0.2s (attempt {attempts}/{maxAttempts})");
+                yield return new WaitForSeconds(0.2f);
+            }
+        }
+        
+        if (attempts >= maxAttempts)
+        {
+            Debug.LogWarning("[MatchUI] Failed to get progression rewards after multiple attempts");
+        }
+    }
+    
+    /// <summary>
+    /// Force refresh progression results (useful for debugging)
+    /// </summary>
+    [ContextMenu("Force Refresh Progression Results")]
+    public void ForceRefreshProgressionResults()
+    {
+        ShowLocalPlayerProgressionResults(true); // Assume win for testing
     }
     
     public void ShowCompetitiveMatchResult(int winner, CharacterData winnerCharacter, int currentMatch, int maxMatches, int player1Wins, int player2Wins)
@@ -394,20 +577,30 @@ public class MatchUI : MonoBehaviour
 
         resultsPanel.SetActive(true);
 
+        // Determine if local player won
+        bool localPlayerWon = (winner == 1 && PhotonNetwork.IsMasterClient) || 
+                             (winner == 2 && !PhotonNetwork.IsMasterClient);
+
         if (resultsText != null)
         {
-            resultsText.text = $"{winnerCharacter.characterName} Wins Match {currentMatch}!";
+            resultsText.text = localPlayerWon ? $"VICTORY! Match {currentMatch}" : $"DEFEAT Match {currentMatch}";
+            resultsText.color = localPlayerWon ? Color.green : Color.red;
         }
 
         if (winnerName != null)
         {
-            winnerName.text = winnerCharacter.characterName;
+            // Show player name alongside character name
+            string playerName = PhotonNetwork.NickName ?? "Player";
+            winnerName.text = $"{playerName} ({winnerCharacter.characterName})";
         }
 
         if (winnerPortrait != null && winnerCharacter.characterIcon != null)
         {
             winnerPortrait.sprite = winnerCharacter.characterIcon;
         }
+        
+        // Show progression results for LOCAL PLAYER only
+        StartCoroutine(ShowProgressionResultsDelayed(localPlayerWon));
         
         // Show series progress
         ShowCompetitiveSeries(currentMatch, maxMatches, player1Wins, player2Wins);
@@ -421,15 +614,23 @@ public class MatchUI : MonoBehaviour
 
         resultsPanel.SetActive(true);
 
+        // Determine if local player won the series
+        bool localPlayerWonSeries = (seriesWinner == 1 && PhotonNetwork.IsMasterClient) || 
+                                   (seriesWinner == 2 && !PhotonNetwork.IsMasterClient);
+
         if (resultsText != null)
         {
-            resultsText.text = $"Series Complete!";
+            resultsText.text = localPlayerWonSeries ? "SERIES VICTORY!" : "SERIES DEFEAT";
+            resultsText.color = localPlayerWonSeries ? Color.green : Color.red;
         }
 
         if (winnerName != null)
         {
             winnerName.text = $"Player {seriesWinner} Wins Series {player1Wins}-{player2Wins}!";
         }
+
+        // Show progression results for LOCAL PLAYER only
+        ShowLocalPlayerProgressionResults(localPlayerWonSeries);
 
         PlaySound(matchEndSound);
     }
@@ -440,20 +641,30 @@ public class MatchUI : MonoBehaviour
 
         resultsPanel.SetActive(true);
 
+        // Determine if local player won
+        bool localPlayerWon = (winner == 1 && PhotonNetwork.IsMasterClient) || 
+                             (winner == 2 && !PhotonNetwork.IsMasterClient);
+
         if (resultsText != null)
         {
-            resultsText.text = $"{winnerCharacter.characterName} Wins by Forfeit!";
+            resultsText.text = localPlayerWon ? "VICTORY by Forfeit!" : "DEFEAT by Forfeit";
+            resultsText.color = localPlayerWon ? Color.green : Color.red;
         }
 
         if (winnerName != null)
         {
-            winnerName.text = $"{winnerCharacter.characterName}\n{forfeitPlayerName} Forfeited";
+            // Show player name alongside character name
+            string playerName = PhotonNetwork.NickName ?? "Player";
+            winnerName.text = $"{playerName} ({winnerCharacter.characterName})\n{forfeitPlayerName} Forfeited";
         }
 
         if (winnerPortrait != null && winnerCharacter.characterIcon != null)
         {
             winnerPortrait.sprite = winnerCharacter.characterIcon;
         }
+
+        // Show progression results for LOCAL PLAYER only
+        StartCoroutine(ShowProgressionResultsDelayed(localPlayerWon));
 
         PlaySound(matchEndSound);
     }

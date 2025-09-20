@@ -41,6 +41,11 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     [SerializeField] private Button confirmPlayWithAIButton;
     [SerializeField] private Button backFromAIButton;
 
+    [Header("=== LEVEL REQUIREMENT POPUP ===")]
+    [SerializeField] private GameObject levelRequirementPopup;
+    [SerializeField] private TMP_Text levelRequirementText;
+    [SerializeField] private Button levelRequirementOkButton;
+
     [Header("=== CUSTOM ROOM - MAIN OPTIONS ===")]
     [SerializeField] private Button createRoomButton;
     [SerializeField] private Button joinRoomButton;
@@ -87,6 +92,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     private bool matchFound = false;
     private Coroutine aiFallbackCoroutine;
     private bool pendingAIFallback = false;
+    private bool isDisconnectingForAI = false;
     
     // Competitive mode state management
     private bool isCompetitiveMatchmaking = false;
@@ -129,6 +135,87 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         }
 
         if (debugMode) Debug.Log("[MAIN MENU] Initialized - user authenticated");
+        
+        // Refresh profile display when returning from matches
+        RefreshProfileDisplay();
+        
+        // Update competitive button state based on level
+        UpdateCompetitiveButtonState();
+    }
+    
+    /// <summary>
+    /// Refresh the profile display when returning from matches
+    /// This ensures data is up-to-date without unnecessary polling
+    /// </summary>
+    private void RefreshProfileDisplay()
+    {
+        // Find and refresh MainMenuProfileUI if it exists
+        var profileUI = FindObjectOfType<RetroDodge.Progression.MainMenuProfileUI>();
+        if (profileUI != null)
+        {
+            profileUI.ForceRefreshProfile();
+            if (debugMode) Debug.Log("[MainMenuManager] Refreshed profile display after returning from match");
+        }
+    }
+
+    /// <summary>
+    /// Update competitive button state based on player level
+    /// </summary>
+    private void UpdateCompetitiveButtonState()
+    {
+        if (competitiveButton == null) return;
+
+        bool isLevelRequirementMet = true;
+        
+        if (RetroDodge.Progression.PlayerDataManager.Instance != null && 
+            RetroDodge.Progression.PlayerDataManager.Instance.IsDataLoaded())
+        {
+            var playerData = RetroDodge.Progression.PlayerDataManager.Instance.GetPlayerData();
+            isLevelRequirementMet = playerData.currentLevel >= competitiveLevelRequirement;
+        }
+
+        // Grey out button if level requirement not met
+        var buttonImage = competitiveButton.GetComponent<Image>();
+        var buttonText = competitiveButtonText;
+        
+        if (buttonImage != null)
+        {
+            buttonImage.color = isLevelRequirementMet ? Color.white : Color.gray;
+        }
+        
+        if (buttonText != null)
+        {
+            buttonText.color = isLevelRequirementMet ? Color.white : Color.gray;
+        }
+        
+        competitiveButton.interactable = isLevelRequirementMet;
+    }
+
+    /// <summary>
+    /// Show level requirement popup
+    /// </summary>
+    private void ShowLevelRequirementPopup(int currentLevel)
+    {
+        if (levelRequirementPopup != null)
+        {
+            levelRequirementPopup.SetActive(true);
+            
+            if (levelRequirementText != null)
+            {
+                levelRequirementText.text = $"Competitive mode requires Level {competitiveLevelRequirement}.\nYou are currently Level {currentLevel}.\n\nPlay more matches to level up!";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Handle level requirement popup OK button
+    /// </summary>
+    private void OnLevelRequirementOkClicked()
+    {
+        if (levelRequirementPopup != null)
+        {
+            levelRequirementPopup.SetActive(false);
+        }
     }
 
     #region UI Setup
@@ -182,6 +269,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         generateRoomCodeButton?.onClick.AddListener(OnGenerateRoomCodeClicked);
         confirmPlayWithAIButton?.onClick.AddListener(OnConfirmPlayWithAIClicked);
         backFromAIButton?.onClick.AddListener(OnBackFromAIClicked);
+        levelRequirementOkButton?.onClick.AddListener(OnLevelRequirementOkClicked);
     }
 
     void SetupCustomRoomUI()
@@ -217,6 +305,12 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         {
             generatedRoomCodeText.text = "Click 'Generate Code' to create room";
         }
+
+        // Setup level requirement popup
+        if (levelRequirementPopup != null)
+        {
+            levelRequirementPopup.SetActive(false);
+        }
     }
     #endregion
 
@@ -249,6 +343,23 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
             return;
         }
 
+        // Check level requirement first
+        if (RetroDodge.Progression.PlayerDataManager.Instance != null && 
+            RetroDodge.Progression.PlayerDataManager.Instance.IsDataLoaded())
+        {
+            var playerData = RetroDodge.Progression.PlayerDataManager.Instance.GetPlayerData();
+            if (playerData.currentLevel < competitiveLevelRequirement)
+            {
+                ShowLevelRequirementPopup(playerData.currentLevel);
+                return;
+            }
+        }
+        else
+        {
+            UpdateStatus("Unable to verify level requirement. Please try again.");
+            return;
+        }
+
         if (isCompetitiveMatchmaking)
             CancelCompetitiveMatchmaking();
         else
@@ -257,8 +368,6 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     
     void StartCompetitiveMatch()
     {
-        // For now, skip level check - you mentioned "regardless of what lvl player is rn"
-        // TODO: Add PlayFab level check when implementing PlayFab integration
         
         isCompetitiveMatchmaking = true;
         matchFound = false;
@@ -487,6 +596,9 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     {
         if (PhotonNetwork.IsConnected || PhotonNetwork.InRoom) return;
 
+        // Set flag to prevent OnDisconnected from redirecting to Connection scene
+        isDisconnectingForAI = true;
+
         PhotonNetwork.OfflineMode = true;
         PhotonNetwork.AutomaticallySyncScene = false;
 
@@ -497,6 +609,9 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         UpdateStatus("No players found. Starting character selection vs AI...");
         UnityEngine.SceneManagement.SceneManager.LoadScene("CharacterSelection");
         pendingAIFallback = false;
+        
+        // Reset flag after scene load
+        isDisconnectingForAI = false;
     }
 
     // FIXED: Proper countdown when match is found
@@ -595,6 +710,9 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     
     IEnumerator StartOfflineAISession()
     {
+        // Set flag to prevent OnDisconnected from redirecting to Connection scene
+        isDisconnectingForAI = true;
+        
         // Disconnect from any existing connection
         if (PhotonNetwork.InRoom)
         {
@@ -620,6 +738,9 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         
         UpdateStatus("Starting character selection vs AI...");
         UnityEngine.SceneManagement.SceneManager.LoadScene("CharacterSelection");
+        
+        // Reset flag after scene load
+        isDisconnectingForAI = false;
     }
     #endregion
     
@@ -895,25 +1016,63 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         if (debugMode) Debug.Log("[MAIN MENU] Connected to master server");
     }
 
+    /// <summary>
+    /// Handle connect button click - redirect to Connection scene
+    /// </summary>
+    public void OnConnectClicked()
+    {
+        SceneManager.LoadScene("Connection");
+    }
+
     public override void OnDisconnected(DisconnectCause cause)
     {
-        loadingIndicator.SetActive(false);
-        mainMenuPanel.SetActive(false);
-        customRoomPanel.SetActive(false);
-
-        if (pendingAIFallback)
+        Debug.Log($"[MAIN MENU] Disconnected: {cause}");
+        
+        // Don't redirect to Connection scene if we're disconnecting for AI mode
+        if (isDisconnectingForAI)
         {
-            StartOfflineAIMode();
+            Debug.Log("[MAIN MENU] Disconnected for AI mode, not redirecting to Connection scene");
             return;
         }
-
-        UpdateStatus($"Disconnected: {cause}");
-        CancelMatchmaking();
-        ResetCustomRoomStates();
-
-        // If disconnected, return to Connection scene
-        Debug.Log($"[MAIN MENU] Disconnected: {cause} - Returning to Connection scene");
+        
         SceneManager.LoadScene("Connection");
+    }
+    
+    /// <summary>
+    /// Logout and return to connection screen
+    /// </summary>
+    public void OnLogoutClicked()
+    {
+        if (debugMode) Debug.Log("[MAIN MENU] Logout requested");
+        
+        UpdateStatus("Logging out...");
+        
+        // Disconnect from Photon
+        if (PhotonNetwork.IsConnected)
+        {
+            PhotonNetwork.Disconnect();
+        }
+        
+        // Save progression data before logout
+        if (RetroDodge.Progression.PlayerDataManager.Instance != null)
+        {
+            RetroDodge.Progression.PlayerDataManager.Instance.ForceSave();
+        }
+        
+        // Clear any progression data
+        if (RetroDodge.Progression.PlayerDataManager.Instance != null)
+        {
+            Destroy(RetroDodge.Progression.PlayerDataManager.Instance.gameObject);
+        }
+        
+        // Clear PlayFab authentication and stored credentials
+        if (PlayFabAuthManager.Instance != null)
+        {
+            PlayFabAuthManager.Instance.Logout();
+        }
+        
+        // Load connection scene
+        UnityEngine.SceneManagement.SceneManager.LoadScene("Connection");
     }
 
     public override void OnPlayerEnteredRoom(Player newPlayer)

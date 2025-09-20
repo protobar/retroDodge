@@ -18,6 +18,10 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
     [SerializeField] private AudioClip deathSound;
     [SerializeField] private AudioClip invulnerabilitySound;
 
+    [Header("Progression Tracking")]
+    public int damageDealt = 0;
+    public int damageTaken = 0;
+
     // Core state
     private bool isDead = false;
     private bool isInvulnerable = false;
@@ -97,6 +101,9 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         int actualDamage = Mathf.Min(damage, currentHealth);
         currentHealth -= actualDamage;
         lastDamageTime = Time.time;
+        
+        // Track damage taken for progression
+        damageTaken += actualDamage;
 
         // Add ability charges
         playerCharacter?.OnDamageTaken(actualDamage);
