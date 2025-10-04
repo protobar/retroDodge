@@ -768,7 +768,7 @@ public class BallManager : MonoBehaviourPunCallbacks
 
     void OnGUI()
     {
-        if (!Application.isPlaying) return;
+        /*if (!Application.isPlaying) return;
 
         // BallManager debug panel (top right)
         float x = Screen.width - 420;
@@ -796,7 +796,7 @@ public class BallManager : MonoBehaviourPunCallbacks
 
         GUI.Label(new Rect(x + 10, y, 380, 20), $"Game Active: {gameActive}");
         y += 20;
-        GUI.Label(new Rect(x + 10, y, 380, 20), $"Timer UI Shown: {isTimerUIShown}");
+        GUI.Label(new Rect(x + 10, y, 380, 20), $"Timer UI Shown: {isTimerUIShown}");*/
     }
 
     // ═══════════════════════════════════════════════════════════════

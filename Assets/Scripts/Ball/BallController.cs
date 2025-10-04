@@ -1196,7 +1196,7 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
     void OnGUI()
     {
-        if (!Application.isPlaying) return;
+        /*if (!Application.isPlaying) return;
 
         // Ball debug panel
         GUI.Box(new Rect(10, 10, 400, 150), "BALL DEBUG INFO");
@@ -1227,6 +1227,6 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             GUI.Label(new Rect(20, y, 380, 20),
                 $"{player.name}: IsMine={pv?.IsMine}, Dist={dist:F1}, HasBall={player.HasBall()}");
             y += 20;
-        }
+        }*/
     }
 }

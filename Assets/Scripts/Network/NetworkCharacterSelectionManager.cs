@@ -188,6 +188,20 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             }
 
             GameObject buttonObj = Instantiate(characterButtonPrefab, characterGridParent);
+
+            // GET THE CharacterSelectionButton COMPONENT
+            CharacterSelectionButton selectionButton = buttonObj.GetComponent<CharacterSelectionButton>();
+
+            // CALL INITIALIZE - THIS IS WHAT WAS MISSING!
+            if (selectionButton != null)
+            {
+                selectionButton.Initialize(character, i);
+            }
+            else
+            {
+                Debug.LogError("CharacterButtonPrefab doesn't have CharacterSelectionButton component!");
+            }
+
             Button button = buttonObj.GetComponent<Button>();
 
             if (button == null)
@@ -200,36 +214,7 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
             button.interactable = true;
             button.enabled = true;
 
-            // Setup button visual
-            Image buttonImage = button.GetComponent<Image>();
-            if (buttonImage != null)
-            {
-                if (character.characterIcon != null)
-                {
-                    buttonImage.sprite = character.characterIcon;
-                }
-                else
-                {
-                    buttonImage.color = Color.cyan;
-                }
-                buttonImage.raycastTarget = true;
-            }
-
-            // Setup button text
-            TMP_Text buttonText = button.GetComponentInChildren<TMP_Text>();
-            if (buttonText != null)
-            {
-                buttonText.text = character.characterName;
-            }
-            else
-            {
-                Text regularText = button.GetComponentInChildren<Text>();
-                if (regularText != null)
-                {
-                    regularText.text = character.characterName;
-                }
-            }
-
+            // Add click listener
             button.onClick.RemoveAllListeners();
             button.onClick.AddListener(() => {
                 OnCharacterSelected(characterIndex);

@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
@@ -41,13 +41,6 @@ public class CharacterSelectionButton : MonoBehaviour
     {
         button = GetComponent<Button>();
         originalScale = transform.localScale;
-
-        // Auto-find components if not assigned
-        if (characterIcon == null)
-            characterIcon = GetComponentInChildren<Image>();
-
-        if (characterName == null)
-            characterName = GetComponentInChildren<TextMeshProUGUI>();
     }
 
     /// <summary>
@@ -58,35 +51,72 @@ public class CharacterSelectionButton : MonoBehaviour
         character = characterData;
         characterIndex = index;
 
+        Debug.Log($"=== INITIALIZING BUTTON {index} ===");
+        Debug.Log($"Character Data: {(characterData != null ? characterData.name : "NULL")}");
+        Debug.Log($"Character Name: {(characterData != null ? characterData.characterName : "NULL")}");
+        Debug.Log($"Character Icon Sprite: {(characterData?.characterIcon != null ? characterData.characterIcon.name : "NULL")}");
+        Debug.Log($"CharacterIcon Image Component: {(characterIcon != null ? characterIcon.gameObject.name : "NULL")}");
+
         SetupVisuals();
         SetupButton();
     }
 
     void SetupVisuals()
     {
-        if (character == null) return;
-
-        // Set character icon
-        if (characterIcon != null && character.characterIcon != null)
+        if (character == null)
         {
-            characterIcon.sprite = character.characterIcon;
+            Debug.LogError($"❌ Character data is NULL on {gameObject.name}!");
+            return;
+        }
+
+        Debug.Log($"--- Setting up visuals for {character.characterName} ---");
+
+        // Set character icon - THIS IS THE CRITICAL PART
+        if (characterIcon != null)
+        {
+            Debug.Log($"CharacterIcon Image found on: {characterIcon.gameObject.name}");
+
+            if (character.characterIcon != null)
+            {
+                characterIcon.sprite = character.characterIcon;
+                characterIcon.enabled = true;
+                characterIcon.color = Color.white; // Make sure it's visible
+
+                Debug.Log($"✓ SUCCESS! Set sprite '{character.characterIcon.name}' to {characterIcon.gameObject.name}");
+                Debug.Log($"   Sprite size: {character.characterIcon.rect.width}x{character.characterIcon.rect.height}");
+                Debug.Log($"   Image enabled: {characterIcon.enabled}");
+                Debug.Log($"   Image color: {characterIcon.color}");
+            }
+            else
+            {
+                Debug.LogError($"❌ Character '{character.characterName}' has NO characterIcon sprite assigned in CharacterData!");
+                Debug.LogError($"   Please assign a sprite to the 'characterIcon' field in the CharacterData ScriptableObject!");
+            }
+        }
+        else
+        {
+            Debug.LogError($"❌ characterIcon Image component is NULL! Assign it in the prefab Inspector!");
         }
 
         // Set character name
-        if (characterName != null)
+        if (characterName != null && !string.IsNullOrEmpty(character.characterName))
         {
             characterName.text = character.characterName;
+            Debug.Log($"✓ Set character name: {character.characterName}");
         }
 
         // Set character color
         if (backgroundImage != null)
         {
             backgroundImage.color = character.characterColor;
+            Debug.Log($"✓ Set background color: {character.characterColor}");
         }
 
         // Initialize highlight state
         SetHighlighted(false);
         SetSelected(false);
+
+        Debug.Log($"=== SETUP COMPLETE for {character.characterName} ===\n");
     }
 
     void SetupButton()
@@ -153,7 +183,7 @@ public class CharacterSelectionButton : MonoBehaviour
         }
 
         // Update background color
-        if (backgroundImage != null)
+        if (backgroundImage != null && character != null)
         {
             Color targetColor = character.characterColor;
 
@@ -169,8 +199,6 @@ public class CharacterSelectionButton : MonoBehaviour
             backgroundImage.color = targetColor;
         }
     }
-
-   
 
     System.Collections.IEnumerator AnimateHighlight()
     {

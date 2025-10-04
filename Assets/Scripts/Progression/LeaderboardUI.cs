@@ -51,15 +51,8 @@ namespace RetroDodge.Progression
             if (leaderboardPanel != null)
                 leaderboardPanel.SetActive(false);
                 
-            // Get current player ID from PlayFabAuthManager
-            if (PlayFabAuthManager.Instance != null && PlayFabAuthManager.Instance.IsAuthenticated)
-            {
-                currentPlayerId = PlayFabAuthManager.Instance.PlayFabId;
-            }
-            else
-            {
-                currentPlayerId = PlayFab.PlayFabSettings.staticSettings.TitleId; // Fallback
-            }
+            // Get current player ID
+            currentPlayerId = PlayFab.PlayFabSettings.staticSettings.TitleId;
         }
         
         void OnDestroy()
@@ -143,16 +136,11 @@ namespace RetroDodge.Progression
                 return;
             }
             
-            // First try to find player in current leaderboard
             int playerIndex = LeaderboardManager.Instance.GetPlayerRank(currentPlayerId);
             
             if (playerIndex == -1)
             {
-                // Player not in current leaderboard, load leaderboard around player
-                if (enableDebugLogs) Debug.Log("[LeaderboardUI] Player not in current leaderboard, loading around player");
-                ShowLoading(true);
-                HideError();
-                LeaderboardManager.Instance.LoadLeaderboardAroundPlayer();
+                ShowError("You're not in the top 100 players!");
                 return;
             }
             
@@ -164,16 +152,6 @@ namespace RetroDodge.Progression
             ShowLoading(false);
             HideError();
             PopulateLeaderboard(entries);
-            
-            // If we loaded leaderboard around player, automatically scroll to player
-            if (entries.Count > 0 && entries.Count <= 20) // Around player typically returns fewer entries
-            {
-                int playerIndex = LeaderboardManager.Instance.GetPlayerRank(currentPlayerId);
-                if (playerIndex != -1)
-                {
-                    StartCoroutine(ScrollToPlayer(playerIndex));
-                }
-            }
             
             if (enableDebugLogs) Debug.Log($"[LeaderboardUI] Loaded {entries.Count} leaderboard entries");
         }
