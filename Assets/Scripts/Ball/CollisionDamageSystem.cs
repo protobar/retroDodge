@@ -9,13 +9,23 @@ using Photon.Pun;
 /// </summary>
 public class CollisionDamageSystem : MonoBehaviour
 {
-    [Header("Collision Settings")]
+    [Header("Collision Settings - UPDATED")]
+    [SerializeField] private bool useDynamicScaling = true;
+    // Keep these as base values that will be scaled
+    [SerializeField] private float baseCollisionRange = 1.0f;
+    [SerializeField] private float baseDuckingHeightThreshold = 1.0f;
+    [SerializeField] private float basePlayerCollisionHeight = 1.0f;
     [SerializeField] private float collisionRange = 1.0f;
     [SerializeField] private float duckingHeightThreshold = 1.0f;
     [SerializeField] private float playerCollisionHeight = 1.0f;
     [SerializeField] private float hitStopDuration = 0.1f;
     [SerializeField] private bool enablePredictiveCollision = true;
     [SerializeField] private float predictionDistance = 1.5f;
+
+
+    private float scaledCollisionRange = 1.0f;
+    private float scaledDuckingThreshold = 1.0f;
+    private float scaledCollisionHeight = 1.0f;
 
     [Header("Damage Settings")]
     [SerializeField] private int baseDamage = 10;
@@ -90,11 +100,46 @@ public class CollisionDamageSystem : MonoBehaviour
             audioSource.volume = 0.7f;
         }
 
+        // NEW: Update scaled values from CharacterScaleManager
+        UpdateScaledValues();
+
         RefreshPlayerCache();
+    }
+
+    void UpdateScaledValues()
+    {
+        if (useDynamicScaling && CharacterScaleManager.Instance != null)
+        {
+            scaledCollisionRange = CharacterScaleManager.Instance.GetCollisionRange();
+            scaledDuckingThreshold = CharacterScaleManager.Instance.GetDuckingThreshold(transform);
+            scaledCollisionHeight = CharacterScaleManager.Instance.GetCollisionHeight();
+
+            if (debugMode)
+            {
+                Debug.Log($"CollisionDamageSystem: Updated scaled values");
+                Debug.Log($"  Collision Range: {baseCollisionRange} → {scaledCollisionRange}");
+                Debug.Log($"  Ducking Threshold: {baseDuckingHeightThreshold} → {scaledDuckingThreshold}");
+                Debug.Log($"  Collision Height: {basePlayerCollisionHeight} → {scaledCollisionHeight}");
+            }
+        }
+        else
+        {
+            // Fallback to base values
+            scaledCollisionRange = baseCollisionRange;
+            scaledDuckingThreshold = baseDuckingHeightThreshold;
+            scaledCollisionHeight = basePlayerCollisionHeight;
+        }
     }
 
     void Update()
     {
+
+        // NEW: Refresh scaled values periodically (every second)
+        if (Time.frameCount % 60 == 0)
+        {
+            UpdateScaledValues();
+        }
+
         // Only check collisions when ball is thrown
         if (ballController != null && ballController.GetBallState() == BallController.BallState.Thrown)
         {
@@ -197,29 +242,53 @@ public class CollisionDamageSystem : MonoBehaviour
     /// </summary>
     bool CheckPlayerCollisionWithDucking(PlayerCharacter player, Vector3 ballPosition)
     {
-        Vector3 playerCenter = player.transform.position + Vector3.up * playerCollisionHeight;
-        float distanceToPlayer = Vector3.Distance(ballPosition, playerCenter);
-
-        // First check: Is ball close enough to player?
-        if (distanceToPlayer > collisionRange)
-            return false;
-
-        // Second check: If player is ducking, ball must be low enough to hit
-        if (player.IsDucking())
+        // NEW: Use CharacterScaleManager for accurate collision detection
+        if (useDynamicScaling && CharacterScaleManager.Instance != null)
         {
-            if (ballPosition.y > duckingHeightThreshold)
-            {
-                // Ball is too high - passes over ducking player
-                if (debugMode)
-                {
-                    Debug.Log($"Ball passed over ducking {player.name} (Ball Y: {ballPosition.y:F2}, Threshold: {duckingHeightThreshold})");
-                }
-                return false;
-            }
-        }
+            // Check if ball is in collision range of character
+            bool inRange = CharacterScaleManager.Instance.IsInCollisionRange(ballPosition, player.transform);
 
-        // Ball should hit the player
-        return true;
+            if (!inRange) return false;
+
+            // If player is ducking, check if ball is low enough to hit
+            if (player.IsDucking())
+            {
+                float duckThreshold = CharacterScaleManager.Instance.GetDuckingThreshold(player.transform);
+                if (ballPosition.y > duckThreshold)
+                {
+                    if (debugMode)
+                    {
+                        Debug.Log($"Ball passed over ducking {player.name} (Ball Y: {ballPosition.y:F2}, Threshold: {duckThreshold:F2})");
+                    }
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        else
+        {
+            // Fallback: Use scaled values directly
+            Vector3 playerCenter = player.transform.position + Vector3.up * scaledCollisionHeight;
+            float distanceToPlayer = Vector3.Distance(ballPosition, playerCenter);
+
+            if (distanceToPlayer > scaledCollisionRange)
+                return false;
+
+            if (player.IsDucking())
+            {
+                if (ballPosition.y > player.transform.position.y + scaledDuckingThreshold)
+                {
+                    if (debugMode)
+                    {
+                        Debug.Log($"Ball passed over ducking {player.name} (Ball Y: {ballPosition.y:F2})");
+                    }
+                    return false;
+                }
+            }
+
+            return true;
+        }
     }
 
     HitType DetermineHitType()
@@ -784,9 +853,15 @@ public class CollisionDamageSystem : MonoBehaviour
     {
         if (!showCollisionGizmos) return;
 
-        // Draw collision range
+        // Update scaled values for editor visualization
+        if (Application.isPlaying)
+        {
+            UpdateScaledValues();
+        }
+
+        // Draw collision range (use scaled value)
         Gizmos.color = hasHitThisThrow ? Color.gray : Color.red;
-        Gizmos.DrawWireSphere(transform.position, collisionRange);
+        Gizmos.DrawWireSphere(transform.position, scaledCollisionRange);
 
         // Show enhanced VFX system status
         if (useVFXManager)
@@ -794,17 +869,16 @@ public class CollisionDamageSystem : MonoBehaviour
             Gizmos.color = VFXManager.Instance != null ? Color.green : Color.red;
             Gizmos.DrawWireCube(transform.position + Vector3.up * 2f, Vector3.one * 0.3f);
 
-            // Draw VFX spawn offset visualization
             Gizmos.color = Color.cyan;
             Gizmos.DrawWireSphere(transform.position + Vector3.forward * vfxSpawnOffset, 0.1f);
         }
 
-        // Show ducking visualization
+        // Show ducking visualization (use scaled value)
         if (showDuckingVisualization)
         {
             Gizmos.color = Color.yellow;
-            Gizmos.DrawWireCube(transform.position + Vector3.up * duckingHeightThreshold,
-                              new Vector3(collisionRange * 2f, 0.1f, collisionRange * 2f));
+            Gizmos.DrawWireCube(transform.position + Vector3.up * scaledDuckingThreshold,
+                              new Vector3(scaledCollisionRange * 2f, 0.1f, scaledCollisionRange * 2f));
         }
 
         // Show predictive collision range
@@ -812,29 +886,48 @@ public class CollisionDamageSystem : MonoBehaviour
         {
             Vector3 predictedPos = transform.position + (ballController.velocity * Time.fixedDeltaTime * predictionDistance);
             Gizmos.color = Color.blue;
-            Gizmos.DrawWireSphere(predictedPos, collisionRange * 0.5f);
+            Gizmos.DrawWireSphere(predictedPos, scaledCollisionRange * 0.5f);
             Gizmos.DrawLine(transform.position, predictedPos);
         }
 
-        // Draw player collision heights - CLEANED UP: PlayerCharacter only
+        // Draw player collision heights with scaled values
         PlayerCharacter[] players = FindObjectsOfType<PlayerCharacter>();
         foreach (PlayerCharacter player in players)
         {
             if (player == null) continue;
 
-            Vector3 playerCenter = player.transform.position + Vector3.up * playerCollisionHeight;
+            Vector3 playerCenter;
+
+            // NEW: Use CharacterScaleManager if available
+            if (useDynamicScaling && CharacterScaleManager.Instance != null)
+            {
+                playerCenter = CharacterScaleManager.Instance.GetCollisionCheckPosition(player.transform);
+            }
+            else
+            {
+                playerCenter = player.transform.position + Vector3.up * scaledCollisionHeight;
+            }
 
             // Color based on player state
             if (player.IsDucking())
             {
-                Gizmos.color = Color.green; // Green for ducking players
+                Gizmos.color = Color.green;
             }
             else
             {
-                Gizmos.color = Color.white; // White for standing players
+                Gizmos.color = Color.white;
             }
 
-            Gizmos.DrawWireSphere(playerCenter, 0.2f);
+            Gizmos.DrawWireSphere(playerCenter, scaledCollisionRange);
+
+            // Draw target position (where ball should aim)
+            if (useDynamicScaling && CharacterScaleManager.Instance != null)
+            {
+                Gizmos.color = Color.magenta;
+                Vector3 targetPos = CharacterScaleManager.Instance.GetCharacterTargetPosition(player.transform);
+                Gizmos.DrawWireSphere(targetPos, 0.3f);
+                Gizmos.DrawLine(player.transform.position, targetPos);
+            }
         }
 
         // Show last collision info
@@ -842,7 +935,6 @@ public class CollisionDamageSystem : MonoBehaviour
         {
             Gizmos.color = Color.magenta;
             Vector3 textPos = transform.position + Vector3.up * 3f;
-            // Note: Gizmos can't draw text, but this shows where collision info would be displayed
             Gizmos.DrawWireCube(textPos, Vector3.one * 0.5f);
         }
     }
@@ -855,7 +947,7 @@ public class CollisionDamageSystem : MonoBehaviour
         // Clamp values to reasonable ranges
         collisionRange = Mathf.Clamp(collisionRange, 0.1f, 5f);
         duckingHeightThreshold = Mathf.Clamp(duckingHeightThreshold, 0.5f, 3f);
-        playerCollisionHeight = Mathf.Clamp(playerCollisionHeight, 0.5f, 2f);
+        playerCollisionHeight = Mathf.Clamp(playerCollisionHeight, 0.5f, 10f);
         vfxSpawnOffset = Mathf.Clamp(vfxSpawnOffset, 0f, 1f);
 
         // Ensure collision cooldown is reasonable

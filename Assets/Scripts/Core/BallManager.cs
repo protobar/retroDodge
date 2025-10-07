@@ -21,10 +21,22 @@ public class BallManager : MonoBehaviourPunCallbacks
     [SerializeField] private bool autoShowTimerOnPickup = true;
     [SerializeField] private bool autoHideTimerOnThrow = true;
 
+    [Header("2.5D Game Settings")]
+    [SerializeField] private bool lock2DMovement = true;
+    [SerializeField] private float fixedZPosition = 0f;
+
+    // ADD this helper method for debug visualization:
+    [Header("Debug Visualization")]
+    [SerializeField] private bool showThrowTrajectory = true;
+    [SerializeField] private int trajectoryPoints = 20;
+    [SerializeField] private float trajectoryTimeStep = 0.1f;
+
     // Current ball reference
     private BallController currentBall;
     private bool gameActive = true;
     private bool isTimerUIShown = false;
+
+    public bool debugMode = false;
 
     void Awake()
     {
@@ -369,6 +381,8 @@ public class BallManager : MonoBehaviourPunCallbacks
         }
 
         float throwSpeed = characterData.GetThrowSpeed(GetBaseThrowSpeed(throwType));
+
+        // NEW: Use improved direction calculation with CharacterScaleManager
         Vector3 direction = CalculateThrowDirection(thrower);
 
         currentBall.SetThrowData(throwType, damage, throwSpeed);
@@ -381,7 +395,15 @@ public class BallManager : MonoBehaviourPunCallbacks
             VFXManager.Instance.SpawnThrowVFX(currentBall.transform.position, thrower, throwType);
         }
 
-        Debug.Log($"✅ Ball throw executed: {thrower.name} threw {throwType} for {damage} damage");
+        if (debugMode)
+        {
+            Debug.Log($"✅ Ball throw executed:");
+            Debug.Log($"   Thrower: {thrower.name}");
+            Debug.Log($"   Type: {throwType}");
+            Debug.Log($"   Damage: {damage}");
+            Debug.Log($"   Speed: {throwSpeed}");
+            Debug.Log($"   Direction: {direction}");
+        }
 
         StartCoroutine(CheckForRespawn());
     }
@@ -395,15 +417,55 @@ public class BallManager : MonoBehaviourPunCallbacks
         PlayerCharacter opponent = FindOpponent(thrower);
         if (opponent != null)
         {
-            Vector3 targetDir = (opponent.transform.position - currentBall.transform.position).normalized;
-            return thrower.GetCharacterData().ApplyThrowAccuracy(targetDir);
+            Vector3 targetPos;
+            Vector3 throwDirection;
+
+            // NEW: Use CharacterScaleManager for proper center-mass targeting
+            if (CharacterScaleManager.Instance != null)
+            {
+                // Get target position (chest/upper torso area)
+                targetPos = CharacterScaleManager.Instance.GetCharacterTargetPosition(opponent.transform);
+
+                // Calculate direction with arc
+                throwDirection = CharacterScaleManager.Instance.CalculateArcDirection(
+                    currentBall.transform.position,
+                    targetPos
+                );
+
+                if (debugMode)
+                {
+                    Debug.Log($"🎯 Throw targeting {opponent.name}:");
+                    Debug.Log($"   From: {currentBall.transform.position}");
+                    Debug.Log($"   To: {targetPos}");
+                    Debug.Log($"   Direction: {throwDirection}");
+                }
+            }
+            else
+            {
+                // Fallback: Manual center-mass targeting
+                targetPos = opponent.transform.position + Vector3.up * 2.5f;
+                throwDirection = (targetPos - currentBall.transform.position).normalized;
+                throwDirection.y += 0.2f; // Add arc
+                throwDirection.Normalize();
+            }
+
+            // Apply character's accuracy stat
+            CharacterData charData = thrower.GetCharacterData();
+            if (charData != null)
+            {
+                return charData.ApplyThrowAccuracy(throwDirection);
+            }
+
+            return throwDirection;
         }
 
-        // Fallback: determine direction based on player position (left side throws right, right side throws left)
+        // Fallback: determine direction based on player position
         Vector3 throwerPos = thrower.transform.position;
         Vector3 direction = throwerPos.x < 0 ? Vector3.right : Vector3.left;
 
-        return direction;
+        // Add slight upward angle for fallback throws
+        direction.y = 0.15f;
+        return direction.normalized;
     }
 
     PlayerCharacter FindOpponent(PlayerCharacter thrower)
@@ -507,34 +569,63 @@ public class BallManager : MonoBehaviourPunCallbacks
                 tempBall.SetThrowData(ThrowType.Ultimate, damagePerBall, throwSpeed);
                 tempBall.SetThrower(thrower);
 
-                // FIXED: Calculate direction properly for multi-throw
+                // IMPROVED: Calculate direction with CharacterScaleManager
                 PlayerCharacter opponent = FindOpponent(thrower);
                 Vector3 throwDir;
-                
+
                 if (opponent != null)
                 {
-                    Vector3 targetDir = (opponent.transform.position - tempBall.transform.position).normalized;
-                    throwDir = characterData.ApplyThrowAccuracy(targetDir);
+                    Vector3 targetPos;
+
+                    // NEW: Use CharacterScaleManager for proper targeting
+                    if (CharacterScaleManager.Instance != null)
+                    {
+                        targetPos = CharacterScaleManager.Instance.GetCharacterTargetPosition(opponent.transform);
+                        throwDir = CharacterScaleManager.Instance.CalculateArcDirection(
+                            tempBall.transform.position,
+                            targetPos
+                        );
+                    }
+                    else
+                    {
+                        targetPos = opponent.transform.position + Vector3.up * 2.5f;
+                        throwDir = (targetPos - tempBall.transform.position).normalized;
+                        throwDir.y += 0.15f;
+                        throwDir.Normalize();
+                    }
+
+                    // Apply character accuracy
+                    throwDir = characterData.ApplyThrowAccuracy(throwDir);
                 }
                 else
                 {
                     // Fallback: determine direction based on player position
                     throwDir = thrower.transform.position.x < 0 ? Vector3.right : Vector3.left;
+                    throwDir.y = 0.15f;
+                    throwDir.Normalize();
                 }
-                
-                // Apply spread angle
+
+                // Apply spread angle for multi-throw
                 float spreadAngle = characterData.GetMultiThrowSpread();
                 float angleOffset = (i - (throwCount - 1) * 0.5f) * (spreadAngle / throwCount);
                 throwDir = Quaternion.Euler(0, angleOffset, 0) * throwDir;
-                throwDir.y = 0.1f;
 
                 tempBall.ThrowBallInternal(throwDir.normalized, 1f);
 
                 // Auto-destroy temp balls after time
-                StartCoroutine(DestroyTempBall(tempBallObj, 4f));
+                StartCoroutine(DestroyTempBall(tempBallObj, 2.5f));
             }
 
             yield return new WaitForSeconds(characterData.GetMultiThrowDelay());
+        }
+    }
+
+    public void RecalibrateCharacterScale()
+    {
+        if (CharacterScaleManager.Instance != null)
+        {
+            CharacterScaleManager.Instance.RecalibrateScale();
+            Debug.Log("BallManager: Recalibrated character scale");
         }
     }
 
@@ -766,6 +857,64 @@ public class BallManager : MonoBehaviourPunCallbacks
     // DEBUG GUI
     // ═══════════════════════════════════════════════════════════════
 
+    void OnDrawGizmos()
+    {
+        if (!showThrowTrajectory || !Application.isPlaying) return;
+        if (currentBall == null) return;
+
+        // Only show trajectory when ball is held
+        if (!currentBall.IsHeld()) return;
+
+        PlayerCharacter holder = currentBall.GetHolder();
+        if (holder == null) return;
+
+        PlayerCharacter opponent = FindOpponent(holder);
+        if (opponent == null) return;
+
+        // Draw trajectory prediction
+        Vector3 startPos = currentBall.transform.position;
+        Vector3 targetPos;
+
+        if (CharacterScaleManager.Instance != null)
+        {
+            targetPos = CharacterScaleManager.Instance.GetCharacterTargetPosition(opponent.transform);
+        }
+        else
+        {
+            targetPos = opponent.transform.position + Vector3.up * 2.5f;
+        }
+
+        // Draw line to target
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawLine(startPos, targetPos);
+        Gizmos.DrawWireSphere(targetPos, 0.3f);
+
+        // Draw arc trajectory
+        Vector3 throwDir = CalculateThrowDirection(holder);
+        float throwSpeed = 18f; // Base speed
+
+        CharacterData charData = holder.GetCharacterData();
+        if (charData != null)
+        {
+            throwSpeed = charData.GetThrowSpeed(throwSpeed);
+        }
+
+        Vector3 velocity = throwDir * throwSpeed;
+        Vector3 currentPos = startPos;
+
+        Gizmos.color = Color.red;
+        for (int i = 0; i < trajectoryPoints; i++)
+        {
+            Vector3 nextPos = currentPos + velocity * trajectoryTimeStep;
+            velocity.y -= 15f * trajectoryTimeStep; // Apply gravity
+
+            Gizmos.DrawLine(currentPos, nextPos);
+            currentPos = nextPos;
+
+            // Stop if trajectory goes below ground
+            if (currentPos.y < 0) break;
+        }
+    }
     void OnGUI()
     {
         /*if (!Application.isPlaying) return;

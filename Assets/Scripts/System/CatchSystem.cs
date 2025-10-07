@@ -231,6 +231,10 @@ public class CatchSystem : MonoBehaviourPunCallbacks
         lastCatchAttempt = Time.time;
         isCatchingAvailable = false;
 
+        // ADDED: Trigger catch animation immediately when button is pressed
+        var animController = playerCharacter.GetComponent<RetroDodgeRumble.Animation.PlayerAnimationController>();
+        animController?.TriggerCatch();
+
         if (nearestThrownBall == null ||
             nearestThrownBall.GetBallState() != BallController.BallState.Thrown ||
             Vector3.Distance(transform.position, nearestThrownBall.transform.position) > catchRange)

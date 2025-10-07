@@ -3,6 +3,7 @@ using System.Collections;
 using Photon.Pun;
 using Photon.Realtime;
 using TMPro;
+using RetroDodgeRumble.Animation;
 /// <summary>
 /// FIXED PlayerCharacter with proper PUN2 multiplayer integration
 /// Fixes: Character data sync, facing direction, round reset issues
@@ -31,6 +32,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     private AudioSource audioSource;
     private ArenaMovementRestrictor movementRestrictor;
     private DuckSystem duckSystem;
+    private PlayerAnimationController animationController;
 
     // Movement state
     private Transform characterTransform;
@@ -127,6 +129,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         playerHealth = GetComponent<PlayerHealth>();
         afkDetector = GetComponent<SimpleAFKDetector>();
         audioSource = GetComponent<AudioSource>() ?? gameObject.AddComponent<AudioSource>();
+        animationController = GetComponent<PlayerAnimationController>();
 
         if (characterCollider != null)
         {
@@ -330,27 +333,28 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         if (side == 1) // Left player (Master Client)
         {
             facingRight = true; // Left player faces right towards opponent
-            int actor = 0;
-            try { actor = photonView?.Owner != null ? photonView.Owner.ActorNumber : 0; } catch { actor = 0; }
-            Debug.Log($"[FACING] Player {(actor != 0 ? actor.ToString() : "LOCAL")} set as LEFT player - facing RIGHT");
+            Debug.Log($"[FACING] Player set as LEFT player - facing RIGHT");
+
+            // Ensure player 1 has 0° rotation
+            transform.rotation = Quaternion.Euler(0, 0f, 0);
         }
         else if (side == 2) // Right player (Remote Client)
         {
             facingRight = false; // Right player faces left towards opponent
-            int actor = 0;
-            try { actor = photonView?.Owner != null ? photonView.Owner.ActorNumber : 0; } catch { actor = 0; }
-            Debug.Log($"[FACING] Player {(actor != 0 ? actor.ToString() : "LOCAL")} set as RIGHT player - facing LEFT");
+            Debug.Log($"[FACING] Player set as RIGHT player - facing LEFT");
 
-            // CRITICAL: Flip the character model for right player
-            FlipCharacterModel();
+            // CRITICAL: Force 180° rotation for player 2
+            transform.rotation = Quaternion.Euler(0, 180f, 0);
+            Debug.Log($"[FACING] Applied 180° rotation to Player 2");
         }
 
         // Network sync the facing direction
-        if (photonView.IsMine)
+        if (photonView != null && photonView.IsMine)
         {
             photonView.RPC("SyncPlayerFacing", RpcTarget.Others, facingRight, side);
         }
     }
+
 
     /// <summary>
     /// Network sync for player facing direction
@@ -374,24 +378,23 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     /// </summary>
     void FlipCharacterModel()
     {
-        // Flip the visual representation
         Transform modelTransform = transform.GetChild(0); // Assuming first child is the model
         if (modelTransform != null)
         {
-            Vector3 scale = modelTransform.localScale;
-            scale.x = Mathf.Abs(scale.x) * (facingRight ? 1 : -1);
-            modelTransform.localScale = scale;
+            // Rotate instead of flipping scale
+            float targetYRotation = facingRight ? 0f : 180f;
+            modelTransform.localRotation = Quaternion.Euler(0, targetYRotation, 0);
 
-            Debug.Log($"[FLIP] Character model flipped - facingRight: {facingRight}");
+            Debug.Log($"[FLIP] Character model rotated - facingRight: {facingRight}");
         }
         else
         {
-            // Fallback: flip the main transform
-            Vector3 scale = transform.localScale;
-            scale.x = Mathf.Abs(scale.x) * (facingRight ? 1 : -1);
-            transform.localScale = scale;
+            // Fallback: rotate the main transform
+            float targetYRotation = facingRight ? 0f : 180f;
+            transform.localRotation = Quaternion.Euler(0, targetYRotation, 0);
         }
     }
+
 
     /// <summary>
     /// FIXED: Get throw direction based on player facing
@@ -502,12 +505,20 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
             Vector3 restricted = movementRestrictor.ApplyMovementRestriction(characterTransform.position);
             characterTransform.position = restricted;
         }
+
+        // Update animations
+        UpdateMovementAnimations();
     }
 
     void Jump()
     {
         velocity.y = characterData.jumpHeight;
         isGrounded = false;
+        
+        // Animation
+        animationController?.TriggerJump();
+        animationController?.SetGrounded(false);
+        
         PlayCharacterSound(CharacterAudioType.Jump);
         SyncPlayerAction("Jump");
     }
@@ -546,6 +557,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         velocity.y = characterData.jumpHeight * 0.8f;
         hasDoubleJumped = true;
         
+        // Animation
+        animationController?.TriggerDoubleJump();
+        
         // FIXED: Sync double jump to other players
         if (photonView.IsMine)
         {
@@ -563,6 +577,10 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     void PerformDash()
     {
+        // Animation
+        animationController?.TriggerDash();
+        animationController?.SetDashing(true);
+        
         SyncPlayerAction("Dash");
         StartCoroutine(DashCoroutine());
     }
@@ -590,6 +608,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         }
 
         isDashing = false;
+        // Animation
+        animationController?.SetDashing(false);
+        
         yield return new WaitForSeconds(characterData.GetDashCooldown());
         canDash = true;
     }
@@ -602,6 +623,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         {
             isDucking = newDuckState;
             ApplyDuckingCollider();
+            
+            // Animation
+            animationController?.SetDucking(isDucking);
         }
     }
 
@@ -643,9 +667,18 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         }
 
         // Throw
-        if (inputHandler.GetThrowPressed() && hasBall)
+        if (inputHandler.GetThrowPressed())
         {
-            ThrowBall();
+            Debug.Log($"[THROW] Button pressed! hasBall={hasBall}");
+
+            if (hasBall)
+            {
+                ThrowBall();
+            }
+            else
+            {
+                Debug.Log("[THROW] No ball to throw");
+            }
         }
     }
 
@@ -655,37 +688,46 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         if (ball?.IsFree() == true &&
             Vector3.Distance(transform.position, ball.transform.position) <= PICKUP_RANGE)
         {
-            if (BallManager.Instance.RequestBallPickup(this))
-            {
-                AddAbilityCharge(0, 5f); // Small charge for pickup
-            }
+        if (BallManager.Instance.RequestBallPickup(this))
+        {
+            // Animation
+            animationController?.TriggerCatch();
+            animationController?.SetHasBall(true);
+            
+            AddAbilityCharge(0, 5f); // Small charge for pickup
+        }
         }
     }
 
     void ThrowBall()
     {
-        if (!hasBall) return;
+        // Always trigger animation first
+        animationController?.TriggerThrow();
+
+        if (!hasBall)
+        {
+            // Play animation but don't actually throw
+            PlayCharacterSound(CharacterAudioType.Throw); // Optional: fake throw sound
+            return;
+        }
 
         ThrowType throwType = isGrounded ? ThrowType.Normal : ThrowType.JumpThrow;
         int damage = characterData.GetThrowDamage(throwType);
-
-        // FIXED: Use proper throw direction based on player side
         Vector3 throwDirection = GetThrowDirection();
 
         SpawnThrowVFX(throwType);
 
-        // FIXED: Set hasBall to false before throwing
         SetHasBall(false);
+        animationController?.SetHasBall(false);
 
-        // Pass throw direction to ball manager
         BallManager.Instance.RequestBallThrowWithCharacterData(this, characterData, throwType, damage);
 
         PlayCharacterSound(CharacterAudioType.Throw);
 
         // Add ability charges
-        AddAbilityCharge(0, 15f); // Ultimate
-        AddAbilityCharge(1, 10f); // Trick
-        AddAbilityCharge(2, 10f); // Treat
+        AddAbilityCharge(0, 15f);
+        AddAbilityCharge(1, 10f);
+        AddAbilityCharge(2, 10f);
     }
 
     // ══════════════════════════════════════════════════════════
@@ -830,6 +872,10 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     {
         abilityCharges[0] = 0f;
         StartCoroutine(AbilityCooldown(0));
+        
+        // Animation
+        animationController?.TriggerUltimate();
+        
         if (!PhotonNetwork.OfflineMode) SyncPlayerAction("Ultimate");
 
         SpawnUltimateVFX();
@@ -846,6 +892,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     {
         abilityCharges[1] = 0f;
         StartCoroutine(AbilityCooldown(1));
+
+        // Animation
+        animationController?.TriggerTrick();
 
         // FIXED: Sync trick activation to other players
         if (!PhotonNetwork.OfflineMode && photonView.IsMine)
@@ -879,6 +928,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     {
         abilityCharges[2] = 0f;
         StartCoroutine(AbilityCooldown(2));
+
+        // Animation
+        animationController?.TriggerTreat();
 
         // FIXED: Sync treat activation to other players
         if (!PhotonNetwork.OfflineMode && photonView.IsMine)
@@ -1256,17 +1308,24 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         switch (actionType)
         {
             case "Jump":
+                animationController?.TriggerJump();
+                PlayCharacterSound(CharacterAudioType.Jump);
+                break;
             case "DoubleJump":
+                animationController?.TriggerDoubleJump();
                 PlayCharacterSound(CharacterAudioType.Jump);
                 break;
             case "Dash":
+                animationController?.TriggerDash();
                 PlayCharacterSound(CharacterAudioType.Dash);
                 SpawnEffect(characterData.dashEffect);
                 break;
             case "Ultimate":
+                animationController?.TriggerUltimate();
                 SpawnUltimateVFX();
                 break;
             case "Trick":
+                animationController?.TriggerTrick();
                 // FIXED: Sync trick effects to other players
                 var opponent = FindOpponent();
                 if (opponent != null)
@@ -1276,6 +1335,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
                 }
                 break;
             case "Treat":
+                animationController?.TriggerTreat();
                 // FIXED: Sync treat effects to other players
                 SpawnTreatVFX();
                 break;
@@ -1580,7 +1640,11 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     public bool IsGrounded() => isGrounded;
     public bool IsDucking() => duckSystem?.IsDucking() ?? isDucking;
     public bool HasBall() => hasBall;
-    public void SetHasBall(bool value) => hasBall = value;
+    public void SetHasBall(bool value) 
+    { 
+        hasBall = value;
+        animationController?.SetHasBall(value);
+    }
     public bool IsLocalPlayer() => PhotonNetwork.OfflineMode || (photonView?.IsMine != false);
     public PlayerInputHandler GetInputHandler() => inputHandler;
     public void SetInputEnabled(bool enabled) => inputEnabled = enabled;
@@ -1599,6 +1663,10 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     public void OnSuccessfulCatch()
     {
         if (!IsLocalPlayer()) return;
+        
+        // Animation
+        animationController?.TriggerCatch();
+        
         AddAbilityCharge(0, 25f);
         AddAbilityCharge(1, 15f);
         AddAbilityCharge(2, 15f);
@@ -1611,6 +1679,57 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         AddAbilityCharge(1, 12f);
         AddAbilityCharge(2, 12f);
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ANIMATION SYSTEM INTEGRATION
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Update movement animations based on current movement state
+    /// FIXED: Inverts speed for player 2 (180° rotated) so animations play correctly
+    /// </summary>
+    void UpdateMovementAnimations()
+    {
+        if (animationController == null) return;
+
+        // Update states
+        animationController.SetGrounded(isGrounded);
+        animationController.SetHasBall(hasBall);
+        animationController.SetDucking(isDucking);
+
+        if (inputHandler != null)
+        {
+            float horizontal = inputHandler.GetHorizontal(); // -1 to 1
+
+            // Use signed speed: positive = right, negative = left
+            float signedSpeed = horizontal * GetEffectiveMoveSpeed();
+
+            // CRITICAL FIX: Invert speed for player 2 (right side player who is rotated 180°)
+            // When player 2 moves left (negative speed), they're actually moving "forward" relative to their rotation
+            // When player 2 moves right (positive speed), they're actually moving "backward" relative to their rotation
+            if (playerSide == 2 && !facingRight)
+            {
+                signedSpeed = -signedSpeed; // Flip the sign for rotated player
+
+                if (debugMode && Mathf.Abs(horizontal) > 0.1f)
+                {
+                    Debug.Log($"[ANIM] Player 2 speed inverted: input={horizontal:F2}, original speed={horizontal * GetEffectiveMoveSpeed():F2}, inverted speed={signedSpeed:F2}");
+                }
+            }
+
+            animationController.SetSpeed(signedSpeed);
+        }
+        else
+        {
+            animationController.SetSpeed(0f);
+        }
+    }
+
+    /// <summary>
+    /// CharacterController reference for movement speed calculation
+    /// Fallback property if you want to use Unity's CharacterController
+    /// </summary>
+    private CharacterController CharacterController => GetComponent<CharacterController>();
 
     public void ResetForNewMatch()
     {

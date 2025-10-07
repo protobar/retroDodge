@@ -15,7 +15,7 @@ MonoBehaviour:
   characterName: Nova
   characterDescription: Fast and evasive
   characterIcon: {fileID: -1254451046, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
-  characterPrefab: {fileID: 45927926235480509, guid: 1992dc87c81c1c545b92d9058f393f3f,
+  characterPrefab: {fileID: 8167500664113679454, guid: ac6d0717d9c7db04c91c552004a3f5d6,
     type: 3}
   moveSpeed: 8
   jumpHeight: 15
@@ -28,9 +28,9 @@ MonoBehaviour:
   damageResistance: 1.2
   normalThrowDamage: 15
   jumpThrowDamage: 15
-  throwSpeedMultiplier: 2
+  throwSpeedMultiplier: 1.5
   throwAccuracy: 0.7
-  characterColor: {r: 0, g: 0.7490196, b: 1, a: 1}
+  characterColor: {r: 1, g: 1, b: 1, a: 1}
   dashEffect: {fileID: 2755417596474721463, guid: 133b20c48d371d94bb543a6b1fe5ed83,
     type: 3}
   ultimateActivationOffset: {x: 0, y: -3, z: 0}

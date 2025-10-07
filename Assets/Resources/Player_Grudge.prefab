@@ -41,7 +41,8 @@ Transform:
   m_LocalPosition: {x: -8.55, y: 6.32, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 7232469723467032042}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &8589221860151888211
@@ -191,8 +192,8 @@ MonoBehaviour:
   maxHealth: 100
   currentHealth: 100
   invulnerabilityDuration: 1
-  hurtSound: {fileID: 0}
-  deathSound: {fileID: 0}
+  hurtSound: {fileID: 8300000, guid: 7d18b02078b591646b900c0f868a572b, type: 3}
+  deathSound: {fileID: 8300000, guid: 57a31d5b028d73343839a40480129fa1, type: 3}
   invulnerabilitySound: {fileID: 0}
   damageDealt: 0
   damageTaken: 0
@@ -256,6 +257,7 @@ MonoBehaviour:
   - {fileID: 2795373992541480716}
   - {fileID: 1504208963714581354}
   - {fileID: 7411436999334466731}
+  - {fileID: 275289898229416672}
   sceneViewId: 0
   InstantiationId: 0
   isRuntimeInstantiated: 0
@@ -432,3 +434,34 @@ MonoBehaviour:
   damageInterval: 1
   afkDamage: 5
   positionThreshold: 0.5
+--- !u!1 &4008633970154218842
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 7232469723467032042}
+  m_Layer: 8
+  m_Name: mixamorig:RightHand
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &7232469723467032042
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4008633970154218842}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.633, y: 0, z: -0.07}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 6930237305721880653}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}

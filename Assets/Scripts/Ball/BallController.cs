@@ -16,6 +16,13 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     [SerializeField] private float bounceMultiplier = 0.6f;
     private bool lastOwnershipState = false;
 
+    [Header("2.5D Game Settings")]
+    [SerializeField] private bool lock2DMovement = true;
+    [SerializeField] private float fixedZPosition = 0f; // The Z position to lock the ball to
+    [SerializeField] private bool compensateHandZOffset = true;
+    [SerializeField] private bool lockZOnThrow = true;
+    [SerializeField] private bool lockZWhenFree = true;
+
     [Header("Ball Hold Timer")]
     [SerializeField] private float maxHoldTime = 5f;
     [SerializeField] private float warningStartTime = 3f;
@@ -31,9 +38,12 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     [SerializeField] private AudioClip dangerSound;
     [SerializeField] private AudioClip corruptionSound;
 
-    [Header("Ball Position")]
-    [SerializeField] private Vector3 holdOffset = new Vector3(0.5f, 1.5f, 0f);
-    [SerializeField] private float holdFollowSpeed = 10f;
+    [Header("Ball Position - UPDATED")]
+    [SerializeField] private bool useHandBoneAttachment = true;
+    [SerializeField] private string rightHandBoneName = "mixamorig:RightHand";
+    [SerializeField] private Vector3 handBoneOffset = new Vector3(0f, 0f, 0f); // Fine-tune if needed
+    [SerializeField] private float handFollowSpeed = 20f; // Faster follow for hand attachment
+    private Transform rightHandBone; // Cache the bone transform
 
     [Header("Arena Bounds")]
     [SerializeField] private float arenaLeftBound = -15f;
@@ -99,6 +109,8 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     private Transform targetOpponent;
     private Color originalBallColor;
 
+    public bool debugMode = false;
+
     // Ground detection
     [SerializeField] private LayerMask groundLayer = 1;
     [SerializeField] private float groundCheckDistance = 0.6f;
@@ -144,6 +156,13 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             originalBallColor = ballRenderer.material.color;
         }
 
+        // NEW: Initialize scaling system reference
+        if (CharacterScaleManager.Instance == null)
+        {
+            GameObject scaleManager = new GameObject("CharacterScaleManager");
+            scaleManager.AddComponent<CharacterScaleManager>();
+        }
+
         SetBallState(BallState.Free);
     }
 
@@ -154,6 +173,12 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         {
             HandleBallLogic();
             UpdateVisuals();
+
+            if (lock2DMovement)
+            {
+                ForceZLock();
+            }
+
             return;
         }
 
@@ -174,15 +199,20 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
         if (hasNetworkAuthority)
         {
-            // We own this ball - run full ball logic
             HandleBallLogic();
+
+            // NEW: Safety check - force Z lock every frame in 2.5D mode
+            if (lock2DMovement)
+            {
+                ForceZLock();
+            }
         }
         else
         {
-            // We don't own this ball - interpolate to network state
             InterpolateBallPosition();
             ApplyNetworkState();
         }
+
 
         // All clients handle visuals
         UpdateVisuals();
@@ -277,6 +307,16 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         }
 
         ballTransform.Translate(velocity * Time.deltaTime, Space.World);
+
+        // NEW: Lock Z position in 2.5D mode when free
+        if (lock2DMovement && lockZWhenFree)
+        {
+            Vector3 pos = ballTransform.position;
+            pos.z = fixedZPosition;
+            ballTransform.position = pos;
+            velocity.z = 0f; // Also zero out Z velocity
+        }
+
         CheckGrounded();
     }
 
@@ -284,8 +324,42 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     {
         if (holder != null)
         {
-            Vector3 holdPosition = holder.transform.position + holdOffset;
-            ballTransform.position = Vector3.Lerp(ballTransform.position, holdPosition, holdFollowSpeed * Time.deltaTime);
+            Vector3 holdPosition;
+
+            // Use bone attachment if enabled and bone is found
+            if (useHandBoneAttachment && rightHandBone != null)
+            {
+                holdPosition = rightHandBone.position + handBoneOffset;
+
+                // NEW: Compensate for hand bone Z offset in 2.5D game
+                if (lock2DMovement && compensateHandZOffset)
+                {
+                    holdPosition.z = fixedZPosition;
+                }
+
+                ballTransform.position = Vector3.Lerp(ballTransform.position, holdPosition, handFollowSpeed * Time.deltaTime);
+            }
+            else
+            {
+                // Fallback: Use scaled offset from CharacterScaleManager
+                if (CharacterScaleManager.Instance != null)
+                {
+                    holdPosition = holder.transform.position + CharacterScaleManager.Instance.GetHoldOffset();
+                }
+                else
+                {
+                    holdPosition = holder.transform.position + new Vector3(0.5f, 1.5f, 0f);
+                }
+
+                // NEW: Lock Z position in 2.5D mode
+                if (lock2DMovement)
+                {
+                    holdPosition.z = fixedZPosition;
+                }
+
+                ballTransform.position = Vector3.Lerp(ballTransform.position, holdPosition, 10f * Time.deltaTime);
+            }
+
             velocity = Vector3.zero;
         }
         else
@@ -294,16 +368,82 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         }
     }
 
+    // ADD this new method to find and cache the right hand bone:
+    Transform FindRightHandBone(PlayerCharacter character)
+    {
+        if (character == null) return null;
+
+        // Search for the right hand bone in character's hierarchy
+        Transform[] allTransforms = character.GetComponentsInChildren<Transform>();
+        foreach (Transform t in allTransforms)
+        {
+            if (t.name == rightHandBoneName)
+            {
+                if (debugMode)
+                {
+                    Debug.Log($"Found right hand bone: {t.name} on {character.name}");
+                }
+                return t;
+            }
+        }
+
+        // Fallback: try common variations
+        string[] commonHandNames = new string[]
+        {
+        "mixamorig:RightHand",
+        "RightHand",
+        "Right Hand",
+        "R_Hand",
+        "Bip01_R_Hand"
+        };
+
+        foreach (string handName in commonHandNames)
+        {
+            foreach (Transform t in allTransforms)
+            {
+                if (t.name.Contains(handName))
+                {
+                    if (debugMode)
+                    {
+                        Debug.Log($"Found right hand bone (variant): {t.name} on {character.name}");
+                    }
+                    return t;
+                }
+            }
+        }
+
+        Debug.LogWarning($"Could not find right hand bone on {character.name}. Searched for: {rightHandBoneName}");
+        return null;
+    }
+
     void HandleThrownBall()
     {
         if (homingEnabled && targetOpponent != null)
         {
             Vector3 directionToTarget = (targetOpponent.position - ballTransform.position).normalized;
+
+            // NEW: Lock Z direction in 2.5D mode
+            if (lock2DMovement)
+            {
+                directionToTarget.z = 0f;
+                directionToTarget.Normalize();
+            }
+
             velocity = Vector3.Slerp(velocity, directionToTarget * velocity.magnitude, 2f * Time.deltaTime);
         }
 
         CheckWallCollisions();
         ballTransform.Translate(velocity * Time.deltaTime, Space.World);
+
+        // NEW: Lock Z position in 2.5D mode during throw
+        if (lock2DMovement && lockZOnThrow)
+        {
+            Vector3 pos = ballTransform.position;
+            pos.z = fixedZPosition;
+            ballTransform.position = pos;
+            velocity.z = 0f; // Also zero out Z velocity
+        }
+
         CheckGrounded();
 
         if (isGrounded && velocity.y <= 0)
@@ -315,7 +455,6 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             }
         }
 
-        // FIXED: All clients check bounds, not just ball owner
         CheckArenaBounds();
     }
 
@@ -590,33 +729,56 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
         float distance = Vector3.Distance(ballTransform.position, networkPosition);
 
-        // FIXED: Improved interpolation with lag compensation
         if (distance > 10f)
         {
-            // Snap to network position if too far (likely teleportation)
-            ballTransform.position = networkPosition;
+            // Snap to network position if too far
+            Vector3 snapPos = networkPosition;
+
+            // NEW: Lock Z in 2.5D mode
+            if (lock2DMovement)
+            {
+                snapPos.z = fixedZPosition;
+            }
+
+            ballTransform.position = snapPos;
             velocity = networkVelocity;
+
+            // NEW: Lock Z velocity in 2.5D mode
+            if (lock2DMovement)
+            {
+                velocity.z = 0f;
+            }
         }
         else if (distance > 0.05f)
         {
-            // FIXED: Smoother interpolation with adaptive rates
             float adaptivePositionRate = positionLerpRate;
             float adaptiveVelocityRate = velocityLerpRate;
-            
-            // Increase interpolation speed for faster-moving balls
+
             if (networkVelocity.magnitude > 15f)
             {
                 adaptivePositionRate *= 1.5f;
                 adaptiveVelocityRate *= 1.2f;
             }
-            
-            // Use Lerp with rate-based factor (previous SmoothDamp was using seconds, causing very slow follow)
+
             float posT = Mathf.Clamp01(adaptivePositionRate * Time.deltaTime);
-            ballTransform.position = Vector3.Lerp(ballTransform.position, networkPosition, posT);
-            
-            // Smooth velocity changes
+            Vector3 targetPos = networkPosition;
+
+            // NEW: Lock Z in 2.5D mode
+            if (lock2DMovement)
+            {
+                targetPos.z = fixedZPosition;
+            }
+
+            ballTransform.position = Vector3.Lerp(ballTransform.position, targetPos, posT);
+
             float velT = Mathf.Clamp01(adaptiveVelocityRate * Time.deltaTime);
             velocity = Vector3.Lerp(velocity, networkVelocity, velT);
+
+            // NEW: Lock Z velocity in 2.5D mode
+            if (lock2DMovement)
+            {
+                velocity.z = 0f;
+            }
         }
     }
 
@@ -715,14 +877,18 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         Debug.Log($"⚽ === BALLCONTROLLER PICKUP START === {character.name}");
         Debug.Log($"[PICKUP DEBUG] state:{currentState} hasAuthority:{hasNetworkAuthority} offline:{PhotonNetwork.OfflineMode}");
 
-        Debug.Log($"🔍 Ball State Check:");
-        Debug.Log($"  - Current State: {currentState}");
-        Debug.Log($"  - Is Free: {currentState == BallState.Free}");
-
         if (currentState != BallState.Free)
         {
             Debug.LogWarning($"❌ Ball not free - current state: {currentState}");
             return false;
+        }
+
+        // NEW: Use CharacterScaleManager for distance check
+        float pickupRange = this.pickupRange;
+        if (CharacterScaleManager.Instance != null)
+        {
+            // Scale pickup range with character size
+            pickupRange *= CharacterScaleManager.Instance.GetScaleFactor();
         }
 
         float distance = Vector3.Distance(ballTransform.position, character.transform.position);
@@ -732,21 +898,15 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         {
             PhotonView characterView = character.GetComponent<PhotonView>();
 
-            Debug.Log($"📡 BallController Network Analysis:");
-            Debug.Log($"  - Ball hasNetworkAuthority: {hasNetworkAuthority}");
-            Debug.Log($"  - Ball photonView.IsMine: {photonView.IsMine}");
-            Debug.Log($"  - Ball Owner: {photonView.Owner?.NickName ?? "NULL"}");
-
-            if (characterView != null)
-            {
-                Debug.Log($"  - Character ViewID: {characterView.ViewID}");
-                Debug.Log($"  - Character IsMine: {characterView.IsMine}");
-                Debug.Log($"  - Character Owner: {characterView.Owner?.NickName ?? "NULL"}");
-            }
+            // ... existing network authority checks ...
 
             if (PhotonNetwork.OfflineMode)
             {
                 holder = character;
+
+                // NEW: Find and cache right hand bone
+                rightHandBone = FindRightHandBone(character);
+
                 SetBallState(BallState.Held);
                 character.SetHasBall(true);
                 ballHoldStartTime = Time.time;
@@ -756,21 +916,17 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             }
             else if (characterView != null && characterView.IsMine)
             {
-                Debug.Log($"✅ BallController: This is MY character");
-                Debug.Log($"🔐 Authority Check: hasNetworkAuthority = {hasNetworkAuthority}");
-
                 if (hasNetworkAuthority)
                 {
-                    Debug.Log($"✅ BallController: We have network authority - executing pickup");
-
-                    // Execute pickup
                     holder = character;
+
+                    // NEW: Find and cache right hand bone
+                    rightHandBone = FindRightHandBone(character);
+
                     SetBallState(BallState.Held);
                     character.SetHasBall(true);
                     ballHoldStartTime = Time.time;
                     ResetHoldTimer();
-
-                    // FIXED: No need for RPC - OnPhotonSerializeView handles sync
                     Debug.Log($"🎉 {character.name} successfully picked up ball!");
                     return true;
                 }
@@ -782,26 +938,18 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             }
             else if (hasNetworkAuthority && (characterView == null || !characterView.IsMine))
             {
-                Debug.Log($"🎮 BallController: Authority holder processing remote pickup");
-
                 holder = character;
+
+                // NEW: Find and cache right hand bone
+                rightHandBone = FindRightHandBone(character);
+
                 SetBallState(BallState.Held);
                 character.SetHasBall(true);
                 ballHoldStartTime = Time.time;
                 ResetHoldTimer();
-
-                // FIXED: No need for RPC - OnPhotonSerializeView handles sync
                 Debug.Log($"🎉 Remote pickup successful for {character.name}");
                 return true;
             }
-            else
-            {
-                Debug.LogWarning($"❌ BallController: No authority and not my character");
-            }
-        }
-        else
-        {
-            Debug.LogWarning($"❌ BallController: Distance too far: {distance:F2} > {pickupRange}");
         }
 
         Debug.Log($"⚽ === BALLCONTROLLER PICKUP END === FAILED");
@@ -838,18 +986,16 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         Debug.Log($"  - Direction: {direction}");
         Debug.Log($"  - Power: {power}");
 
-        // FIXED: For ultimate abilities, we don't need to check holder or authority
-        // Just set the ball to thrown state and apply velocity
-
         StopHoldTimer();
 
-        // FIXED: Set thrower to the holder if not set
+        // Clear hand bone reference when throwing
+        rightHandBone = null;
+
         if (thrower == null && holder != null)
         {
             thrower = holder;
         }
-        
-        // If still null, find the correct player for offline mode
+
         if (thrower == null)
         {
             var players = FindObjectsOfType<PlayerCharacter>();
@@ -857,7 +1003,6 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
             {
                 if (PhotonNetwork.OfflineMode)
                 {
-                    // In offline mode, use the player who has the ball
                     if (player.HasBall())
                     {
                         thrower = player;
@@ -882,34 +1027,58 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
         if (targetOpponent != null)
         {
-            // IMPROVED: Lead targeting with prediction
-            Vector3 targetPos = CalculateLeadTarget(targetOpponent);
-            throwDirection = (targetPos - ballTransform.position).normalized;
+            Vector3 targetPos;
+            if (CharacterScaleManager.Instance != null)
+            {
+                targetPos = CharacterScaleManager.Instance.GetCharacterTargetPosition(targetOpponent);
+                throwDirection = CharacterScaleManager.Instance.CalculateArcDirection(ballTransform.position, targetPos);
+            }
+            else
+            {
+                targetPos = targetOpponent.position + Vector3.up * 2.5f;
+                throwDirection = (targetPos - ballTransform.position).normalized;
+                throwDirection.y += 0.2f;
+                throwDirection.Normalize();
+            }
+
+            Debug.Log($"🎯 Targeting: {targetOpponent.name} at {targetPos}");
         }
 
-        // FIXED: Set velocity and state
+        // NEW: Lock Z direction in 2.5D mode
+        if (lock2DMovement)
+        {
+            throwDirection.z = 0f;
+            throwDirection.Normalize();
+            Debug.Log($"🔒 Z-axis locked for 2.5D gameplay");
+        }
+
         velocity = throwDirection * currentThrowSpeed * power;
+
+        // NEW: Ensure Z velocity is zero in 2.5D mode
+        if (lock2DMovement)
+        {
+            velocity.z = 0f;
+        }
+
         SetBallState(BallState.Thrown);
 
-        Debug.Log($"🚀 === BALL THROW INTERNAL COMPLETE ===");
+        Debug.Log($"🚀 === BALL THROW COMPLETE ===");
         Debug.Log($"  - New State: {currentState}");
         Debug.Log($"  - Velocity: {velocity}");
         Debug.Log($"  - Speed: {currentThrowSpeed}");
-
-        // FIXED: No need for RPC - OnPhotonSerializeView handles sync
-
-        Debug.Log($"🚀 === BALL THROW COMPLETE ===");
     }
 
     public void ResetBall()
     {
-        Vector3 spawnPosition = new Vector3(0, 2f, 0);
+        Vector3 spawnPosition = new Vector3(0, 2f, fixedZPosition); // NEW: Use fixedZPosition
         ballTransform.position = spawnPosition;
         velocity = Vector3.zero;
         currentWallBounces = 0;
         usedRoofBounces = 0;
 
         StopHoldTimer();
+
+        rightHandBone = null;
 
         if (holder != null)
         {
@@ -1039,23 +1208,32 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         }
         return null;
     }
-    
+
     Vector3 CalculateLeadTarget(Transform target)
     {
         if (target == null) return Vector3.zero;
-        
-        // Get target's current position and velocity
-        Vector3 targetPos = target.position;
+
+        Vector3 targetPos;
+        if (CharacterScaleManager.Instance != null)
+        {
+            targetPos = CharacterScaleManager.Instance.GetCharacterTargetPosition(target);
+        }
+        else
+        {
+            targetPos = target.position + Vector3.up * 2.5f;
+        }
+
+        // NEW: Lock Z in 2.5D mode
+        if (lock2DMovement)
+        {
+            targetPos.z = fixedZPosition;
+        }
+
         Vector3 targetVelocity = Vector3.zero;
-        
-        // Try to get player character for movement data
+
         PlayerCharacter targetPlayer = target.GetComponent<PlayerCharacter>();
         if (targetPlayer != null)
         {
-            // Estimate velocity from transform movement (simple approach)
-            Vector3 currentPos = target.position;
-            
-            // Use a simple prediction based on movement direction
             var inputHandler = targetPlayer.GetInputHandler();
             if (inputHandler != null)
             {
@@ -1068,27 +1246,39 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
                 }
             }
         }
-        
-        // Calculate interception point
+
         float ballSpeed = currentThrowSpeed;
         float timeToTarget = Vector3.Distance(ballTransform.position, targetPos) / ballSpeed;
-        
-        // Predict where target will be
+
         Vector3 predictedPos = targetPos + (targetVelocity * timeToTarget);
-        
-        // Add some inaccuracy for fairness (based on difficulty if AI is throwing)
+
+        // NEW: Lock Z in 2.5D mode
+        if (lock2DMovement)
+        {
+            predictedPos.z = fixedZPosition;
+        }
+
         if (thrower != null)
         {
             var aiBrain = thrower.GetComponent<RetroDodge.AIControllerBrain>();
             if (aiBrain != null)
             {
-                // Add AI-specific inaccuracy
-                float inaccuracy = UnityEngine.Random.Range(-1f, 1f) * 2f; // 2 units max error
+                float inaccuracy = UnityEngine.Random.Range(-1f, 1f) * 2f;
                 predictedPos.x += inaccuracy;
             }
         }
-        
+
         return predictedPos;
+    }
+
+    public void ForceZLock()
+    {
+        if (!lock2DMovement) return;
+
+        Vector3 pos = ballTransform.position;
+        pos.z = fixedZPosition;
+        ballTransform.position = pos;
+        velocity.z = 0f;
     }
 
     void CheckGrounded()

@@ -15,7 +15,7 @@ MonoBehaviour:
   characterName: Echo
   characterDescription: Trickster
   characterIcon: {fileID: -1525437889, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
-  characterPrefab: {fileID: 3775798883431776970, guid: 936d3a2bc075a8649bb2cfd3aa1c78e0,
+  characterPrefab: {fileID: 84948438152551402, guid: 355cb54c60ca3ea4686bfba56f3df327,
     type: 3}
   moveSpeed: 10
   jumpHeight: 12
@@ -28,9 +28,9 @@ MonoBehaviour:
   damageResistance: 1
   normalThrowDamage: 18
   jumpThrowDamage: 15
-  throwSpeedMultiplier: 1
+  throwSpeedMultiplier: 1.5
   throwAccuracy: 1
-  characterColor: {r: 1, g: 0.84313726, b: 0, a: 1}
+  characterColor: {r: 1, g: 1, b: 1, a: 1}
   dashEffect: {fileID: 0}
   ultimateActivationOffset: {x: 0, y: -1.5, z: 0}
   trickEffectOffset: {x: 0, y: 1.5, z: 0}

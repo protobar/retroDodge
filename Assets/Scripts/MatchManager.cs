@@ -478,6 +478,8 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         StartRound(1);
     }
 
+    // REPLACE the entire SpawnOfflinePlayers() method in MatchManager.cs with this:
+
     IEnumerator SpawnOfflinePlayers()
     {
         playersSpawned = true;
@@ -509,8 +511,8 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         }
         TrackSpawnedPlayer(p1);
 
-        // AI player on right
-        GameObject p2 = Instantiate(aiChar.characterPrefab, p2Pos, Quaternion.identity);
+        // AI player on right - FIXED: Spawn with 180° rotation
+        GameObject p2 = Instantiate(aiChar.characterPrefab, p2Pos, Quaternion.Euler(0, 180f, 0));
         var p2PC = p2.GetComponent<PlayerCharacter>() ?? p2.GetComponentInChildren<PlayerCharacter>();
         if (p2PC != null)
         {
@@ -524,7 +526,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         brain.SetDifficulty(difficulty);
 
         // Disable network flags
-        foreach (var pc in new []{ p1PC, p2PC })
+        foreach (var pc in new[] { p1PC, p2PC })
         {
             if (pc != null)
             {
@@ -540,17 +542,23 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             p1PC.SetPlayerSide(1);
             var r = p1PC.GetComponent<ArenaMovementRestrictor>();
             if (r != null) r.SetPlayerSide(ArenaMovementRestrictor.PlayerSide.Left);
+
+            Debug.Log($"✅ Player 1 spawned at {p1Pos}, rotation: {p1.transform.rotation.eulerAngles.y}°");
         }
         if (p2PC != null)
         {
             p2PC.SetPlayerSide(2);
             var r = p2PC.GetComponent<ArenaMovementRestrictor>();
             if (r != null) r.SetPlayerSide(ArenaMovementRestrictor.PlayerSide.Right);
+
+            // CRITICAL FIX: Force 180° rotation on AI player
+            p2.transform.rotation = Quaternion.Euler(0, 180f, 0);
+
+            Debug.Log($"✅ AI Player spawned at {p2Pos}, rotation: {p2.transform.rotation.eulerAngles.y}°");
         }
 
         // Ensure a BallManager exists and spawns a ball in OfflineMode
         var ballManager = FindObjectOfType<BallManager>();
-        // Do not auto-create BallManager here because prefab references would be missing
 
         yield return null;
     }
@@ -636,33 +644,53 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         Vector3 spawnPosition = GetSpawnPosition();
         spawnPosition.y = Mathf.Max(spawnPosition.y, 0.5f);
 
-        Debug.Log($"[SPAWN] {selectedCharacter.characterName} at {spawnPosition} for Actor {PhotonNetwork.LocalPlayer.ActorNumber}");
+        // FIXED: Determine rotation based on spawn side
+        // Player 1 (left side) = 0° rotation (faces right)
+        // Player 2 (right side) = 180° rotation (faces left)
+        Quaternion spawnRotation = Quaternion.identity;
+        int myActorNumber = PhotonNetwork.LocalPlayer.ActorNumber;
+
+        // Determine if this is player 2 (right side)
+        bool isPlayer2 = myActorNumber != 1 && PhotonNetwork.PlayerList[0].ActorNumber != myActorNumber;
+
+        if (isPlayer2)
+        {
+            spawnRotation = Quaternion.Euler(0, 180f, 0);
+            Debug.Log($"[SPAWN] Player 2 detected - spawning with 180° rotation");
+        }
+        else
+        {
+            Debug.Log($"[SPAWN] Player 1 detected - spawning with 0° rotation");
+        }
+
+        Debug.Log($"[SPAWN] {selectedCharacter.characterName} at {spawnPosition} with rotation {spawnRotation.eulerAngles.y}° for Actor {myActorNumber}");
 
         // Store character data in player properties BEFORE spawning
         StorePlayerCharacterData(selectedCharacter, selectedCharacterIndex);
 
-        // Spawn player
+        // Spawn player with correct rotation
         GameObject playerObj = PhotonNetwork.Instantiate(
             selectedCharacter.characterPrefab.name,
             spawnPosition,
-            Quaternion.identity
+            spawnRotation  // FIXED: Use calculated rotation instead of Quaternion.identity
         );
 
         PlayerCharacter playerCharacter = playerObj.GetComponent<PlayerCharacter>();
         if (playerCharacter != null)
         {
-            // Load character data immediately - NO COROUTINES, NO DELAYS
+            // Load character data immediately
             playerCharacter.LoadCharacter(selectedCharacter);
 
-            // FIXED: Network sync immediately
+            // FIXED: Network sync with rotation info
             photonView.RPC("ApplyCharacterDataToPlayer", RpcTarget.All,
                 playerObj.GetComponent<PhotonView>().ViewID,
-                selectedCharacterIndex);
+                selectedCharacterIndex,
+                isPlayer2); // Pass player side info
 
             // Track this player
             TrackSpawnedPlayer(playerObj);
 
-            Debug.Log($"[SPAWN SUCCESS] {selectedCharacter.characterName} ready with color {selectedCharacter.characterColor}");
+            Debug.Log($"[SPAWN SUCCESS] {selectedCharacter.characterName} ready with rotation {spawnRotation.eulerAngles.y}°");
         }
 
         if (isInitialSpawn)
@@ -698,7 +726,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     /// FIXED: Apply character data across network - no position changes
     /// </summary>
     [PunRPC]
-    void ApplyCharacterDataToPlayer(int viewID, int characterIndex)
+    void ApplyCharacterDataToPlayer(int viewID, int characterIndex, bool isPlayer2)
     {
         PhotonView targetView = PhotonView.Find(viewID);
         if (targetView == null)
@@ -723,6 +751,13 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
         // Apply character data without position changes
         playerCharacter.LoadCharacter(characterData);
+
+        // FIXED: Force 180° rotation for player 2
+        if (isPlayer2)
+        {
+            playerCharacter.transform.rotation = Quaternion.Euler(0, 180f, 0);
+            Debug.Log($"[SYNC] Applied 180° rotation to Player 2 (ViewID: {viewID})");
+        }
 
         // Apply color from network properties if available
         if (targetView.Owner.CustomProperties.ContainsKey("CharacterColor_R"))
@@ -863,9 +898,10 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             {
                 // Reset position
                 Vector3 resetPosition;
+                int side = player.GetPlayerSide();
+
                 if (PhotonNetwork.OfflineMode)
                 {
-                    int side = player.GetPlayerSide();
                     resetPosition = side == 2 ? (player2SpawnPoint != null ? player2SpawnPoint.position : new Vector3(3f, 0.5f, 0f))
                                               : (player1SpawnPoint != null ? player1SpawnPoint.position : new Vector3(-3f, 0.5f, 0f));
                 }
@@ -874,7 +910,20 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
                     int actorNumber = player.photonView.Owner.ActorNumber;
                     resetPosition = GetSpawnPositionForActor(actorNumber);
                 }
+
                 player.transform.position = resetPosition;
+
+                // CRITICAL FIX: Reapply rotation based on side
+                if (side == 2)
+                {
+                    player.transform.rotation = Quaternion.Euler(0, 180f, 0);
+                    Debug.Log($"[ROUND RESET] Reapplied 180° rotation to Player 2");
+                }
+                else
+                {
+                    player.transform.rotation = Quaternion.Euler(0, 0f, 0);
+                    Debug.Log($"[ROUND RESET] Reapplied 0° rotation to Player 1");
+                }
 
                 // CRITICAL FIX: Reset player state first, THEN health
                 player.ResetPlayerState();
@@ -903,7 +952,7 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
                     }
                 }
 
-                Debug.Log($"[ROUND RESET] Player reset to {resetPosition} with health reset");
+                Debug.Log($"[ROUND RESET] Player reset to {resetPosition} with rotation {player.transform.rotation.eulerAngles.y}°");
             }
         }
 

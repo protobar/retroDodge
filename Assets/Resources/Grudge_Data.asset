@@ -15,7 +15,7 @@ MonoBehaviour:
   characterName: Grudge
   characterDescription: Slow but devastating
   characterIcon: {fileID: 1368295261, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
-  characterPrefab: {fileID: 990030946171809883, guid: f3a20aa0d33475d48b2e4de88dd3ccb8,
+  characterPrefab: {fileID: 583287291519579574, guid: c21e6b79dca229f479d9ff9a8925ec7b,
     type: 3}
   moveSpeed: 10
   jumpHeight: 12
@@ -30,7 +30,7 @@ MonoBehaviour:
   jumpThrowDamage: 15
   throwSpeedMultiplier: 1.5
   throwAccuracy: 1
-  characterColor: {r: 0.54509807, g: 0, b: 0, a: 1}
+  characterColor: {r: 1, g: 1, b: 1, a: 1}
   dashEffect: {fileID: 0}
   ultimateActivationOffset: {x: 0, y: -2.81, z: 0}
   trickEffectOffset: {x: 0, y: 1.5, z: 0}
