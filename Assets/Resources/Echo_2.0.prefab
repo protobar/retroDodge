@@ -208,10 +208,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d89f09a39ea917c4cb6e31240d6eda3c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  catchRange: 2
+  baseCatchRange: 2.5
   catchCooldown: 0.5
   debugMode: 0
-  catchIndicator: {fileID: 0}
+  useDynamicScaling: 1
+  catchHeightRatio: 0.5
+  catchIndicator: {fileID: 425042071368733433, guid: ac3f51b32e190ed4dacc74f235373ce0,
+    type: 3}
   perfectZoneColor: {r: 0, g: 1, b: 0, a: 1}
   goodZoneColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   missZoneColor: {r: 1, g: 0, b: 0, a: 1}
@@ -270,8 +273,8 @@ MonoBehaviour:
   maxHealth: 100
   currentHealth: 100
   invulnerabilityDuration: 1
-  hurtSound: {fileID: 0}
-  deathSound: {fileID: 0}
+  hurtSound: {fileID: 8300000, guid: 7d18b02078b591646b900c0f868a572b, type: 3}
+  deathSound: {fileID: 8300000, guid: 57a31d5b028d73343839a40480129fa1, type: 3}
   invulnerabilitySound: {fileID: 0}
   damageDealt: 0
   damageTaken: 0
@@ -315,6 +318,8 @@ MonoBehaviour:
     m_Bits: 1024
   groundCheckRadius: 0.06
   facingRight: 1
+  useAnimationEvents: 1
+  throwAnimationDelay: 0.3
   isGrounded: 0
   isDucking: 0
   hasBall: 0

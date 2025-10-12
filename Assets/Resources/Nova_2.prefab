@@ -438,7 +438,7 @@ SkinnedMeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 040a9d32da83772459ff1676505b29c0, type: 2}
+  - {fileID: 2100000, guid: 30c78c79e9bbd19488f209b32ff3706b, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -2450,7 +2450,7 @@ SkinnedMeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 17277fac80e5ef74db8af3b77d98b69d, type: 2}
+  - {fileID: 2100000, guid: e1adc99ec7df06b4998dc2408fe57434, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -4168,7 +4168,7 @@ SkinnedMeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 1569214e1c6b01947b3beb83cfc9a012, type: 2}
+  - {fileID: 2100000, guid: c7dc985e99e9a5543adaf983e7ff6250, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -4487,10 +4487,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d89f09a39ea917c4cb6e31240d6eda3c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  catchRange: 2
+  baseCatchRange: 2.5
   catchCooldown: 0.5
   debugMode: 0
-  catchIndicator: {fileID: 0}
+  useDynamicScaling: 1
+  catchHeightRatio: 0.5
+  catchIndicator: {fileID: 425042071368733433, guid: ac3f51b32e190ed4dacc74f235373ce0,
+    type: 3}
   perfectZoneColor: {r: 0, g: 1, b: 0, a: 1}
   goodZoneColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   missZoneColor: {r: 1, g: 0, b: 0, a: 1}
@@ -4549,8 +4552,8 @@ MonoBehaviour:
   maxHealth: 100
   currentHealth: 100
   invulnerabilityDuration: 1
-  hurtSound: {fileID: 0}
-  deathSound: {fileID: 0}
+  hurtSound: {fileID: 8300000, guid: 7d18b02078b591646b900c0f868a572b, type: 3}
+  deathSound: {fileID: 8300000, guid: 57a31d5b028d73343839a40480129fa1, type: 3}
   invulnerabilitySound: {fileID: 0}
   damageDealt: 0
   damageTaken: 0
@@ -4594,6 +4597,8 @@ MonoBehaviour:
     m_Bits: 1024
   groundCheckRadius: 0.06
   facingRight: 1
+  useAnimationEvents: 1
+  throwAnimationDelay: 0.3
   isGrounded: 0
   isDucking: 0
   hasBall: 0
@@ -4763,11 +4768,16 @@ MonoBehaviour:
   - Type: 9
     SynchronizeType: 1
     Name: Treat
+  - Type: 9
+    SynchronizeType: 0
+    Name: Hit
   m_SynchronizeLayers:
   - SynchronizeType: 1
     LayerIndex: 0
   - SynchronizeType: 1
     LayerIndex: 1
+  - SynchronizeType: 0
+    LayerIndex: 2
 --- !u!1 &8171328462876456026
 GameObject:
   m_ObjectHideFlags: 0

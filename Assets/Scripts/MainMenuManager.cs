@@ -22,6 +22,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     [SerializeField] private GameObject createRoomPanel;
     [SerializeField] private GameObject roomLobbyPanel;
     [SerializeField] private GameObject matchFoundPanel;
+    [SerializeField] private GameObject reconnectionPanel;
 
     [Header("=== MAIN MENU ===")]
     [SerializeField] private TMP_Text playerInfoText;
@@ -128,6 +129,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         {
             UpdateStatus("Reconnecting to servers...");
             PhotonNetwork.ConnectUsingSettings();
+            ShowReconnectingPanel();
         }
         else
         {
@@ -234,10 +236,16 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         ResetQuickMatchButton();
     }
 
+    private void ShowReconnectingPanel()
+    {
+        reconnectionPanel.SetActive(true);
+    }
+
     private void ShowMainMenu()
     {
         mainMenuPanel.SetActive(true);
         UpdatePlayerInfo();
+        reconnectionPanel.SetActive(false);
         UpdateStatus($"Welcome back, {PlayFabAuthManager.Instance.PlayerDisplayName}!");
     }
 

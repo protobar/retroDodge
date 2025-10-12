@@ -3,12 +3,11 @@ using PlayFab;
 using PlayFab.ClientModels;
 using Photon.Pun;
 using System;
-using System.Collections.Generic;
+using System.Collections;
 
 /// <summary>
-/// PlayFab Authentication Manager
-/// Handles all authentication methods: Email/Password, Guest, and Auto-login
-/// Maintains persistent data across scenes
+/// PlayFab Authentication Manager - FIXED VERSION
+/// Uses secure RememberMe pattern instead of storing passwords
 /// </summary>
 public class PlayFabAuthManager : MonoBehaviour
 {
@@ -56,30 +55,37 @@ public class PlayFabAuthManager : MonoBehaviour
     #endregion
 
     #region Events
-    public System.Action<bool, string> OnAuthenticationResult; // success, message
+    public System.Action<bool, string> OnAuthenticationResult;
     public System.Action OnLoginSuccess;
     public System.Action<string> OnLoginError;
     #endregion
 
-    #region Constants
+    #region Constants - UPDATED TO USE REMEMBERME PATTERN
+    private const string REMEMBER_ME_KEY = "PlayFab_RememberMe";
+    private const string REMEMBER_ME_ID_KEY = "PlayFab_RememberMeId";
     private const string EMAIL_KEY = "PlayFab_Email";
-    private const string PASSWORD_KEY = "PlayFab_Password";
     private const string DISPLAY_NAME_KEY = "PlayFab_DisplayName";
+    private const string AUTH_TYPE_KEY = "PlayFab_AuthType"; // "Email" or "Guest"
     private const string GUEST_ID_KEY = "PlayFab_GuestId";
     #endregion
 
+    private bool hasAttemptedAutoLogin = false;
+
     void Start()
     {
-        // Check for auto-login on startup
-        CheckStoredCredentials();
+        // Wait a frame to ensure PlayFab is fully initialized
+        StartCoroutine(DelayedAutoLogin());
     }
-    
-    void OnApplicationFocus(bool hasFocus)
+
+    private IEnumerator DelayedAutoLogin()
     {
-        // In Unity editor, OnApplicationFocus can help with auto-login timing
-        if (hasFocus && !IsAuthenticated)
+        // Wait for PlayFab to initialize
+        yield return new WaitForSeconds(0.5f);
+
+        if (!hasAttemptedAutoLogin)
         {
-            CheckStoredCredentials();
+            hasAttemptedAutoLogin = true;
+            AttemptAutoLogin();
         }
     }
 
@@ -88,7 +94,7 @@ public class PlayFabAuthManager : MonoBehaviour
     /// <summary>
     /// Login with email and password
     /// </summary>
-    public void LoginWithEmail(string email, string password)
+    public void LoginWithEmail(string email, string password, bool rememberMe = true)
     {
         if (!IsValidEmail(email))
         {
@@ -113,13 +119,20 @@ public class PlayFabAuthManager : MonoBehaviour
             }
         };
 
-        PlayFabClientAPI.LoginWithEmailAddress(request, OnLoginSuccessCallback, OnLoginErrorCallback);
+        // FIXED: Store email and rememberMe preference for use in callback
+        PlayerPrefs.SetString(EMAIL_KEY, email);
+        PlayerPrefs.SetInt(REMEMBER_ME_KEY, rememberMe ? 1 : 0);
+        PlayerPrefs.Save();
+
+        PlayFabClientAPI.LoginWithEmailAddress(request,
+            result => OnEmailLoginSuccess(result, rememberMe),
+            OnLoginErrorCallback);
     }
 
     /// <summary>
     /// Register new account with email and password
     /// </summary>
-    public void RegisterAccount(string displayName, string email, string password, string confirmPassword)
+    public void RegisterAccount(string displayName, string email, string password, string confirmPassword, bool rememberMe = true)
     {
         if (!IsValidEmail(email))
         {
@@ -145,8 +158,11 @@ public class PlayFabAuthManager : MonoBehaviour
             return;
         }
 
-        // Store credentials before registration so they're available in the callback
-        StoreCredentials(email, password, displayName);
+        // FIXED: Only store email and display name, NOT password
+        PlayerPrefs.SetString(EMAIL_KEY, email);
+        PlayerPrefs.SetString(DISPLAY_NAME_KEY, displayName);
+        PlayerPrefs.SetInt(REMEMBER_ME_KEY, rememberMe ? 1 : 0);
+        PlayerPrefs.Save();
 
         var request = new RegisterPlayFabUserRequest
         {
@@ -156,13 +172,15 @@ public class PlayFabAuthManager : MonoBehaviour
             RequireBothUsernameAndEmail = false
         };
 
-        PlayFabClientAPI.RegisterPlayFabUser(request, OnRegisterSuccessCallback, OnRegisterErrorCallback);
+        PlayFabClientAPI.RegisterPlayFabUser(request,
+            result => OnRegisterSuccess(result, rememberMe),
+            OnRegisterErrorCallback);
     }
 
     /// <summary>
     /// Login as guest using device ID
     /// </summary>
-    public void LoginAsGuest()
+    public void LoginAsGuest(bool rememberMe = true)
     {
         string deviceId = GetOrCreateDeviceId();
 
@@ -177,7 +195,12 @@ public class PlayFabAuthManager : MonoBehaviour
             }
         };
 
-        PlayFabClientAPI.LoginWithCustomID(request, OnGuestLoginSuccessCallback, OnLoginErrorCallback);
+        PlayerPrefs.SetInt(REMEMBER_ME_KEY, rememberMe ? 1 : 0);
+        PlayerPrefs.Save();
+
+        PlayFabClientAPI.LoginWithCustomID(request,
+            result => OnGuestLoginSuccess(result, rememberMe),
+            OnLoginErrorCallback);
     }
 
     /// <summary>
@@ -190,29 +213,22 @@ public class PlayFabAuthManager : MonoBehaviour
         Email = null;
         IsAuthenticated = false;
         IsGuest = false;
+        hasAttemptedAutoLogin = false;
 
-        // Clear stored credentials
+        // Clear ALL stored credentials
+        PlayerPrefs.DeleteKey(REMEMBER_ME_KEY);
+        PlayerPrefs.DeleteKey(REMEMBER_ME_ID_KEY);
         PlayerPrefs.DeleteKey(EMAIL_KEY);
-        PlayerPrefs.DeleteKey(PASSWORD_KEY);
         PlayerPrefs.DeleteKey(DISPLAY_NAME_KEY);
+        PlayerPrefs.DeleteKey(AUTH_TYPE_KEY);
         PlayerPrefs.DeleteKey(GUEST_ID_KEY);
         PlayerPrefs.Save();
 
         Debug.Log("[PLAYFAB AUTH] Logged out successfully");
     }
-    
-    /// <summary>
-    /// Manually trigger auto-login check (useful for debugging)
-    /// </summary>
-    [ContextMenu("Force Auto-Login Check")]
-    public void ForceAutoLoginCheck()
-    {
-        Debug.Log("[PLAYFAB AUTH] Force checking auto-login");
-        CheckStoredCredentials();
-    }
 
     /// <summary>
-    /// Send password reset email to user
+    /// Send password reset email
     /// </summary>
     public void SendPasswordResetEmail(string email)
     {
@@ -232,10 +248,216 @@ public class PlayFabAuthManager : MonoBehaviour
         PlayFabClientAPI.SendAccountRecoveryEmail(request, OnPasswordResetSuccess, OnPasswordResetError);
     }
 
+    #endregion
+
+    #region Auto-Login with RememberMe Pattern
+
+    /// <summary>
+    /// FIXED: Attempt auto-login using RememberMe pattern
+    /// </summary>
+    private void AttemptAutoLogin()
+    {
+        if (IsAuthenticated)
+        {
+            Debug.Log("[PLAYFAB AUTH] Already authenticated");
+            return;
+        }
+
+        bool rememberMe = PlayerPrefs.GetInt(REMEMBER_ME_KEY, 0) == 1;
+
+        if (!rememberMe)
+        {
+            Debug.Log("[PLAYFAB AUTH] RememberMe not enabled, skipping auto-login");
+            return;
+        }
+
+        string authType = PlayerPrefs.GetString(AUTH_TYPE_KEY, "");
+        string rememberMeId = PlayerPrefs.GetString(REMEMBER_ME_ID_KEY, "");
+
+        Debug.Log($"[PLAYFAB AUTH] Attempting auto-login - AuthType: {authType}, HasRememberMeId: {!string.IsNullOrEmpty(rememberMeId)}");
+
+        if (authType == "Email" && !string.IsNullOrEmpty(rememberMeId))
+        {
+            // Auto-login with RememberMe CustomID
+            LoginWithRememberMe(rememberMeId);
+        }
+        else if (authType == "Guest")
+        {
+            // Auto-login as guest
+            LoginAsGuest(true);
+        }
+        else
+        {
+            Debug.Log("[PLAYFAB AUTH] No valid auto-login credentials found");
+        }
+    }
+
+    /// <summary>
+    /// NEW: Login using RememberMe ID (secure alternative to storing password)
+    /// </summary>
+    private void LoginWithRememberMe(string rememberMeId)
+    {
+        Debug.Log("[PLAYFAB AUTH] Attempting RememberMe auto-login");
+
+        var request = new LoginWithCustomIDRequest
+        {
+            CustomId = rememberMeId,
+            CreateAccount = false, // Don't create if doesn't exist
+            InfoRequestParameters = new GetPlayerCombinedInfoRequestParams
+            {
+                GetPlayerProfile = true,
+                GetUserAccountInfo = true
+            }
+        };
+
+        PlayFabClientAPI.LoginWithCustomID(request, OnRememberMeLoginSuccess, OnRememberMeLoginError);
+    }
+
+    #endregion
+
+    #region Private Callbacks
+
+    /// <summary>
+    /// FIXED: Email login success with RememberMe linking
+    /// </summary>
+    private void OnEmailLoginSuccess(LoginResult result, bool rememberMe)
+    {
+        PlayFabId = result.PlayFabId;
+        PlayerDisplayName = result.InfoResultPayload?.PlayerProfile?.DisplayName ??
+                          "Player_" + PlayFabId.Substring(0, 8);
+        Email = PlayerPrefs.GetString(EMAIL_KEY, "");
+        IsAuthenticated = true;
+        IsGuest = false;
+
+        // FIXED: Link RememberMe ID if enabled
+        if (rememberMe)
+        {
+            string rememberMeId = GetOrCreateRememberMeId();
+            LinkRememberMeId(rememberMeId);
+
+            PlayerPrefs.SetString(AUTH_TYPE_KEY, "Email");
+            PlayerPrefs.SetString(DISPLAY_NAME_KEY, PlayerDisplayName);
+            PlayerPrefs.Save();
+        }
+
+        SyncToPhoton();
+        Debug.Log($"[PLAYFAB AUTH] Email login successful: {PlayerDisplayName} ({Email})");
+        OnAuthenticationResult?.Invoke(true, "Login successful!");
+        OnLoginSuccess?.Invoke();
+    }
+
+    /// <summary>
+    /// FIXED: Registration success with RememberMe linking
+    /// </summary>
+    private void OnRegisterSuccess(RegisterPlayFabUserResult result, bool rememberMe)
+    {
+        PlayFabId = result.PlayFabId;
+        PlayerDisplayName = PlayerPrefs.GetString(DISPLAY_NAME_KEY, "") ??
+                          result.Username ??
+                          "Player_" + PlayFabId.Substring(0, 8);
+        Email = PlayerPrefs.GetString(EMAIL_KEY, "");
+        IsAuthenticated = true;
+        IsGuest = false;
+
+        // FIXED: Link RememberMe ID if enabled
+        if (rememberMe)
+        {
+            string rememberMeId = GetOrCreateRememberMeId();
+            LinkRememberMeId(rememberMeId);
+
+            PlayerPrefs.SetString(AUTH_TYPE_KEY, "Email");
+            PlayerPrefs.Save();
+        }
+
+        SyncToPhoton();
+        Debug.Log($"[PLAYFAB AUTH] Registration successful: {PlayerDisplayName} ({Email})");
+        OnAuthenticationResult?.Invoke(true, "Account created successfully!");
+        OnLoginSuccess?.Invoke();
+    }
+
+    /// <summary>
+    /// FIXED: Guest login success
+    /// </summary>
+    private void OnGuestLoginSuccess(LoginResult result, bool rememberMe)
+    {
+        PlayFabId = result.PlayFabId;
+        PlayerDisplayName = result.InfoResultPayload?.PlayerProfile?.DisplayName ??
+                          "Guest_" + PlayFabId.Substring(0, 8);
+        Email = null;
+        IsAuthenticated = true;
+        IsGuest = true;
+
+        if (rememberMe)
+        {
+            PlayerPrefs.SetString(AUTH_TYPE_KEY, "Guest");
+            PlayerPrefs.Save();
+        }
+
+        SyncToPhoton();
+        Debug.Log($"[PLAYFAB AUTH] Guest login successful: {PlayerDisplayName}");
+        OnAuthenticationResult?.Invoke(true, "Guest login successful!");
+        OnLoginSuccess?.Invoke();
+    }
+
+    /// <summary>
+    /// NEW: RememberMe login success
+    /// </summary>
+    private void OnRememberMeLoginSuccess(LoginResult result)
+    {
+        PlayFabId = result.PlayFabId;
+        PlayerDisplayName = result.InfoResultPayload?.PlayerProfile?.DisplayName ??
+                          PlayerPrefs.GetString(DISPLAY_NAME_KEY, "Player");
+        Email = PlayerPrefs.GetString(EMAIL_KEY, "");
+        IsAuthenticated = true;
+        IsGuest = false;
+
+        SyncToPhoton();
+        Debug.Log($"[PLAYFAB AUTH] Auto-login successful: {PlayerDisplayName}");
+        OnLoginSuccess?.Invoke();
+    }
+
+    /// <summary>
+    /// NEW: RememberMe login error - clear stored data and require manual login
+    /// </summary>
+    private void OnRememberMeLoginError(PlayFabError error)
+    {
+        Debug.LogWarning($"[PLAYFAB AUTH] Auto-login failed: {error.ErrorMessage}");
+
+        // Clear RememberMe data if it's invalid
+        PlayerPrefs.DeleteKey(REMEMBER_ME_ID_KEY);
+        PlayerPrefs.DeleteKey(AUTH_TYPE_KEY);
+        PlayerPrefs.Save();
+
+        // Don't show error to user for auto-login failures
+        // Just silently fail and require manual login
+    }
+
+    private void OnLoginErrorCallback(PlayFabError error)
+    {
+        string errorMessage = GetErrorMessage(error);
+        Debug.LogWarning($"[PLAYFAB AUTH] Login failed: {errorMessage}");
+        OnAuthenticationResult?.Invoke(false, errorMessage);
+        OnLoginError?.Invoke(errorMessage);
+    }
+
+    private void OnRegisterErrorCallback(PlayFabError error)
+    {
+        string errorMessage = GetErrorMessage(error);
+        Debug.LogWarning($"[PLAYFAB AUTH] Registration failed: {errorMessage}");
+
+        // FIXED: Clear stored credentials on registration failure
+        PlayerPrefs.DeleteKey(EMAIL_KEY);
+        PlayerPrefs.DeleteKey(DISPLAY_NAME_KEY);
+        PlayerPrefs.Save();
+
+        OnAuthenticationResult?.Invoke(false, errorMessage);
+        OnLoginError?.Invoke(errorMessage);
+    }
+
     private void OnPasswordResetSuccess(SendAccountRecoveryEmailResult result)
     {
         Debug.Log("[PLAYFAB AUTH] Password reset email sent successfully");
-        OnAuthenticationResult?.Invoke(true, "Password reset email sent! Please check your inbox and follow the instructions to reset your password.");
+        OnAuthenticationResult?.Invoke(true, "Password reset email sent!");
     }
 
     private void OnPasswordResetError(PlayFabError error)
@@ -245,82 +467,60 @@ public class PlayFabAuthManager : MonoBehaviour
         OnAuthenticationResult?.Invoke(false, errorMessage);
     }
 
-    private string GetPasswordResetErrorMessage(PlayFabError error)
+    #endregion
+
+    #region RememberMe ID Management
+
+    /// <summary>
+    /// NEW: Get or create RememberMe ID (used instead of storing password)
+    /// </summary>
+    private string GetOrCreateRememberMeId()
     {
-        switch (error.Error)
+        string rememberMeId = PlayerPrefs.GetString(REMEMBER_ME_ID_KEY, "");
+
+        if (string.IsNullOrEmpty(rememberMeId))
         {
-            case PlayFabErrorCode.InvalidEmailAddress:
-                return "Please enter a valid email address";
-            case PlayFabErrorCode.EmailAddressNotAvailable:
-                return "No account found with this email address";
-            case PlayFabErrorCode.InvalidParams:
-                return "Invalid email address format";
-            case PlayFabErrorCode.AccountNotFound:
-                return "No account found with this email address";
-            case PlayFabErrorCode.InvalidTitleId:
-                return "Invalid game configuration";
-            default:
-                return $"Failed to send password reset email: {error.ErrorMessage}";
+            rememberMeId = "RM_" + System.Guid.NewGuid().ToString();
+            PlayerPrefs.SetString(REMEMBER_ME_ID_KEY, rememberMeId);
+            PlayerPrefs.Save();
+            Debug.Log($"[PLAYFAB AUTH] Created new RememberMe ID");
         }
+
+        return rememberMeId;
+    }
+
+    /// <summary>
+    /// NEW: Link RememberMe CustomID to the PlayFab account
+    /// </summary>
+    private void LinkRememberMeId(string rememberMeId)
+    {
+        var request = new LinkCustomIDRequest
+        {
+            CustomId = rememberMeId,
+            ForceLink = false // Don't overwrite existing links
+        };
+
+        PlayFabClientAPI.LinkCustomID(request,
+            result => {
+                Debug.Log("[PLAYFAB AUTH] RememberMe ID linked successfully");
+            },
+            error => {
+                // If already linked, that's fine
+                if (error.Error == PlayFabErrorCode.LinkedAccountAlreadyClaimed)
+                {
+                    Debug.Log("[PLAYFAB AUTH] RememberMe ID already linked");
+                }
+                else
+                {
+                    Debug.LogWarning($"[PLAYFAB AUTH] Failed to link RememberMe ID: {error.ErrorMessage}");
+                }
+            });
     }
 
     #endregion
 
-    #region Private Methods
+    #region Helper Methods
 
-    /// <summary>
-    /// Check for stored credentials and attempt auto-login
-    /// </summary>
-    private void CheckStoredCredentials()
-    {
-        // Don't attempt auto-login if already authenticated
-        if (IsAuthenticated)
-        {
-            Debug.Log("[PLAYFAB AUTH] Already authenticated, skipping auto-login");
-            return;
-        }
-        
-        string email = PlayerPrefs.GetString(EMAIL_KEY, "");
-        string password = PlayerPrefs.GetString(PASSWORD_KEY, "");
-        string guestId = PlayerPrefs.GetString(GUEST_ID_KEY, "");
-
-        Debug.Log($"[PLAYFAB AUTH] Checking stored credentials - Email: {(string.IsNullOrEmpty(email) ? "None" : "Found")}, Password: {(string.IsNullOrEmpty(password) ? "None" : "Found")}, Guest: {(string.IsNullOrEmpty(guestId) ? "None" : "Found")}");
-
-        if (!string.IsNullOrEmpty(email) && !string.IsNullOrEmpty(password))
-        {
-            Debug.Log("[PLAYFAB AUTH] Found stored credentials, attempting auto-login");
-            // Add a small delay to ensure PlayFab is ready
-            StartCoroutine(AutoLoginWithDelay(email, password));
-        }
-        else if (!string.IsNullOrEmpty(guestId))
-        {
-            Debug.Log("[PLAYFAB AUTH] Found guest ID, attempting guest login");
-            // Add a small delay to ensure PlayFab is ready
-            StartCoroutine(AutoGuestLoginWithDelay());
-        }
-        else
-        {
-            Debug.Log("[PLAYFAB AUTH] No stored credentials found");
-        }
-    }
-    
-    private System.Collections.IEnumerator AutoLoginWithDelay(string email, string password)
-    {
-        // Wait a frame to ensure PlayFab is ready
-        yield return null;
-        LoginWithEmail(email, password);
-    }
-    
-    private System.Collections.IEnumerator AutoGuestLoginWithDelay()
-    {
-        // Wait a frame to ensure PlayFab is ready
-        yield return null;
-        LoginAsGuest();
-    }
-
-    /// <summary>
-    /// Get or create unique device ID for guest login
-    /// </summary>
     private string GetOrCreateDeviceId()
     {
         string deviceId = PlayerPrefs.GetString(GUEST_ID_KEY, "");
@@ -339,9 +539,6 @@ public class PlayFabAuthManager : MonoBehaviour
         return deviceId;
     }
 
-    /// <summary>
-    /// Validate email format
-    /// </summary>
     private bool IsValidEmail(string email)
     {
         try
@@ -355,43 +552,20 @@ public class PlayFabAuthManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Validate password strength
-    /// </summary>
     private bool IsValidPassword(string password)
     {
         return !string.IsNullOrEmpty(password) && password.Length >= 6;
     }
 
-    /// <summary>
-    /// Store credentials for auto-login
-    /// </summary>
-    private void StoreCredentials(string email, string password, string displayName = "")
-    {
-        PlayerPrefs.SetString(EMAIL_KEY, email);
-        PlayerPrefs.SetString(PASSWORD_KEY, password);
-        if (!string.IsNullOrEmpty(displayName))
-        {
-            PlayerPrefs.SetString(DISPLAY_NAME_KEY, displayName);
-        }
-        PlayerPrefs.Save();
-    }
-
-    /// <summary>
-    /// Sync PlayFab display name to Photon nickname
-    /// </summary>
     private void SyncToPhoton()
     {
         if (!string.IsNullOrEmpty(PlayerDisplayName))
         {
             PhotonNetwork.NickName = PlayerDisplayName;
-            Debug.Log($"[PLAYFAB AUTH] Synced display name to Photon: {PlayerDisplayName}");
+            Debug.Log($"[PLAYFAB AUTH] Synced to Photon: {PlayerDisplayName}");
         }
     }
 
-    /// <summary>
-    /// Get user-friendly error message from PlayFab error
-    /// </summary>
     private string GetErrorMessage(PlayFabError error)
     {
         switch (error.Error)
@@ -399,110 +573,67 @@ public class PlayFabAuthManager : MonoBehaviour
             case PlayFabErrorCode.InvalidEmailAddress:
                 return "Please enter a valid email address";
             case PlayFabErrorCode.InvalidUsernameOrPassword:
-                return "Invalid email or password. Please check your credentials and try again";
+                return "Invalid email or password";
             case PlayFabErrorCode.EmailAddressNotAvailable:
-                return "This email is already registered. Try signing in instead";
+                return "This email is already registered";
             case PlayFabErrorCode.AccountNotFound:
-                return "No account found with this email. Please sign up first";
+                return "No account found with this email";
             case PlayFabErrorCode.InvalidPassword:
-                return "Password is incorrect. Please try again";
+                return "Password is incorrect";
             case PlayFabErrorCode.UsernameNotAvailable:
-                return "This display name is already taken. Please choose another";
-            case PlayFabErrorCode.InvalidParams:
-                return "Please check all fields and try again";
+                return "Display name is already taken";
             case PlayFabErrorCode.AccountBanned:
                 return "This account has been suspended";
             case PlayFabErrorCode.AccountDeleted:
                 return "This account has been deleted";
             default:
-                // For generic errors, provide a more user-friendly message
-                if (error.ErrorMessage.Contains("Invalid email address or password"))
-                {
-                    return "Invalid email or password. Please check your credentials and try again";
-                }
                 return "Authentication failed. Please try again";
+        }
+    }
+
+    private string GetPasswordResetErrorMessage(PlayFabError error)
+    {
+        switch (error.Error)
+        {
+            case PlayFabErrorCode.InvalidEmailAddress:
+            case PlayFabErrorCode.InvalidParams:
+                return "Please enter a valid email address";
+            case PlayFabErrorCode.EmailAddressNotAvailable:
+            case PlayFabErrorCode.AccountNotFound:
+                return "No account found with this email";
+            default:
+                return $"Failed to send password reset email: {error.ErrorMessage}";
         }
     }
 
     #endregion
 
-    #region PlayFab Callbacks
+    #region Debug Methods
 
-    private void OnLoginSuccessCallback(LoginResult result)
+    [ContextMenu("Force Auto-Login Check")]
+    public void ForceAutoLoginCheck()
     {
-        PlayFabId = result.PlayFabId;
-        PlayerDisplayName = result.InfoResultPayload?.PlayerProfile?.DisplayName ?? 
-                          "Player_" + PlayFabId.Substring(0, 8);
-        Email = PlayerPrefs.GetString(EMAIL_KEY, ""); // Get email from stored credentials
-        IsAuthenticated = true;
-        IsGuest = false;
-
-        // Store credentials for auto-login
-        StoreCredentials(Email, PlayerPrefs.GetString(PASSWORD_KEY, ""), PlayerDisplayName);
-
-        // Sync to Photon
-        SyncToPhoton();
-
-        Debug.Log($"[PLAYFAB AUTH] Login successful: {PlayerDisplayName} ({Email})");
-        OnAuthenticationResult?.Invoke(true, "Login successful!");
-        OnLoginSuccess?.Invoke();
+        hasAttemptedAutoLogin = false;
+        AttemptAutoLogin();
     }
 
-    private void OnRegisterSuccessCallback(RegisterPlayFabUserResult result)
+    [ContextMenu("Clear All Saved Data")]
+    public void ClearAllSavedData()
     {
-        PlayFabId = result.PlayFabId;
-        // For registration, we need to get the display name from the stored credentials
-        // since RegisterPlayFabUserResult doesn't include InfoResultPayload
-        string storedDisplayName = PlayerPrefs.GetString(DISPLAY_NAME_KEY, "");
-        PlayerDisplayName = !string.IsNullOrEmpty(storedDisplayName) ? storedDisplayName : 
-                          result.Username ?? 
-                          "Player_" + PlayFabId.Substring(0, 8);
-        Email = PlayerPrefs.GetString(EMAIL_KEY, ""); // Get email from stored credentials
-        IsAuthenticated = true;
-        IsGuest = false;
-
-        // Store credentials for auto-login
-        StoreCredentials(Email, PlayerPrefs.GetString(PASSWORD_KEY, ""), PlayerDisplayName);
-
-        // Sync to Photon
-        SyncToPhoton();
-
-        Debug.Log($"[PLAYFAB AUTH] Registration successful: {PlayerDisplayName} ({Email})");
-        OnAuthenticationResult?.Invoke(true, "Account created successfully!");
-        OnLoginSuccess?.Invoke();
+        Logout();
+        Debug.Log("[PLAYFAB AUTH] All saved data cleared");
     }
 
-    private void OnGuestLoginSuccessCallback(LoginResult result)
+    [ContextMenu("Debug Saved Credentials")]
+    public void DebugSavedCredentials()
     {
-        PlayFabId = result.PlayFabId;
-        PlayerDisplayName = result.InfoResultPayload?.PlayerProfile?.DisplayName ?? 
-                          "Guest_" + PlayFabId.Substring(0, 8);
-        Email = null;
-        IsAuthenticated = true;
-        IsGuest = true;
-
-        // Sync to Photon
-        SyncToPhoton();
-
-        Debug.Log($"[PLAYFAB AUTH] Guest login successful: {PlayerDisplayName}");
-        OnAuthenticationResult?.Invoke(true, "Guest login successful!");
-        OnLoginSuccess?.Invoke();
-    }
-
-    private void OnLoginErrorCallback(PlayFabError error)
-    {
-        string errorMessage = GetErrorMessage(error);
-        Debug.LogWarning($"[PLAYFAB AUTH] Login failed: {errorMessage}");
-        OnAuthenticationResult?.Invoke(false, errorMessage);
-        OnLoginError?.Invoke(errorMessage);
-    }
-
-    private void OnRegisterErrorCallback(PlayFabError error)
-    {
-        string errorMessage = GetErrorMessage(error);
-        Debug.LogWarning($"[PLAYFAB AUTH] Registration failed: {errorMessage}");
-        OnAuthenticationResult?.Invoke(false, errorMessage);
-        OnLoginError?.Invoke(errorMessage);
+        Debug.Log("=== SAVED CREDENTIALS DEBUG ===");
+        Debug.Log($"RememberMe: {PlayerPrefs.GetInt(REMEMBER_ME_KEY, 0)}");
+        Debug.Log($"RememberMeId: {PlayerPrefs.GetString(REMEMBER_ME_ID_KEY, "None")}");
+        Debug.Log($"Email: {PlayerPrefs.GetString(EMAIL_KEY, "None")}");
+        Debug.Log($"DisplayName: {PlayerPrefs.GetString(DISPLAY_NAME_KEY, "None")}");
+        Debug.Log($"AuthType: {PlayerPrefs.GetString(AUTH_TYPE_KEY, "None")}");
+        Debug.Log($"GuestId: {PlayerPrefs.GetString(GUEST_ID_KEY, "None")}");
     }
 
     #endregion

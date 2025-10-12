@@ -31,6 +31,7 @@ namespace RetroDodgeRumble.Animation
         private static readonly int ULTIMATE_HASH = Animator.StringToHash("Ultimate");
         private static readonly int TRICK_HASH = Animator.StringToHash("Trick");
         private static readonly int TREAT_HASH = Animator.StringToHash("Treat");
+        private static readonly int HIT_HASH = Animator.StringToHash("Hit");
 
         #endregion
 
@@ -127,6 +128,16 @@ namespace RetroDodgeRumble.Animation
             if (!animator) return;
             animator.SetTrigger(DOUBLE_JUMP_HASH);
         }
+
+        /// <summary>
+        /// Trigger hit/damaged animation when player takes damage
+        /// </summary>
+        public void TriggerHit()
+        {
+            if (!animator) return;
+            animator.SetTrigger(HIT_HASH);
+        }
+
 
         /// <summary>
         /// Trigger dash animation

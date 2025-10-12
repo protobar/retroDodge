@@ -25,6 +25,13 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     [SerializeField] private bool facingRight = true;
     private int playerSide = 0; // 0 = not set, 1 = left player, 2 = right player
 
+    [Header("Animation Throw Settings")]
+    [SerializeField] private bool useAnimationEvents = true;
+    [SerializeField] private float throwAnimationDelay = 0.3f; // Fallback if no animation event
+    private bool ballThrowQueued = false;
+    private ThrowType queuedThrowType;
+    private int queuedDamage;
+
     // Core Components - cached once
     private PlayerInputHandler inputHandler;
     private CapsuleCollider characterCollider;
@@ -93,7 +100,8 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     public System.Action<float>[] OnAbilityChargeChanged = new System.Action<float>[3];
 
     // Constants
-    private const float GROUND_CHECK_DISTANCE = 0.1f;
+    private const float GROUND_CHECK_DISTANCE = 0.15f; // Distance to check below collider
+    private const float GROUND_STICK_FORCE = 2f; // Small downward force to stick to ground
     private const float PICKUP_RANGE = 1.2f;
     private const float VFX_SPAWN_HEIGHT = 1.5f;
 
@@ -206,19 +214,19 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     void Update()
     {
+        // FIXED: Check ground FIRST before any input or movement
+        CheckGrounded();
+
         // FIXED: Only process if character data is loaded
         if (characterData == null || (!IsLocalPlayer() && !isDataSyncComplete)) return;
 
-        if (PhotonNetwork.OfflineMode || photonView?.IsMine != false) // Local player or no network
+        if (PhotonNetwork.OfflineMode || photonView?.IsMine != false)
         {
             HandleInput();
-            CheckGrounded();
-            HandleMovement();
+            HandleMovement(); // Gravity is handled here
             HandleDucking();
             HandleBallInteraction();
             UpdateAbilityCharges();
-            
-            // OPTIMIZED: Update network optimization
             UpdateNetworkOptimization();
         }
         else
@@ -479,21 +487,38 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         float horizontal = inputHandler.GetHorizontal();
 
         // Horizontal movement using character data
-        if (horizontal != 0)
+        if (Mathf.Abs(horizontal) > 0.01f)
         {
             Vector3 moveDir = Vector3.right * horizontal * GetEffectiveMoveSpeed();
             characterTransform.position += moveDir * Time.deltaTime;
         }
 
-        // Gravity and vertical movement
+        // FIXED: Apply gravity ONLY if not grounded
         if (!isGrounded)
         {
+            // Standard gravity
             velocity.y -= 25f * Time.deltaTime;
+
+            // Clamp falling speed to prevent falling through ground
+            velocity.y = Mathf.Max(velocity.y, -50f); // Terminal velocity
         }
-        else if (velocity.y < 0)
+        else
         {
-            velocity.y = 0f;
-            hasDoubleJumped = false;
+            // FIXED: Stick to ground when grounded
+            if (velocity.y < 0)
+            {
+                velocity.y = -GROUND_STICK_FORCE; // Small downward force to stay on ground
+            }
+            else if (velocity.y > 0)
+            {
+                // Allow jumping upward
+                // Don't modify velocity.y here
+            }
+            else
+            {
+                // On ground, not jumping - zero velocity
+                velocity.y = 0f;
+            }
         }
 
         // Apply vertical movement
@@ -512,62 +537,108 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     void Jump()
     {
+        // FIXED: Don't manually set isGrounded here - let CheckGrounded handle it
         velocity.y = characterData.jumpHeight;
-        isGrounded = false;
-        
+
         // Animation
         animationController?.TriggerJump();
-        animationController?.SetGrounded(false);
-        
+        animationController?.SetGrounded(false); // Update animation immediately
+
         PlayCharacterSound(CharacterAudioType.Jump);
         SyncPlayerAction("Jump");
+
+        if (debugMode)
+        {
+            Debug.Log($"[JUMP] Executed jump - velocity.y set to {velocity.y}");
+        }
     }
 
     void DoubleJump()
     {
-        Debug.Log($"[DOUBLE JUMP] Attempting double jump - hasDoubleJumped: {hasDoubleJumped}, canDoubleJump: {characterData?.canDoubleJump}, isGrounded: {isGrounded}, velocity.y: {velocity.y}");
-        
-        // FIXED: More robust double jump conditions
-        if (hasDoubleJumped) 
+        Debug.Log($"[DOUBLE JUMP] Attempting double jump - hasDoubleJumped: {hasDoubleJumped}, canDoubleJump: {characterData?.canDoubleJump}, isGrounded: {isGrounded}");
+
+        // Validation checks
+        if (hasDoubleJumped)
         {
             Debug.Log($"[DOUBLE JUMP] Blocked - already double jumped");
             return;
         }
-        
+
         if (characterData == null || !characterData.canDoubleJump)
         {
             Debug.Log($"[DOUBLE JUMP] Blocked - character cannot double jump");
             return;
         }
-        
+
         if (isGrounded)
         {
-            Debug.Log($"[DOUBLE JUMP] Blocked - player is grounded, should use normal jump");
+            Debug.Log($"[DOUBLE JUMP] Blocked - player is grounded");
             return;
         }
-        
-        // FIXED: Check if player is actually in air (falling or rising)
-        if (velocity.y >= 0)
-        {
-            Debug.Log($"[DOUBLE JUMP] Blocked - player not falling (velocity.y: {velocity.y})");
-            return;
-        }
-        
+
+        // FIXED: Allow double jump when in air (removed velocity.y check)
         Debug.Log($"[DOUBLE JUMP] Executing double jump!");
         velocity.y = characterData.jumpHeight * 0.8f;
         hasDoubleJumped = true;
-        
+
         // Animation
         animationController?.TriggerDoubleJump();
-        
-        // FIXED: Sync double jump to other players
-        if (photonView.IsMine)
-        {
+
         PlayCharacterSound(CharacterAudioType.Jump);
-        SyncPlayerAction("DoubleJump");
-            // FIXED: Also sync the double jump state
+
+        // Sync to network
+        if (photonView != null && photonView.IsMine)
+        {
+            SyncPlayerAction("DoubleJump");
             photonView.RPC("SyncDoubleJumpState", RpcTarget.Others, hasDoubleJumped);
         }
+    }
+
+    /// <summary>
+    /// FIXED: Force ground check immediately after spawn/teleport
+    /// Call this after any position change that might affect ground state
+    /// </summary>
+    public void ForceGroundCheck()
+    {
+        // Wait one physics frame for colliders to settle
+        StartCoroutine(ForceGroundCheckCoroutine());
+    }
+
+    IEnumerator ForceGroundCheckCoroutine()
+    {
+        // Wait for physics to settle
+        yield return new WaitForFixedUpdate();
+
+        // Force ground check
+        CheckGrounded();
+
+        if (isGrounded)
+        {
+            // Snap to ground if we're close
+            if (characterCollider != null)
+            {
+                RaycastHit hit;
+                Vector3 origin = characterTransform.position + characterCollider.center;
+                float distance = characterCollider.height * 0.5f + 1f;
+
+                if (Physics.Raycast(origin, Vector3.down, out hit, distance, groundLayerMask))
+                {
+                    // Snap to ground surface
+                    float targetY = hit.point.y + (characterCollider.height * 0.5f) - characterCollider.center.y;
+                    characterTransform.position = new Vector3(
+                        characterTransform.position.x,
+                        targetY,
+                        characterTransform.position.z
+                    );
+
+                    velocity.y = 0f;
+
+                    Debug.Log($"[SPAWN] Snapped to ground at Y={targetY:F3}");
+                }
+            }
+        }
+
+        Debug.Log($"[SPAWN] Force ground check complete - isGrounded: {isGrounded}, Y: {characterTransform.position.y:F3}");
     }
 
     bool CanDash()
@@ -707,12 +778,73 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         if (!hasBall)
         {
             // Play animation but don't actually throw
-            PlayCharacterSound(CharacterAudioType.Throw); // Optional: fake throw sound
+            PlayCharacterSound(CharacterAudioType.Throw);
             return;
         }
 
         ThrowType throwType = isGrounded ? ThrowType.Normal : ThrowType.JumpThrow;
         int damage = characterData.GetThrowDamage(throwType);
+
+        // Queue the ball throw to happen at animation event
+        if (useAnimationEvents)
+        {
+            // Wait for animation event to call ExecuteBallThrow()
+            ballThrowQueued = true;
+            queuedThrowType = throwType;
+            queuedDamage = damage;
+
+            Debug.Log($"[THROW] Queued ball throw - waiting for animation event");
+
+            // Fallback: if animation event doesn't fire, throw after delay
+            StartCoroutine(ThrowBallFallback());
+        }
+        else
+        {
+            // Immediate throw (old behavior)
+            ExecuteBallThrow(throwType, damage);
+        }
+    }
+
+    /// <summary>
+    /// Called by Animation Event at the exact throw frame
+    /// </summary>
+    public void OnThrowAnimationEvent()
+    {
+        Debug.Log($"[ANIM EVENT] OnThrowAnimationEvent called - ballThrowQueued: {ballThrowQueued}, hasBall: {hasBall}");
+
+        if (ballThrowQueued && hasBall)
+        {
+            ExecuteBallThrow(queuedThrowType, queuedDamage);
+            ballThrowQueued = false;
+        }
+    }
+
+    /// <summary>
+    /// Fallback in case animation event doesn't fire
+    /// </summary>
+    IEnumerator ThrowBallFallback()
+    {
+        yield return new WaitForSeconds(throwAnimationDelay);
+
+        if (ballThrowQueued && hasBall)
+        {
+            Debug.LogWarning("[THROW] Animation event didn't fire, using fallback timing");
+            ExecuteBallThrow(queuedThrowType, queuedDamage);
+            ballThrowQueued = false;
+        }
+    }
+
+    /// <summary>
+    /// Extracted actual throw logic - called by animation event or fallback
+    /// </summary>
+    void ExecuteBallThrow(ThrowType throwType, int damage)
+    {
+        if (!hasBall)
+        {
+            Debug.LogWarning("[THROW] ExecuteBallThrow called but player doesn't have ball!");
+            return;
+        }
+
         Vector3 throwDirection = GetThrowDirection();
 
         SpawnThrowVFX(throwType);
@@ -728,14 +860,17 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         AddAbilityCharge(0, 15f);
         AddAbilityCharge(1, 10f);
         AddAbilityCharge(2, 10f);
+
+        Debug.Log($"[THROW] Ball thrown successfully! Type: {throwType}, Damage: {damage}");
     }
+
 
     // ══════════════════════════════════════════════════════════
     // FIXED ROUND RESET SYSTEM
     // ══════════════════════════════════════════════════════════
 
     /// <summary>
-    /// FIXED: Reset player state for round reset (called from MatchManager)
+    /// FIXED: Reset player state for round reset
     /// </summary>
     public void ResetPlayerState()
     {
@@ -749,12 +884,12 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         // Reset ducking state
         if (duckSystem != null)
         {
-            duckSystem.ResetDuckSystem(); // This handles everything including standing up
+            duckSystem.ResetDuckSystem();
         }
         else
         {
             isDucking = false;
-            ApplyDuckingCollider(); // Apply normal collider
+            ApplyDuckingCollider();
         }
 
         // Reset ball possession
@@ -771,20 +906,20 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         isSpeedBoostActive = false;
         isSlowSpeedActive = false;
         slowSpeedMultiplier = 1f;
-        originalMoveSpeed = -1f; // Reset to force recalculation
+        originalMoveSpeed = -1f;
 
         // Re-enable movement and input
         movementEnabled = true;
         inputEnabled = true;
 
-        // Reset health if needed (but don't full heal on round reset)
+        // Reset health if needed
         if (playerHealth != null && playerHealth.IsDead())
         {
             playerHealth.RevivePlayer();
         }
 
-        // Ensure proper ground state
-        CheckGroundedState();
+        // FIXED: Force ground check after reset
+        ForceGroundCheck();
 
         Debug.Log($"[RESET] Player state reset completed for {gameObject.name}");
     }
@@ -794,13 +929,8 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     /// </summary>
     void CheckGroundedState()
     {
-        if (characterCollider != null)
-        {
-            Vector3 capsuleBottom = characterTransform.position +
-                characterCollider.center - Vector3.up * (characterCollider.height * 0.5f);
-
-            isGrounded = Physics.CheckSphere(capsuleBottom, groundCheckRadius, groundLayerMask);
-        }
+        // This method is now redundant - use CheckGrounded() instead
+        CheckGrounded();
     }
 
     // ══════════════════════════════════════════════════════════
@@ -950,20 +1080,63 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         var ball = BallManager.Instance.GetCurrentBall();
         if (ball != null)
         {
+            if (useAnimationEvents)
+            {
+                // Queue ultimate throw for animation event
+                ballThrowQueued = true;
+                queuedThrowType = ThrowType.Ultimate;
+                queuedDamage = characterData.GetUltimateDamage();
+
+                Debug.Log($"[ULTIMATE] Queued ultimate throw - waiting for animation event");
+
+                StartCoroutine(ThrowBallFallback());
+            }
+            else
+            {
+                // Immediate ultimate throw (old behavior)
+                ExecuteUltimateThrow();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Called by Ultimate Animation Event
+    /// </summary>
+    public void OnUltimateThrowAnimationEvent()
+    {
+        Debug.Log($"[ANIM EVENT] OnUltimateThrowAnimationEvent called");
+
+        if (ballThrowQueued && hasBall)
+        {
+            ExecuteUltimateThrow();
+            ballThrowQueued = false;
+        }
+    }
+
+    /// <summary>
+    /// Execute the actual ultimate throw
+    /// </summary>
+    void ExecuteUltimateThrow()
+    {
+        if (!hasBall) return;
+
+        var ball = BallManager.Instance.GetCurrentBall();
+        if (ball != null)
+        {
             int damage = characterData.GetUltimateDamage();
             float speed = characterData.GetUltimateSpeed();
-            Vector3 throwDirection = GetThrowDirection(); // FIXED: Use proper direction
+            Vector3 throwDirection = GetThrowDirection();
 
-            // Enhanced power for airborne throws (jump ultimates)
             float powerMultiplier = isGrounded ? 1.5f : 2.0f;
 
             ball.SetThrowData(ThrowType.Ultimate, damage, speed);
             ball.ThrowBall(throwDirection, powerMultiplier);
-            SetHasBall(false); // FIXED: Set hasBall to false after throwing
+            SetHasBall(false);
 
-            // Screen shake (centralized through CameraShakeManager)
-            float shakeIntensity = characterData.GetPowerThrowScreenShake() * 1.5f; // More intense
+            float shakeIntensity = characterData.GetPowerThrowScreenShake() * 1.5f;
             CameraShakeManager.Instance.TriggerShake(shakeIntensity, 0.8f, $"PowerThrow_{characterData?.characterName ?? "Unknown"}");
+
+            Debug.Log($"[ULTIMATE] Ball thrown! Damage: {damage}, Speed: {speed}");
         }
     }
 
@@ -1533,6 +1706,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     // UTILITY METHODS
     // ══════════════════════════════════════════════════════════
 
+    /// <summary>
+    /// FIXED: Robust ground detection using multiple methods
+    /// </summary>
     void CheckGrounded()
     {
         if (characterCollider == null)
@@ -1541,29 +1717,86 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
             return;
         }
 
-        // Calculate check position at the bottom of the collider
-        Vector3 checkPos = characterTransform.position;
-        float colliderBottom = characterCollider.bounds.min.y;
-        checkPos.y = colliderBottom;
+        // FIXED: Calculate check position CORRECTLY
+        // Start from the center of the collider
+        Vector3 colliderCenter = characterTransform.position + characterCollider.center;
 
-        // Perform spherecast for more reliable ground detection
-        isGrounded = Physics.CheckSphere(checkPos, groundCheckRadius, groundLayerMask);
+        // Calculate the actual bottom of the capsule (local offset from center)
+        float halfHeight = characterCollider.height * 0.5f;
+        Vector3 capsuleBottom = colliderCenter - Vector3.up * halfHeight;
 
-        // Alternative: Use raycast with multiple points for better detection
-        if (!isGrounded)
+        // FIXED: Check slightly BELOW the collider bottom, not AT it
+        Vector3 checkPosition = capsuleBottom + Vector3.down * GROUND_CHECK_DISTANCE;
+
+        // Primary check: Sphere check at capsule bottom
+        bool sphereCheck = Physics.CheckSphere(
+            checkPosition,
+            groundCheckRadius,
+            groundLayerMask
+        );
+
+        // Secondary check: Raycast from center downward (more reliable for edges)
+        bool raycastCheck = Physics.Raycast(
+            colliderCenter,
+            Vector3.down,
+            halfHeight + GROUND_CHECK_DISTANCE * 2f,
+            groundLayerMask
+        );
+
+        // Tertiary check: Multiple raycasts at edges (catches narrow platforms)
+        bool edgeCheck = false;
+        if (!sphereCheck && !raycastCheck)
         {
-            // Check center
-            isGrounded = Physics.Raycast(checkPos, Vector3.down, GROUND_CHECK_DISTANCE, groundLayerMask);
-
-            // Check left and right edges if center fails
-            if (!isGrounded)
+            float radius = characterCollider.radius * 0.8f;
+            Vector3[] edgePoints = new Vector3[]
             {
-                Vector3 leftCheck = checkPos + Vector3.left * (characterCollider.radius * 0.8f);
-                Vector3 rightCheck = checkPos + Vector3.right * (characterCollider.radius * 0.8f);
+            capsuleBottom + Vector3.left * radius,
+            capsuleBottom + Vector3.right * radius,
+            capsuleBottom + Vector3.forward * radius,
+            capsuleBottom + Vector3.back * radius
+            };
 
-                isGrounded = Physics.Raycast(leftCheck, Vector3.down, GROUND_CHECK_DISTANCE, groundLayerMask) ||
-                           Physics.Raycast(rightCheck, Vector3.down, GROUND_CHECK_DISTANCE, groundLayerMask);
+            foreach (Vector3 edgePoint in edgePoints)
+            {
+                if (Physics.Raycast(edgePoint, Vector3.down, GROUND_CHECK_DISTANCE * 2f, groundLayerMask))
+                {
+                    edgeCheck = true;
+                    break;
+                }
             }
+        }
+
+        // Consider grounded if ANY check passes
+        bool wasGrounded = isGrounded;
+        isGrounded = sphereCheck || raycastCheck || edgeCheck;
+
+        // Debug visualization
+        if (debugMode && Time.frameCount % 60 == 0)
+        {
+            Debug.Log($"[GROUND] Sphere:{sphereCheck} Ray:{raycastCheck} Edge:{edgeCheck} => Grounded:{isGrounded} | Pos:{checkPosition.y:F3}");
+        }
+
+        // FIXED: Landing detection - reset double jump when landing
+        if (!wasGrounded && isGrounded)
+        {
+            hasDoubleJumped = false;
+
+            // Reset vertical velocity when landing
+            if (velocity.y < 0)
+            {
+                velocity.y = 0f;
+            }
+
+            if (debugMode)
+            {
+                Debug.Log($"[GROUND] Landed! Resetting double jump and velocity");
+            }
+        }
+
+        // FIXED: Update animations
+        if (animationController != null)
+        {
+            animationController.SetGrounded(isGrounded);
         }
     }
 

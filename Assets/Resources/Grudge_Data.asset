@@ -17,14 +17,14 @@ MonoBehaviour:
   characterIcon: {fileID: 1368295261, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
   characterPrefab: {fileID: 583287291519579574, guid: c21e6b79dca229f479d9ff9a8925ec7b,
     type: 3}
-  moveSpeed: 10
+  moveSpeed: 9
   jumpHeight: 12
   canDoubleJump: 0
   canDash: 0
   dashDistance: 3
   dashCooldown: 2
   dashDuration: 0.2
-  maxHealth: 150
+  maxHealth: 100
   damageResistance: 0.8
   normalThrowDamage: 20
   jumpThrowDamage: 15
@@ -63,7 +63,8 @@ MonoBehaviour:
     type: 3}
   ultimateImpactVFX: {fileID: 1543543649040506132, guid: 05465472d7c46a54f9c624a4aca1092c,
     type: 3}
-  ultimateActivationSound: {fileID: 0}
+  ultimateActivationSound: {fileID: 8300000, guid: a120bf66f29fc7a45bd44c6daf629433,
+    type: 3}
   ultimateImpactSound: {fileID: 0}
   powerThrowDamage: 35
   powerThrowSpeed: 30
@@ -80,28 +81,30 @@ MonoBehaviour:
   curveballAmplitude: 3
   curveballFrequency: 4
   curveballDuration: 2
-  ultimateChargeRequired: 50
-  ultimateChargeRate: 3
+  ultimateChargeRequired: 200
+  ultimateChargeRate: 1.5
   trickType: 2
   trickEffectVFX: {fileID: 154672, guid: 5dabf78823224e146aff88a3e9452a63, type: 3}
-  trickActivationSound: {fileID: 0}
+  trickActivationSound: {fileID: 8300000, guid: a20fce45ea96c1949b8c9bc8ad7d056b,
+    type: 3}
   slowSpeedMultiplier: 0.3
   slowSpeedDuration: 4
   freezeDuration: 2.5
-  instantDamageAmount: 15
-  trickChargeRequired: 30
-  trickChargeRate: 3
+  instantDamageAmount: 12
+  trickChargeRequired: 100
+  trickChargeRate: 1.5
   treatType: 2
   treatEffectVFX: {fileID: 3386043687460178344, guid: 7e87589c16a1ac44b94f921ab38fa699,
     type: 3}
-  treatActivationSound: {fileID: 8300000, guid: 459917b52688dc34096745c5a94db379,
+  treatActivationSound: {fileID: 8300000, guid: 00350704bad08804783f9ad22ffa3899,
     type: 3}
   shieldDuration: 4
   teleportRange: 8
-  speedBoostMultiplier: 2.5
+  speedBoostMultiplier: 1.5
   speedBoostDuration: 3
-  treatChargeRequired: 30
-  treatChargeRate: 3
-  throwSounds: []
+  treatChargeRequired: 100
+  treatChargeRate: 1.25
+  throwSounds:
+  - {fileID: 8300000, guid: e8549c5c03117c04389c6ca2a7bb8860, type: 3}
   jumpSounds: []
   dashSound: {fileID: 0}

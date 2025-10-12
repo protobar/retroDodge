@@ -17,8 +17,8 @@ MonoBehaviour:
   characterIcon: {fileID: -1254451046, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
   characterPrefab: {fileID: 8167500664113679454, guid: ac6d0717d9c7db04c91c552004a3f5d6,
     type: 3}
-  moveSpeed: 8
-  jumpHeight: 15
+  moveSpeed: 10
+  jumpHeight: 12
   canDoubleJump: 1
   canDash: 1
   dashDistance: 4
@@ -34,8 +34,8 @@ MonoBehaviour:
   dashEffect: {fileID: 2755417596474721463, guid: 133b20c48d371d94bb543a6b1fe5ed83,
     type: 3}
   ultimateActivationOffset: {x: 0, y: -3, z: 0}
-  trickEffectOffset: {x: 0, y: 0, z: 0}
-  treatEffectOffset: {x: 0, y: 0, z: 0}
+  trickEffectOffset: {x: 0, y: 3, z: 0}
+  treatEffectOffset: {x: 0, y: 2.5, z: 0}
   normalThrowVFX:
   - {fileID: 124808, guid: 1893a4b18d4ee34479e7a13e3f55dbb2, type: 3}
   - {fileID: 1737036121482468, guid: 2bcf565b6893a5d4288c3487ebb2fc13, type: 3}
@@ -70,7 +70,8 @@ MonoBehaviour:
     type: 3}
   ultimateImpactVFX: {fileID: 4331404992140873778, guid: e7faacf38c848e34d8803eab3677306e,
     type: 3}
-  ultimateActivationSound: {fileID: 0}
+  ultimateActivationSound: {fileID: 8300000, guid: bc39d4e5b94e95a4392b00038969b8a0,
+    type: 3}
   ultimateImpactSound: {fileID: 0}
   powerThrowDamage: 35
   powerThrowSpeed: 30
@@ -87,28 +88,30 @@ MonoBehaviour:
   curveballAmplitude: 25
   curveballFrequency: 25
   curveballDuration: 2
-  ultimateChargeRequired: 50
-  ultimateChargeRate: 3
+  ultimateChargeRequired: 150
+  ultimateChargeRate: 1.5
   trickType: 0
   trickEffectVFX: {fileID: 2755417596474721463, guid: 133b20c48d371d94bb543a6b1fe5ed83,
     type: 3}
-  trickActivationSound: {fileID: 0}
+  trickActivationSound: {fileID: 8300000, guid: 0cc6c19f2a24d0c439974ea7ff051833,
+    type: 3}
   slowSpeedMultiplier: 0.3
-  slowSpeedDuration: 4
+  slowSpeedDuration: 3
   freezeDuration: 2.5
   instantDamageAmount: 15
-  trickChargeRequired: 30
-  trickChargeRate: 3
+  trickChargeRequired: 100
+  trickChargeRate: 1.25
   treatType: 0
   treatEffectVFX: {fileID: 1876188362804903397, guid: e00f5d66cb034644292554ac7e9aeca5,
     type: 3}
-  treatActivationSound: {fileID: 0}
+  treatActivationSound: {fileID: 8300000, guid: beb9439f7ea924544ba3a2d91552481c,
+    type: 3}
   shieldDuration: 3
   teleportRange: 5
   speedBoostMultiplier: 2.5
   speedBoostDuration: 5
-  treatChargeRequired: 30
-  treatChargeRate: 3
+  treatChargeRequired: 100
+  treatChargeRate: 1.25
   throwSounds: []
   jumpSounds: []
   dashSound: {fileID: 0}

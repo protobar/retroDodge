@@ -53,10 +53,10 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         audioSource.playOnAwake = false;
         audioSource.volume = 0.7f;
 
-        if (playerRenderer != null)
+        /*if (playerRenderer != null)
         {
             originalColor = playerRenderer.material.color;
-        }
+        }*/
 
         currentHealth = maxHealth;
         networkHealth = currentHealth;
@@ -101,12 +101,18 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         int actualDamage = Mathf.Min(damage, currentHealth);
         currentHealth -= actualDamage;
         lastDamageTime = Time.time;
-        
+
         // Track damage taken for progression
         damageTaken += actualDamage;
 
         // Add ability charges
         playerCharacter?.OnDamageTaken(actualDamage);
+
+        // NEW: Trigger hit animation when taking damage (but not when dead)
+        if (currentHealth > 0)
+        {
+            TriggerHitAnimation();
+        }
 
         // Network sync
         if (!PhotonNetwork.OfflineMode)
@@ -133,10 +139,19 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
     void OnDamageReceived(int newHealth, int damageAmount)
     {
         currentHealth = newHealth;
+
+        // NEW: Trigger hit animation on remote clients
+        if (currentHealth > 0)
+        {
+            TriggerHitAnimation();
+        }
+
         PlaySound(hurtSound);
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
         StartCoroutine(DamageReaction());
     }
+
+
 
     /// <summary>
     /// Ball damage RPC - simplified
@@ -153,7 +168,26 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
             attacker = attackerView?.GetComponent<PlayerCharacter>();
         }
 
+        // TakeDamage will handle the hit animation
         TakeDamage(damage, attacker);
+    }
+
+    /// <summary>
+    /// Trigger hit animation on this player
+    /// </summary>
+    void TriggerHitAnimation()
+    {
+        // Get the animation controller
+        var animController = GetComponent<RetroDodgeRumble.Animation.PlayerAnimationController>();
+        if (animController != null)
+        {
+            animController.TriggerHit();
+            Debug.Log($"[HIT ANIM] Triggered hit animation for {gameObject.name}");
+        }
+        else
+        {
+            Debug.LogWarning($"[HIT ANIM] No PlayerAnimationController found on {gameObject.name}");
+        }
     }
 
     public void Die(PlayerCharacter killer)
