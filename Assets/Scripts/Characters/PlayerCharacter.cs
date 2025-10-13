@@ -445,8 +445,6 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         // Jump system with character data integration
         if (inputHandler.GetJumpPressed())
         {
-            Debug.Log($"[INPUT] Jump pressed - grounded:{isGrounded} ducking:{isDucking} canDJ:{characterData?.canDoubleJump} hasDJ:{hasDoubleJumped}");
-            
             if (isGrounded && !isDucking)
             {
                 Jump();
@@ -524,6 +522,14 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         // Apply vertical movement
         characterTransform.position += Vector3.up * velocity.y * Time.deltaTime;
 
+        // FIXED: Prevent falling through ground - snap to ground level if below
+        if (characterTransform.position.y < 0.5f)
+        {
+            characterTransform.position = new Vector3(characterTransform.position.x, 0.5f, characterTransform.position.z);
+            velocity.y = 0f;
+            isGrounded = true;
+        }
+
         // Apply movement restrictions
         if (movementRestrictor != null)
         {
@@ -555,29 +561,23 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
     void DoubleJump()
     {
-        Debug.Log($"[DOUBLE JUMP] Attempting double jump - hasDoubleJumped: {hasDoubleJumped}, canDoubleJump: {characterData?.canDoubleJump}, isGrounded: {isGrounded}");
-
         // Validation checks
         if (hasDoubleJumped)
         {
-            Debug.Log($"[DOUBLE JUMP] Blocked - already double jumped");
             return;
         }
 
         if (characterData == null || !characterData.canDoubleJump)
         {
-            Debug.Log($"[DOUBLE JUMP] Blocked - character cannot double jump");
             return;
         }
 
         if (isGrounded)
         {
-            Debug.Log($"[DOUBLE JUMP] Blocked - player is grounded");
             return;
         }
 
-        // FIXED: Allow double jump when in air (removed velocity.y check)
-        Debug.Log($"[DOUBLE JUMP] Executing double jump!");
+        // Execute double jump
         velocity.y = characterData.jumpHeight * 0.8f;
         hasDoubleJumped = true;
 
@@ -762,7 +762,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         if (BallManager.Instance.RequestBallPickup(this))
         {
             // Animation
-            animationController?.TriggerCatch();
+            animationController?.TriggerPickup();
             animationController?.SetHasBall(true);
             
             AddAbilityCharge(0, 5f); // Small charge for pickup

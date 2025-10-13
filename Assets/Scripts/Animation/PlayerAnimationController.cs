@@ -28,10 +28,14 @@ namespace RetroDodgeRumble.Animation
         private static readonly int DASH_HASH = Animator.StringToHash("Dash");
         private static readonly int THROW_HASH = Animator.StringToHash("Throw");
         private static readonly int CATCH_HASH = Animator.StringToHash("Catch");
+        private static readonly int PICKUP_HASH = Animator.StringToHash("Pickup");
         private static readonly int ULTIMATE_HASH = Animator.StringToHash("Ultimate");
         private static readonly int TRICK_HASH = Animator.StringToHash("Trick");
         private static readonly int TREAT_HASH = Animator.StringToHash("Treat");
         private static readonly int HIT_HASH = Animator.StringToHash("Hit");
+        private static readonly int DEATH_HASH = Animator.StringToHash("Death");
+        private static readonly int VICTORY_HASH = Animator.StringToHash("Victory");
+        private static readonly int DEFEAT_HASH = Animator.StringToHash("Defeat");
 
         #endregion
 
@@ -138,6 +142,50 @@ namespace RetroDodgeRumble.Animation
             animator.SetTrigger(HIT_HASH);
         }
 
+        /// <summary>
+        /// Trigger death animation when player dies
+        /// </summary>
+        public void TriggerDeath()
+        {
+            if (!animator) return;
+            animator.SetTrigger(DEATH_HASH);
+        }
+
+        /// <summary>
+        /// Trigger victory animation when player wins
+        /// </summary>
+        public void TriggerVictory()
+        {
+            if (!animator) return;
+            animator.SetTrigger(VICTORY_HASH);
+        }
+
+        /// <summary>
+        /// Trigger defeat animation when player loses
+        /// </summary>
+        public void TriggerDefeat()
+        {
+            if (!animator) return;
+            animator.SetTrigger(DEFEAT_HASH);
+        }
+
+        /// <summary>
+        /// Reset all animations to idle state
+        /// </summary>
+        public void ResetToIdle()
+        {
+            if (!animator) return;
+            
+            // Reset all bool parameters
+            animator.SetBool(IS_GROUNDED_HASH, true);
+            animator.SetBool(IS_DUCKING_HASH, false);
+            animator.SetBool(HAS_BALL_HASH, false);
+            animator.SetBool(IS_DASHING_HASH, false);
+            
+            // Reset speed to 0
+            animator.SetFloat(SPEED_HASH, 0f);
+        }
+
 
         /// <summary>
         /// Trigger dash animation
@@ -164,6 +212,15 @@ namespace RetroDodgeRumble.Animation
         {
             if (!animator) return;
             animator.SetTrigger(CATCH_HASH);
+        }
+
+        /// <summary>
+        /// Trigger ball pickup animation
+        /// </summary>
+        public void TriggerPickup()
+        {
+            if (!animator) return;
+            animator.SetTrigger(PICKUP_HASH);
         }
 
         /// <summary>

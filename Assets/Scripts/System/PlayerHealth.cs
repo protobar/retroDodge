@@ -273,9 +273,15 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         OnPlayerDeath?.Invoke(playerCharacter);
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
 
-        // FIXED: Don't disable PlayerCharacter component - just disable controls
+        // Trigger death animation
         if (playerCharacter != null)
         {
+            var animController = playerCharacter.GetComponent<RetroDodgeRumble.Animation.PlayerAnimationController>();
+            if (animController != null)
+            {
+                animController.TriggerDeath();
+            }
+            
             playerCharacter.SetInputEnabled(false);
             playerCharacter.SetMovementEnabled(false);
             // Keep component enabled for round system to work properly
@@ -397,6 +403,14 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         {
             photonView.RPC("StartTemporaryInvulnerability", RpcTarget.All, duration);
         }
+    }
+
+    /// <summary>
+    /// Check if player has temporary invulnerability (shield) active
+    /// </summary>
+    public bool HasTemporaryInvulnerability()
+    {
+        return hasTemporaryInvulnerability || isInvulnerable;
     }
 
     [PunRPC]

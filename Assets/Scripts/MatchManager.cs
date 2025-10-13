@@ -654,7 +654,8 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         }
 
         Vector3 spawnPosition = GetSpawnPosition();
-        spawnPosition.y = Mathf.Max(spawnPosition.y, 0.5f);
+        // FIXED: Ensure players spawn on ground level, not in air
+        spawnPosition.y = 0.5f; // Fixed ground level spawn
 
         // FIXED: Determine rotation based on spawn side
         // Player 1 (left side) = 0° rotation (faces right)
@@ -922,6 +923,9 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
                     int actorNumber = player.photonView.Owner.ActorNumber;
                     resetPosition = GetSpawnPositionForActor(actorNumber);
                 }
+                
+                // FIXED: Ensure players spawn on ground level
+                resetPosition.y = 0.5f;
 
                 player.transform.position = resetPosition;
 
@@ -939,6 +943,13 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
                 // CRITICAL FIX: Reset player state first, THEN health
                 player.ResetPlayerState();
+
+                // FIXED: Reset animations to idle state
+                var animController = player.GetComponent<RetroDodgeRumble.Animation.PlayerAnimationController>();
+                if (animController != null)
+                {
+                    animController.ResetToIdle();
+                }
 
                 // FIXED: Properly reset health on the player's owner
                 PlayerHealth health = player.GetComponent<PlayerHealth>();
@@ -1037,7 +1048,8 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
                     int actorNumber = player.photonView.Owner.ActorNumber;
                     spawnPos = GetSpawnPositionForActor(actorNumber);
                 }
-                spawnPos.y = Mathf.Max(spawnPos.y, 0.5f);
+                // FIXED: Ensure players spawn on ground level
+                spawnPos.y = 0.5f;
                 player.transform.position = spawnPos;
 
                 PlayerHealth health = player.GetComponent<PlayerHealth>();
@@ -1059,6 +1071,85 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         else
         {
             return player2SpawnPoint != null ? player2SpawnPoint.position : new Vector3(3f, 0.5f, 0f);
+        }
+    }
+
+    /// <summary>
+    /// Reset all player animations to idle state
+    /// </summary>
+    void ResetAllPlayerAnimations()
+    {
+        PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
+        
+        foreach (PlayerCharacter player in allPlayers)
+        {
+            if (player != null)
+            {
+                var animController = player.GetComponent<RetroDodgeRumble.Animation.PlayerAnimationController>();
+                if (animController != null)
+                {
+                    animController.ResetToIdle();
+                }
+            }
+        }
+        
+        Debug.Log("[ANIMATION RESET] All player animations reset to idle");
+    }
+
+    /// <summary>
+    /// Trigger victory/defeat animations based on round result
+    /// </summary>
+    void TriggerRoundResultAnimations(int winner, string reason)
+    {
+        PlayerCharacter[] allPlayers = FindObjectsOfType<PlayerCharacter>();
+        
+        foreach (PlayerCharacter player in allPlayers)
+        {
+            if (player != null)
+            {
+                var animController = player.GetComponent<RetroDodgeRumble.Animation.PlayerAnimationController>();
+                if (animController != null)
+                {
+                    // Determine if this player won or lost
+                    int playerSide = player.GetPlayerSide();
+                    bool playerWon = (winner == playerSide);
+                    
+                    if (winner == 0)
+                    {
+                        // Tie - no victory/defeat animations
+                        Debug.Log($"[ROUND RESULT] Tie - no victory/defeat animations for Player {playerSide}");
+                    }
+                    else if (playerWon)
+                    {
+                        // Winner always gets victory animation
+                        animController.TriggerVictory();
+                        Debug.Log($"[VICTORY ANIMATION] Player {playerSide} triggered victory animation (reason: {reason})");
+                    }
+                    else
+                    {
+                        // FIXED: Only trigger defeat animation for timeout scenarios
+                        // For knockout deaths, the death animation is already triggered in ProcessDeath()
+                        if (reason == "knockout")
+                        {
+                            Debug.Log($"[ROUND RESULT] Knockout - Player {playerSide} already has death animation, skipping defeat animation");
+                        }
+                        else
+                        {
+                            animController.TriggerDefeat();
+                            Debug.Log($"[DEFEAT ANIMATION] Player {playerSide} triggered defeat animation (reason: {reason})");
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (winner == 0)
+        {
+            Debug.Log($"[ROUND RESULT ANIMATIONS] Tie - no victory/defeat animations triggered");
+        }
+        else
+        {
+            Debug.Log($"[ROUND RESULT ANIMATIONS] Triggered animations for winner: {winner} (reason: {reason})");
         }
     }
 
@@ -1220,8 +1311,14 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             matchUI.ShowRoundResult(winner);
         }
 
+        // FIXED: Trigger victory/defeat animations based on round result
+        TriggerRoundResultAnimations(winner, reason);
+
         // FIXED: Reset ball on ALL clients when round ends
         ResetBallForNewRound();
+
+        // FIXED: Reset all player animations to idle when round ends
+        ResetAllPlayerAnimations();
 
         PlaySound(roundEndSound);
 

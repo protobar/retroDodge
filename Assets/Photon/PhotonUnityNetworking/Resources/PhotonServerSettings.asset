@@ -132,6 +132,10 @@ MonoBehaviour:
   - UpdateAFKStatusRPC
   - SyncShake
   - SyncCameraShakeRPC
+  - RpcClearBuffer
+  - RpcNonServerOwnedTeleportFromServer
+  - RpcTeleport
+  - ProcessHitEvent
   DisableAutoOpenWizard: 1
   ShowSettings: 0
   DevRegionSetOnce: 1
