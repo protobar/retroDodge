@@ -295,7 +295,7 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         if (aiDifficultyDropdown != null)
         {
             aiDifficultyDropdown.ClearOptions();
-            var aiOptions = new List<string> { "Easy", "Normal", "Hard" };
+            var aiOptions = new List<string> { "Easy", "Normal", "Hard", "Nightmare" };
             aiDifficultyDropdown.AddOptions(aiOptions);
             aiDifficultyDropdown.value = 1; // Default to Normal
         }

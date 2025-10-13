@@ -523,6 +523,18 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         // Add AI brain to AI object with selected difficulty
         var brain = p2.AddComponent<RetroDodge.AIControllerBrain>();
         RetroDodge.AI.AIDifficulty difficulty = (cfg != null) ? cfg.difficulty : RetroDodge.AI.AIDifficulty.Normal;
+        
+        // DEBUG: Log difficulty setting
+        Debug.Log($"[MATCH MANAGER] Setting AI difficulty to: {difficulty}");
+        if (cfg != null)
+        {
+            Debug.Log($"[MATCH MANAGER] AISessionConfig difficulty: {cfg.difficulty}");
+        }
+        else
+        {
+            Debug.LogWarning("[MATCH MANAGER] AISessionConfig is null, using default Normal difficulty");
+        }
+        
         brain.SetDifficulty(difficulty);
 
         // Disable network flags

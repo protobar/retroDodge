@@ -6,7 +6,8 @@ namespace RetroDodge.AI
 	{
 		Easy,
 		Normal,
-		Hard
+		Hard,
+		Nightmare
 	}
 
 	[System.Serializable]
@@ -47,15 +48,28 @@ namespace RetroDodge.AI
 				case AIDifficulty.Hard:
 					return new AIDifficultyParams
 					{
-						reactionDelaySeconds = 0.1f,
-						aimInaccuracyDegrees = 8f,
-						throwDecisionCooldown = 0.7f,
-						dodgeProbability = 0.3f,
-						jumpProbability = 0.12f, // Still reduced from original
-						aggression = 0.6f,
-						mistakeChance = 0.05f, // Fewer mistakes
-						reactionSpeed = 1.2f,
-						maxActionsPerSecond = 2.5f
+						reactionDelaySeconds = 0.08f, // Faster reactions
+						aimInaccuracyDegrees = 5f, // More accurate
+						throwDecisionCooldown = 0.5f, // Faster decisions
+						dodgeProbability = 0.4f, // More dodging
+						jumpProbability = 0.15f, // More jumping
+						aggression = 0.75f, // More aggressive
+						mistakeChance = 0.02f, // Almost no mistakes
+						reactionSpeed = 1.4f, // Faster reactions
+						maxActionsPerSecond = 3.0f // More actions
+					};
+				case AIDifficulty.Nightmare:
+					return new AIDifficultyParams
+					{
+						reactionDelaySeconds = 0.05f, // Lightning fast
+						aimInaccuracyDegrees = 2f, // Near perfect aim
+						throwDecisionCooldown = 0.3f, // Instant decisions
+						dodgeProbability = 0.6f, // Dodges everything
+						jumpProbability = 0.25f, // Aggressive jumping
+						aggression = 0.9f, // Maximum aggression
+						mistakeChance = 0.0f, // No mistakes
+						reactionSpeed = 1.8f, // Superhuman reactions
+						maxActionsPerSecond = 4.0f // Maximum actions
 					};
 				default:
 					return new AIDifficultyParams

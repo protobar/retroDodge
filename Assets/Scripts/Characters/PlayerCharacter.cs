@@ -486,8 +486,8 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
         float horizontal = inputHandler.GetHorizontal();
 
-        // Horizontal movement using character data
-        if (Mathf.Abs(horizontal) > 0.01f)
+        // FIXED: Only allow horizontal movement when grounded (no air control)
+        if (Mathf.Abs(horizontal) > 0.01f && isGrounded)
         {
             Vector3 moveDir = Vector3.right * horizontal * GetEffectiveMoveSpeed();
             characterTransform.position += moveDir * Time.deltaTime;
