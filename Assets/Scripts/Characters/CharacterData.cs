@@ -174,13 +174,27 @@ public class CharacterData : ScriptableObject
     public float treatChargeRate = 1f;
 
     [Header("═══════════════════════════════════")]
-    [Header("BASIC AUDIO")]
+    [Header("ENHANCED AUDIO SYSTEM")]
     [Header("═══════════════════════════════════")]
 
-    [Header("Basic Audio")]
-    public AudioClip[] throwSounds;
+    [Header("Player Audio Arrays")]
+    [Tooltip("Multiple jump sounds for variety")]
     public AudioClip[] jumpSounds;
-    public AudioClip dashSound;
+    
+    [Tooltip("Multiple dash sounds for variety")]
+    public AudioClip[] dashSounds;
+    
+    [Tooltip("Multiple throw sounds for variety")]
+    public AudioClip[] throwSounds;
+    
+    [Tooltip("Multiple footstep sounds for variety")]
+    public AudioClip[] footstepSounds;
+    
+    [Tooltip("Multiple hurt sounds for variety")]
+    public AudioClip[] hurtSounds;
+    
+    [Tooltip("Multiple death sounds for variety")]
+    public AudioClip[] deathSounds;
 
     // ═══════════════════════════════════════════════════════════════
     // SIMPLIFIED VFX GETTER METHODS
@@ -312,14 +326,39 @@ public class CharacterData : ScriptableObject
         switch (audioType)
         {
             case CharacterAudioType.Throw:
-                return throwSounds?.Length > 0 ? throwSounds[Random.Range(0, throwSounds.Length)] : null;
+                return GetRandomFromAudioArray(throwSounds);
             case CharacterAudioType.Jump:
-                return jumpSounds?.Length > 0 ? jumpSounds[Random.Range(0, jumpSounds.Length)] : null;
+                return GetRandomFromAudioArray(jumpSounds);
             case CharacterAudioType.Dash:
-                return dashSound;
+                return GetRandomFromAudioArray(dashSounds);
+            case CharacterAudioType.Footstep:
+                return GetRandomFromAudioArray(footstepSounds);
+            case CharacterAudioType.Hurt:
+                return GetRandomFromAudioArray(hurtSounds);
+            case CharacterAudioType.Death:
+                return GetRandomFromAudioArray(deathSounds);
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Get random audio clip from array with null safety
+    /// </summary>
+    private AudioClip GetRandomFromAudioArray(AudioClip[] audioArray)
+    {
+        if (audioArray == null || audioArray.Length == 0) return null;
+        
+        // Filter out null entries
+        var validClips = new System.Collections.Generic.List<AudioClip>();
+        foreach (var clip in audioArray)
+        {
+            if (clip != null) validClips.Add(clip);
+        }
+        
+        if (validClips.Count == 0) return null;
+        
+        return validClips[Random.Range(0, validClips.Count)];
     }
     #endregion
 
@@ -459,5 +498,8 @@ public enum CharacterAudioType
 {
     Throw,
     Jump,
-    Dash
+    Dash,
+    Footstep,
+    Hurt,
+    Death
 }

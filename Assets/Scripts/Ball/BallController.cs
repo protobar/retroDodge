@@ -38,6 +38,10 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
     [SerializeField] private AudioClip dangerSound;
     [SerializeField] private AudioClip corruptionSound;
 
+    [Header("Ball Audio Arrays")]
+    [SerializeField] private AudioClip[] bounceSounds;
+    [SerializeField] private AudioClip[] hitSounds;
+
     [Header("Ball Position - UPDATED")]
     [SerializeField] private bool useHandBoneAttachment = true;
     [SerializeField] private string rightHandBoneName = "mixamorig:RightHand";
@@ -1313,6 +1317,45 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         {
             audioSource.PlayOneShot(clip);
         }
+    }
+
+    /// <summary>
+    /// Play random sound from array with null safety
+    /// </summary>
+    void PlayRandomSound(AudioClip[] audioArray)
+    {
+        if (audioArray == null || audioArray.Length == 0) return;
+        
+        // Filter out null entries
+        var validClips = new System.Collections.Generic.List<AudioClip>();
+        foreach (var clip in audioArray)
+        {
+            if (clip != null) validClips.Add(clip);
+        }
+        
+        if (validClips.Count == 0) return;
+        
+        AudioClip randomClip = validClips[Random.Range(0, validClips.Count)];
+        if (audioSource != null && randomClip != null)
+        {
+            audioSource.PlayOneShot(randomClip);
+        }
+    }
+
+    /// <summary>
+    /// Play bounce sound when ball hits ground
+    /// </summary>
+    public void PlayBounceSound()
+    {
+        PlayRandomSound(bounceSounds);
+    }
+
+    /// <summary>
+    /// Play hit sound when ball hits player
+    /// </summary>
+    public void PlayHitSound()
+    {
+        PlayRandomSound(hitSounds);
     }
 
     // ═══════════════════════════════════════════════════════════════

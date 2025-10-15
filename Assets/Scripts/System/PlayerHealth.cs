@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using System.Collections;
 using Photon.Pun;
 
@@ -14,8 +14,8 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
     [SerializeField] private float invulnerabilityDuration = 1f;
 
     [Header("Audio")]
-    [SerializeField] private AudioClip hurtSound;
-    [SerializeField] private AudioClip deathSound;
+    [SerializeField] private AudioClip[] hurtSounds;
+    [SerializeField] private AudioClip[] deathSounds;
     [SerializeField] private AudioClip invulnerabilitySound;
 
     [Header("Progression Tracking")]
@@ -121,7 +121,7 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         }
 
         // Effects and events
-        PlaySound(hurtSound);
+        PlayRandomSound(hurtSounds);
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
         OnDamageTaken?.Invoke(actualDamage, attacker);
 
@@ -146,7 +146,7 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
             TriggerHitAnimation();
         }
 
-        PlaySound(hurtSound);
+        PlayRandomSound(hurtSounds);
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
         StartCoroutine(DamageReaction());
     }
@@ -269,7 +269,9 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
 
     void ProcessDeath(PlayerCharacter killer)
     {
-        PlaySound(deathSound);
+        // Play death sound with debug logging
+        Debug.Log($"[DEATH SOUND] Playing death sound for {gameObject.name}");
+        PlayRandomSound(deathSounds);
         OnPlayerDeath?.Invoke(playerCharacter);
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
 
@@ -394,15 +396,17 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
     /// </summary>
     public void SetTemporaryInvulnerability(float duration)
     {
-        if (!photonView.IsMine) return;
+        // ✅ Check offline mode BEFORE ownership check
         if (PhotonNetwork.OfflineMode)
         {
             StartTemporaryInvulnerability(duration);
+            return;
         }
-        else
-        {
-            photonView.RPC("StartTemporaryInvulnerability", RpcTarget.All, duration);
-        }
+
+        // Online mode - check ownership
+        if (!photonView.IsMine) return;
+
+        photonView.RPC("StartTemporaryInvulnerability", RpcTarget.All, duration);
     }
 
     /// <summary>
@@ -494,6 +498,35 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         {
             audioSource.PlayOneShot(clip);
         }
+    }
+
+    /// <summary>
+    /// Play random sound from array with null safety
+    /// </summary>
+    void PlayRandomSound(AudioClip[] audioArray)
+    {
+        if (audioArray == null || audioArray.Length == 0) 
+        {
+            Debug.LogWarning($"[DEATH SOUND] No death sounds assigned to {gameObject.name}");
+            return;
+        }
+        
+        // Filter out null entries
+        var validClips = new System.Collections.Generic.List<AudioClip>();
+        foreach (var clip in audioArray)
+        {
+            if (clip != null) validClips.Add(clip);
+        }
+        
+        if (validClips.Count == 0) 
+        {
+            Debug.LogWarning($"[DEATH SOUND] All death sounds are null for {gameObject.name}");
+            return;
+        }
+        
+        AudioClip randomClip = validClips[Random.Range(0, validClips.Count)];
+        Debug.Log($"[DEATH SOUND] Playing death sound: {randomClip.name} for {gameObject.name}");
+        PlaySound(randomClip);
     }
 
     // Network sync for health display

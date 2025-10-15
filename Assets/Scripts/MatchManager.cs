@@ -58,6 +58,13 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     [SerializeField] private AudioClip matchWinSound;
     [SerializeField] private AudioClip countdownSound;
 
+    [Header("Announcement Audio Arrays")]
+    [SerializeField] private AudioClip[] readySounds;
+    [SerializeField] private AudioClip[] fightSounds;
+    [SerializeField] private AudioClip[] knockoutSounds;
+    [SerializeField] private AudioClip[] winnerSounds;
+    [SerializeField] private AudioClip[] loserSounds;
+
     [Header("Camera")]
     [SerializeField] private CameraManager cameraManager;
     [SerializeField] private CameraShakeManager cameraShakeManager;
@@ -1172,6 +1179,8 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             matchUI.ShowRoundAnnouncement(currentRound);
         }
 
+        // Play round start sound with new audio system
+        PlayAnnouncementSound(AnnouncementType.Ready);
         PlaySound(roundStartSound);
 
         // Countdown
@@ -1183,6 +1192,11 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
             }
 
             PlaySound(countdownSound);
+            // Play fight sound on last countdown
+            if (i == 1)
+            {
+                PlayAnnouncementSound(AnnouncementType.Fight);
+            }
             yield return new WaitForSeconds(1f);
         }
 
@@ -1313,6 +1327,16 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
 
         // FIXED: Trigger victory/defeat animations based on round result
         TriggerRoundResultAnimations(winner, reason);
+
+        // Play winner/loser sounds
+        if (winner > 0)
+        {
+            PlayAnnouncementSound(AnnouncementType.Winner);
+        }
+        else
+        {
+            PlayAnnouncementSound(AnnouncementType.Loser);
+        }
 
         // FIXED: Reset ball on ALL clients when round ends
         ResetBallForNewRound();
@@ -1918,6 +1942,9 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
         int deadPlayerActor = GetPlayerActorNumber(deadPlayer);
         if (deadPlayerActor != -1)
         {
+            // Play knockout sound
+            PlayAnnouncementSound(AnnouncementType.Knockout);
+            
             int winner = deadPlayerActor == 1 ? 2 : 1;
             photonView.RPC("EndRound", RpcTarget.All, winner, "knockout");
         }
@@ -2169,6 +2196,60 @@ public class MatchManager : MonoBehaviourPunCallbacks, IPunObservable
     {
         if (audioSource != null && clip != null)
             audioSource.PlayOneShot(clip);
+    }
+
+    /// <summary>
+    /// Play random sound from array with null safety
+    /// </summary>
+    void PlayRandomSound(AudioClip[] audioArray)
+    {
+        if (audioArray == null || audioArray.Length == 0) return;
+        
+        // Filter out null entries
+        var validClips = new System.Collections.Generic.List<AudioClip>();
+        foreach (var clip in audioArray)
+        {
+            if (clip != null) validClips.Add(clip);
+        }
+        
+        if (validClips.Count == 0) return;
+        
+        AudioClip randomClip = validClips[Random.Range(0, validClips.Count)];
+        PlaySound(randomClip);
+    }
+
+    /// <summary>
+    /// Play announcement sounds for round events
+    /// </summary>
+    public void PlayAnnouncementSound(AnnouncementType announcementType)
+    {
+        switch (announcementType)
+        {
+            case AnnouncementType.Ready:
+                PlayRandomSound(readySounds);
+                break;
+            case AnnouncementType.Fight:
+                PlayRandomSound(fightSounds);
+                break;
+            case AnnouncementType.Knockout:
+                PlayRandomSound(knockoutSounds);
+                break;
+            case AnnouncementType.Winner:
+                PlayRandomSound(winnerSounds);
+                break;
+            case AnnouncementType.Loser:
+                PlayRandomSound(loserSounds);
+                break;
+        }
+    }
+
+    public enum AnnouncementType
+    {
+        Ready,
+        Fight,
+        Knockout,
+        Winner,
+        Loser
     }
 
     public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)

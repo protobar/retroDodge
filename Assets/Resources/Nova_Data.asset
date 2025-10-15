@@ -110,8 +110,21 @@ MonoBehaviour:
   teleportRange: 5
   speedBoostMultiplier: 2.5
   speedBoostDuration: 5
-  treatChargeRequired: 100
-  treatChargeRate: 1.25
-  throwSounds: []
-  jumpSounds: []
-  dashSound: {fileID: 0}
+  treatChargeRequired: 30
+  treatChargeRate: 3
+  jumpSounds:
+  - {fileID: 8300000, guid: 3dd1971e6cd13644782d1a2b8f336c32, type: 3}
+  - {fileID: 8300000, guid: b22495e2599c7cb4ea8bb0f82ec6a443, type: 3}
+  dashSounds:
+  - {fileID: 8300000, guid: 3adc179888b4c034a94661e2cbea738b, type: 3}
+  throwSounds:
+  - {fileID: 8300000, guid: 4529e42970253a445826a18d9fcdf2a6, type: 3}
+  - {fileID: 8300000, guid: fca13af299fed244b8ca63cfd0426b26, type: 3}
+  footstepSounds:
+  - {fileID: 8300000, guid: d598e3f0ab97a1c4eb29360c773eaa95, type: 3}
+  hurtSounds:
+  - {fileID: 8300000, guid: cae56cb929fb7a046bb15e09ffa3aa24, type: 3}
+  - {fileID: 8300000, guid: 3e600f971efa69b4d978813b739a1d26, type: 3}
+  - {fileID: 8300000, guid: 404c37287e8fe064da9476d4941500ca, type: 3}
+  deathSounds:
+  - {fileID: 8300000, guid: 328058096640ef64199e0366ebdd2f2a, type: 3}

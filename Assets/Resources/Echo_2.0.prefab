@@ -274,8 +274,14 @@ MonoBehaviour:
   maxHealth: 100
   currentHealth: 100
   invulnerabilityDuration: 1
-  hurtSound: {fileID: 8300000, guid: 7d18b02078b591646b900c0f868a572b, type: 3}
-  deathSound: {fileID: 8300000, guid: 57a31d5b028d73343839a40480129fa1, type: 3}
+  hurtSounds:
+  - {fileID: 8300000, guid: 153b4d9fe78ce2b458130e8d01260761, type: 3}
+  - {fileID: 8300000, guid: 619f30eb298759b42b14547bd74c0272, type: 3}
+  - {fileID: 8300000, guid: 353f479bdbc02634fa3365320b83603d, type: 3}
+  - {fileID: 8300000, guid: 66c732115f8a02648a61d777570ca139, type: 3}
+  - {fileID: 8300000, guid: dce1efc05349d0341a25fe62c31b68e2, type: 3}
+  deathSounds:
+  - {fileID: 8300000, guid: 26855df5d21fc5a48805e44d15025ae2, type: 3}
   invulnerabilitySound: {fileID: 0}
   damageDealt: 0
   damageTaken: 0
@@ -411,7 +417,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 84948438152551402}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8efc6b1d64977384eb3405357896c656, type: 3}
   m_Name: 

@@ -136,6 +136,8 @@ MonoBehaviour:
   - RpcNonServerOwnedTeleportFromServer
   - RpcTeleport
   - ProcessHitEvent
+  - PlayAnnouncementRPC
+  - PlaySoundRPC
   DisableAutoOpenWizard: 1
   ShowSettings: 0
   DevRegionSetOnce: 1

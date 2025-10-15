@@ -63,9 +63,9 @@ MonoBehaviour:
     type: 3}
   ultimateImpactVFX: {fileID: 1543543649040506132, guid: 05465472d7c46a54f9c624a4aca1092c,
     type: 3}
-  ultimateActivationSound: {fileID: 8300000, guid: a120bf66f29fc7a45bd44c6daf629433,
+  ultimateActivationSound: {fileID: 8300000, guid: 3a2169e249eff1d4b91f187b04078d0d,
     type: 3}
-  ultimateImpactSound: {fileID: 0}
+  ultimateImpactSound: {fileID: 8300000, guid: 806d29721efa587489c0b1c07db3f0c4, type: 3}
   powerThrowDamage: 35
   powerThrowSpeed: 30
   powerThrowKnockback: 12
@@ -104,7 +104,20 @@ MonoBehaviour:
   speedBoostDuration: 3
   treatChargeRequired: 100
   treatChargeRate: 1.25
+  jumpSounds:
+  - {fileID: 8300000, guid: 019398214694b7b41ab24577d32fd8f9, type: 3}
+  - {fileID: 8300000, guid: 0bcaf1b524e5a524c9d4037ca466d750, type: 3}
+  dashSounds: []
   throwSounds:
-  - {fileID: 8300000, guid: e8549c5c03117c04389c6ca2a7bb8860, type: 3}
-  jumpSounds: []
-  dashSound: {fileID: 0}
+  - {fileID: 8300000, guid: 7bd18b6372e654041b440baeb91f0fac, type: 3}
+  - {fileID: 8300000, guid: de0545c532115cf499456408d1e28f99, type: 3}
+  - {fileID: 8300000, guid: f5e1ba1ecb39f70479e95f7764fc8165, type: 3}
+  footstepSounds:
+  - {fileID: 8300000, guid: d598e3f0ab97a1c4eb29360c773eaa95, type: 3}
+  hurtSounds:
+  - {fileID: 8300000, guid: 34a61bdcc23cebf48a8e6079c76a5f97, type: 3}
+  - {fileID: 8300000, guid: 98b1a635f5394b84cbe657046f4f14dd, type: 3}
+  - {fileID: 8300000, guid: 31344ccbb315198429ef54384ca3b039, type: 3}
+  deathSounds:
+  - {fileID: 8300000, guid: 0d51ec8071f34f5409b2263799143508, type: 3}
+  - {fileID: 8300000, guid: 58c500a4e1da5464798ce64e46c14468, type: 3}

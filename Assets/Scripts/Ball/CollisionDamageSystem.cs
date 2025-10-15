@@ -49,10 +49,10 @@ public class CollisionDamageSystem : MonoBehaviour
     [SerializeField] private float vfxSpawnOffset = 0.2f; // Slight offset for better visibility
 
     [Header("Audio")]
-    [SerializeField] private AudioClip hitSound;
-    [SerializeField] private AudioClip criticalHitSound;
-    [SerializeField] private AudioClip deflectSound;
-    [SerializeField] private AudioClip catchFailSound;
+    [SerializeField] private AudioClip[] hitSounds;
+    [SerializeField] private AudioClip[] criticalHitSounds;
+    [SerializeField] private AudioClip[] deflectSounds;
+    [SerializeField] private AudioClip[] catchFailSounds;
 
     [Header("Debug")]
     [SerializeField] private bool debugMode = true;
@@ -383,7 +383,7 @@ public class CollisionDamageSystem : MonoBehaviour
         ballController.OnCaught(catcher);
 
         // Play catch sound
-        PlaySound(deflectSound);
+        PlayRandomSound(deflectSounds);
 
         // Create catch effect - VFXManager doesn't have SpawnCatchSuccessVFX, use fallback
         CreateCatchEffect(catcher.transform.position);
@@ -397,7 +397,7 @@ public class CollisionDamageSystem : MonoBehaviour
     void HandleFailedCatch(PlayerCharacter player, bool attemptedCatch)
     {
         // VFXManager doesn't have SpawnCatchFailVFX, use fallback
-        PlaySound(catchFailSound);
+        PlayRandomSound(catchFailSounds);
 
         if (debugMode)
         {
@@ -589,13 +589,9 @@ public class CollisionDamageSystem : MonoBehaviour
 
         CameraShakeManager.Instance.TriggerShake(shakeIntensity, shakeDuration, $"Damage_{hitType}_{hitPlayer?.name ?? "Unknown"}");
 
-        // Play hit sound (VFXManager handles audio automatically through SpawnHitVFX)
-        if (!useVFXManager || VFXManager.Instance == null)
-        {
-            // Fallback audio
-            AudioClip soundToPlay = hitType == HitType.Ultimate ? criticalHitSound : hitSound;
-            PlaySound(soundToPlay);
-        }
+        // Play hit sound - VFXManager doesn't handle audio, so we always play here
+        AudioClip[] soundArray = hitType == HitType.Ultimate ? criticalHitSounds : hitSounds;
+        PlayRandomSound(soundArray);
 
         if (debugMode)
         {
@@ -732,6 +728,26 @@ public class CollisionDamageSystem : MonoBehaviour
         {
             audioSource.PlayOneShot(clip);
         }
+    }
+
+    /// <summary>
+    /// Play random sound from array with null safety
+    /// </summary>
+    void PlayRandomSound(AudioClip[] audioArray)
+    {
+        if (audioArray == null || audioArray.Length == 0) return;
+        
+        // Filter out null entries
+        var validClips = new System.Collections.Generic.List<AudioClip>();
+        foreach (var clip in audioArray)
+        {
+            if (clip != null) validClips.Add(clip);
+        }
+        
+        if (validClips.Count == 0) return;
+        
+        AudioClip randomClip = validClips[Random.Range(0, validClips.Count)];
+        PlaySound(randomClip);
     }
 
     // Public methods for ball controller integration - CLEANED UP

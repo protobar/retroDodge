@@ -87,6 +87,11 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     private bool hasStateChanged = false;
     private bool hasAbilityChanged = false;
     
+    // Footstep system
+    private float lastFootstepTime = 0f;
+    private float footstepInterval = 0.5f; // Time between footsteps
+    private bool wasMovingLastFrame = false;
+    
     // PUN2 optimization tracking
     private float lastSendRateChange = 0f;
     private const float SEND_RATE_CHANGE_COOLDOWN = 1f; // Don't change send rate too frequently
@@ -489,6 +494,13 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         {
             Vector3 moveDir = Vector3.right * horizontal * GetEffectiveMoveSpeed();
             characterTransform.position += moveDir * Time.deltaTime;
+            
+            // Play footstep sounds
+            HandleFootstepSounds();
+        }
+        else
+        {
+            wasMovingLastFrame = false;
         }
 
         // FIXED: Apply gravity ONLY if not grounded
@@ -1006,7 +1018,11 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         // Animation
         animationController?.TriggerUltimate();
         
-        if (!PhotonNetwork.OfflineMode) SyncPlayerAction("Ultimate");
+        // FIXED: Only sync in online mode, not offline
+        if (!PhotonNetwork.OfflineMode && photonView.IsMine)
+        {
+            photonView.RPC("SyncPlayerAction", RpcTarget.Others, "Ultimate");
+        }
 
         SpawnUltimateVFX();
 
@@ -1026,31 +1042,18 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         // Animation
         animationController?.TriggerTrick();
 
-        // FIXED: Sync trick activation to other players
+        // FIXED: Only sync in online mode, not offline
         if (!PhotonNetwork.OfflineMode && photonView.IsMine)
         {
             photonView.RPC("SyncPlayerAction", RpcTarget.Others, "Trick");
         }
-        else if (PhotonNetwork.OfflineMode)
-        {
-            // In offline mode, execute directly
-            var opponent = FindOpponent();
-            if (opponent != null)
-            {
-                SpawnTrickVFX(opponent);
-                ExecuteTrick(opponent);
-            }
-        }
 
-        // For online mode, also execute locally for immediate feedback
-        if (!PhotonNetwork.OfflineMode)
+        // Execute trick effect on opponent
+        var opponent = FindOpponent();
+        if (opponent != null)
         {
-            var opponent = FindOpponent();
-            if (opponent != null)
-            {
-                SpawnTrickVFX(opponent);
-                ExecuteTrick(opponent);
-            }
+            SpawnTrickVFX(opponent);
+            ExecuteTrick(opponent);
         }
     }
 
@@ -1062,7 +1065,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         // Animation
         animationController?.TriggerTreat();
 
-        // FIXED: Sync treat activation to other players
+        // FIXED: Only sync in online mode, not offline
         if (!PhotonNetwork.OfflineMode && photonView.IsMine)
         {
             photonView.RPC("SyncPlayerAction", RpcTarget.Others, "Treat");
@@ -1476,7 +1479,13 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     [PunRPC]
     void SyncPlayerAction(string actionType)
     {
-        if (photonView.IsMine) return;
+        // FIXED: Don't process RPC calls in offline mode or if this is the local player
+        if (photonView.IsMine || PhotonNetwork.OfflineMode) return;
+
+        // FIXED: Don't process ability RPCs for AI characters
+        // Check for AI component using reflection to avoid compilation errors
+        if (gameObject.CompareTag("AI") || gameObject.name.Contains("AI") || 
+            GetComponent("AIControllerBrain") != null) return;
 
         switch (actionType)
         {
@@ -1823,6 +1832,19 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         {
             audioSource.PlayOneShot(clip);
         }
+    }
+
+    /// <summary>
+    /// Handle footstep sound timing and playback
+    /// </summary>
+    void HandleFootstepSounds()
+    {
+        if (!wasMovingLastFrame || Time.time - lastFootstepTime >= footstepInterval)
+        {
+            PlayCharacterSound(CharacterAudioType.Footstep);
+            lastFootstepTime = Time.time;
+        }
+        wasMovingLastFrame = true;
     }
 
     void SpawnEffect(GameObject effect)

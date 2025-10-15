@@ -144,6 +144,13 @@ MonoBehaviour:
   warningSound: {fileID: 0}
   dangerSound: {fileID: 0}
   corruptionSound: {fileID: 0}
+  bounceSounds:
+  - {fileID: 8300000, guid: 96c7d1f9967920e41a714533f30539c0, type: 3}
+  - {fileID: 8300000, guid: d0686f62e0731ff4aa684539e43cef0b, type: 3}
+  hitSounds:
+  - {fileID: 8300000, guid: 849ec0c8d9c5c1a4d99bb0f981fb6f89, type: 3}
+  - {fileID: 8300000, guid: 19037a932e4a5474dbbc642d693d76da, type: 3}
+  - {fileID: 8300000, guid: 3dbbf75321273834eba9f2fe44505c0f, type: 3}
   useHandBoneAttachment: 1
   rightHandBoneName: mixamorig:RightHand
   handBoneOffset: {x: 0, y: 0, z: 0}
@@ -202,10 +209,17 @@ MonoBehaviour:
   useVFXManager: 1
   enableHitVFXVariety: 1
   vfxSpawnOffset: 0.2
-  hitSound: {fileID: 0}
-  criticalHitSound: {fileID: 0}
-  deflectSound: {fileID: 0}
-  catchFailSound: {fileID: 0}
+  hitSounds:
+  - {fileID: 8300000, guid: 3dbbf75321273834eba9f2fe44505c0f, type: 3}
+  - {fileID: 8300000, guid: 19037a932e4a5474dbbc642d693d76da, type: 3}
+  criticalHitSounds:
+  - {fileID: 8300000, guid: 19037a932e4a5474dbbc642d693d76da, type: 3}
+  - {fileID: 8300000, guid: 3dbbf75321273834eba9f2fe44505c0f, type: 3}
+  deflectSounds:
+  - {fileID: 8300000, guid: 96c7d1f9967920e41a714533f30539c0, type: 3}
+  - {fileID: 8300000, guid: d0686f62e0731ff4aa684539e43cef0b, type: 3}
+  catchFailSounds:
+  - {fileID: 8300000, guid: 35868c70a209d8a43802d755ab9c87f6, type: 3}
   debugMode: 0
   showCollisionGizmos: 0
   showDuckingVisualization: 0
@@ -243,7 +257,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 8401581377007119221}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8efc6b1d64977384eb3405357896c656, type: 3}
   m_Name: 

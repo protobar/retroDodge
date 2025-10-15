@@ -3,6 +3,7 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections;
+using System.Linq;
 using Photon.Pun;
 using Photon.Realtime;
 using Hashtable = ExitGames.Client.Photon.Hashtable;
@@ -43,6 +44,17 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
     [SerializeField] private TMP_Text loadingText;
     [SerializeField] private string gameplayScene = "GameplayArena";
 
+    [Header("Character Preview")]
+    [SerializeField] private Transform characterPreviewParent;
+    [SerializeField] private Vector3 previewPosition = new Vector3(0, 0, 0);
+    [SerializeField] private Vector3 previewRotation = new Vector3(0, 0, 0);
+    [SerializeField] private float previewScale = 1f;
+    [SerializeField] private bool enablePreviewAnimations = true;
+    [SerializeField] private RuntimeAnimatorController previewAnimatorController;
+    
+    [Header("Preview Prefabs (Animation Only)")]
+    [SerializeField] private GameObject[] characterPreviewPrefabs; // Separate preview prefabs with only animators
+
     [Header("Audio")]
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip characterSelectSound;
@@ -62,6 +74,10 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
     private bool timerStarted = false;
     private bool isTransitioning = false;
     private double selectionStartTime = 0;
+
+    // Character preview state
+    private GameObject currentPreviewCharacter;
+    private Animator currentPreviewAnimator;
 
 
     // FIXED: Use centralized room state manager
@@ -275,6 +291,9 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
         UpdateCharacterDisplay(selectedCharacter);
         UpdateCharacterButtons();
+        
+        // Spawn character preview
+        SpawnCharacterPreview(selectedCharacter);
 
         if (!PhotonNetwork.OfflineMode)
         {
@@ -354,22 +373,6 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         LockInCharacter();
     }
 
-    public void OnChangeCharacterButtonClicked()
-    {
-        if (isCharacterLocked || isTransitioning)
-        {
-            return;
-        }
-
-        SetPanelActive(selectedCharacterPanel, false);
-        selectedCharacterIndex = -1;
-
-        // FIXED: Use centralized room state manager with fallback
-        RoomStateManager.GetOrCreateInstance()?.SetPlayerProperty(RoomStateManager.PLAYER_CHARACTER_KEY, -1);
-
-        UpdateCharacterButtons();
-        UpdatePlayerStatus();
-    }
 
     void LockInCharacter()
     {
@@ -862,6 +865,335 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         }
     }
 
+
+    #endregion
+
+    #region Character Preview System
+
+    /// <summary>
+    /// Get preview prefab for character (separate from gameplay prefab)
+    /// </summary>
+    GameObject GetPreviewPrefabForCharacter(CharacterData characterData)
+    {
+        if (characterPreviewPrefabs == null || characterPreviewPrefabs.Length == 0)
+        {
+            return null;
+        }
+
+        // Find preview prefab by character name
+        foreach (var previewPrefab in characterPreviewPrefabs)
+        {
+            if (previewPrefab != null && previewPrefab.name.Contains(characterData.characterName))
+            {
+                return previewPrefab;
+            }
+        }
+
+        // Fallback: try to match by index if names don't match
+        int characterIndex = GetCharacterIndex(characterData);
+        if (characterIndex >= 0 && characterIndex < characterPreviewPrefabs.Length)
+        {
+            return characterPreviewPrefabs[characterIndex];
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Get character index for preview prefab matching
+    /// </summary>
+    int GetCharacterIndex(CharacterData characterData)
+    {
+        for (int i = 0; i < availableCharacters.Length; i++)
+        {
+            if (availableCharacters[i] == characterData)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Spawn character preview when character is selected
+    /// </summary>
+    void SpawnCharacterPreview(CharacterData characterData)
+    {
+        if (characterData == null || characterData.characterPrefab == null)
+        {
+            Debug.LogWarning($"[CHAR PREVIEW] Character data or prefab is null for {characterData?.characterName ?? "Unknown"}");
+            return;
+        }
+
+        // Destroy current preview if exists
+        DestroyCurrentPreview();
+
+        // Create preview parent if not assigned
+        if (characterPreviewParent == null)
+        {
+            GameObject previewParent = new GameObject("CharacterPreviewParent");
+            characterPreviewParent = previewParent.transform;
+            characterPreviewParent.position = previewPosition;
+        }
+
+        // Use separate preview prefab instead of gameplay prefab
+        GameObject previewPrefab = GetPreviewPrefabForCharacter(characterData);
+        if (previewPrefab == null)
+        {
+            if (debugMode)
+            {
+                Debug.LogWarning($"[CHAR PREVIEW] No preview prefab found for {characterData.characterName}. Using gameplay prefab as fallback.");
+            }
+            // Fallback to gameplay prefab if no preview prefab
+            currentPreviewCharacter = Instantiate(characterData.characterPrefab, characterPreviewParent);
+            DisablePreviewComponents(); // Disable all scripts as fallback
+        }
+        else
+        {
+            // Spawn preview character using dedicated preview prefab (no network components!)
+            currentPreviewCharacter = Instantiate(previewPrefab, characterPreviewParent);
+        }
+        
+        // Set position, rotation, and scale
+        currentPreviewCharacter.transform.localPosition = Vector3.zero;
+        currentPreviewCharacter.transform.localRotation = Quaternion.Euler(previewRotation);
+        currentPreviewCharacter.transform.localScale = Vector3.one * previewScale;
+
+        // Get animator for preview animations
+        currentPreviewAnimator = currentPreviewCharacter.GetComponent<Animator>();
+        
+        // Apply custom animator controller if provided
+        if (previewAnimatorController != null && currentPreviewAnimator != null)
+        {
+            currentPreviewAnimator.runtimeAnimatorController = previewAnimatorController;
+            if (debugMode)
+            {
+                Debug.Log($"[CHAR PREVIEW] Applied custom animator controller: {previewAnimatorController.name}");
+            }
+        }
+
+        // Start preview animation (simplified for custom controller)
+        if (enablePreviewAnimations && currentPreviewAnimator != null)
+        {
+            StartPreviewAnimation();
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"[CHAR PREVIEW] Spawned preview for {characterData.characterName}");
+        }
+    }
+
+    /// <summary>
+    /// Destroy current character preview
+    /// </summary>
+    void DestroyCurrentPreview()
+    {
+        if (currentPreviewCharacter != null)
+        {
+            if (debugMode)
+            {
+                Debug.Log($"[CHAR PREVIEW] Destroying current preview: {currentPreviewCharacter.name}");
+            }
+            
+            DestroyImmediate(currentPreviewCharacter);
+            currentPreviewCharacter = null;
+            currentPreviewAnimator = null;
+        }
+    }
+
+    /// <summary>
+    /// Disable components that shouldn't be active in character preview
+    /// </summary>
+    void DisablePreviewComponents()
+    {
+        if (currentPreviewCharacter == null) return;
+
+        // DISABLE ALL SCRIPTS - Keep only Animator for preview
+        var allMonoBehaviours = currentPreviewCharacter.GetComponentsInChildren<MonoBehaviour>();
+        foreach (var script in allMonoBehaviours)
+        {
+            if (script != null && !(script is Animator))
+            {
+                script.enabled = false;
+                if (debugMode)
+                {
+                    Debug.Log($"[CHAR PREVIEW] Disabled script: {script.GetType().Name}");
+                }
+            }
+        }
+
+        // CRITICAL: DESTROY all network components to prevent Photon errors
+        // This is better than disabling because it completely removes network functionality
+        var photonView = currentPreviewCharacter.GetComponent<PhotonView>();
+        if (photonView != null)
+        {
+            DestroyImmediate(photonView);
+            if (debugMode)
+            {
+                Debug.Log($"[CHAR PREVIEW] Destroyed PhotonView component");
+            }
+        }
+
+        // Destroy SmoothSync components
+        var smoothSync = currentPreviewCharacter.GetComponent<Smooth.SmoothSyncPUN2>();
+        if (smoothSync != null)
+        {
+            DestroyImmediate(smoothSync);
+            if (debugMode)
+            {
+                Debug.Log($"[CHAR PREVIEW] Destroyed SmoothSyncPUN2 component");
+            }
+        }
+
+        // Destroy OptimizedPlayerSync
+        var optimizedPlayerSync = currentPreviewCharacter.GetComponent<OptimizedPlayerSync>();
+        if (optimizedPlayerSync != null)
+        {
+            DestroyImmediate(optimizedPlayerSync);
+            if (debugMode)
+            {
+                Debug.Log($"[CHAR PREVIEW] Destroyed OptimizedPlayerSync component");
+            }
+        }
+
+        // Destroy any other network-related components
+        var networkComponents = currentPreviewCharacter.GetComponents<MonoBehaviourPunCallbacks>();
+        foreach (var component in networkComponents)
+        {
+            DestroyImmediate(component);
+            if (debugMode)
+            {
+                Debug.Log($"[CHAR PREVIEW] Destroyed network component: {component.GetType().Name}");
+            }
+        }
+
+        // Also destroy any PhotonAnimatorView components
+        var photonAnimatorView = currentPreviewCharacter.GetComponent<PhotonAnimatorView>();
+        if (photonAnimatorView != null)
+        {
+            DestroyImmediate(photonAnimatorView);
+            if (debugMode)
+            {
+                Debug.Log($"[CHAR PREVIEW] Destroyed PhotonAnimatorView component");
+            }
+        }
+
+        // Destroy any remaining Photon components recursively
+        var allPhotonComponents = currentPreviewCharacter.GetComponentsInChildren<Component>()
+            .Where(c => c != null && (c.GetType().Name.Contains("Photon") || 
+                                     c.GetType().Name.Contains("SmoothSync") ||
+                                     c.GetType().Name.Contains("Optimized")))
+            .ToArray();
+
+        foreach (var component in allPhotonComponents)
+        {
+            if (component != null && !(component is Transform) && !(component is Animator))
+            {
+                DestroyImmediate(component);
+                if (debugMode)
+                {
+                    Debug.Log($"[CHAR PREVIEW] Destroyed network component: {component.GetType().Name}");
+                }
+            }
+        }
+
+        // Disable colliders to prevent physics interactions
+        var colliders = currentPreviewCharacter.GetComponentsInChildren<Collider>();
+        foreach (var collider in colliders)
+        {
+            collider.enabled = false;
+        }
+
+        // Disable rigidbodies
+        var rigidbodies = currentPreviewCharacter.GetComponentsInChildren<Rigidbody>();
+        foreach (var rb in rigidbodies)
+        {
+            rb.isKinematic = true;
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"[CHAR PREVIEW] Disabled preview components for {currentPreviewCharacter.name}");
+        }
+    }
+
+    /// <summary>
+    /// Start preview animation (simplified for custom controller)
+    /// </summary>
+    void StartPreviewAnimation()
+    {
+        if (currentPreviewAnimator == null) return;
+
+        // If using custom animator controller, it will handle transitions automatically
+        if (previewAnimatorController != null)
+        {
+            // Custom controller handles all transitions automatically
+            if (debugMode)
+            {
+                Debug.Log($"[CHAR PREVIEW] Using custom animator controller - animations will play automatically");
+            }
+        }
+        else
+        {
+            // Fallback for manual animation control
+            currentPreviewAnimator.SetTrigger("Idle");
+            
+            if (enablePreviewAnimations)
+            {
+                StartCoroutine(PlayPreviewVictoryAnimation());
+            }
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"[CHAR PREVIEW] Started preview animation");
+        }
+    }
+
+    /// <summary>
+    /// Play victory animation for preview
+    /// </summary>
+    System.Collections.IEnumerator PlayPreviewVictoryAnimation()
+    {
+        yield return new WaitForSeconds(1f);
+        
+        if (currentPreviewAnimator != null)
+        {
+            currentPreviewAnimator.SetTrigger("Victory");
+        }
+        
+        yield return new WaitForSeconds(2f);
+        
+        // Return to idle
+        if (currentPreviewAnimator != null)
+        {
+            currentPreviewAnimator.SetTrigger("Idle");
+        }
+    }
+
+    /// <summary>
+    /// Update character preview when changing characters
+    /// </summary>
+    public void OnChangeCharacterButtonClicked()
+    {
+        if (isCharacterLocked || isTransitioning)
+        {
+            return;
+        }
+
+        // Destroy current preview
+        DestroyCurrentPreview();
+
+        SetPanelActive(selectedCharacterPanel, false);
+        selectedCharacterIndex = -1;
+
+        // FIXED: Use centralized room state manager with fallback
+        RoomStateManager.GetOrCreateInstance()?.SetPlayerProperty(RoomStateManager.PLAYER_CHARACTER_KEY, -1);
+
+        UpdateCharacterButtons();
+        UpdatePlayerStatus();
+    }
 
     #endregion
 }

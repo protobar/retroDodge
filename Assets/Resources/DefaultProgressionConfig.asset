@@ -61,7 +61,7 @@ MonoBehaviour:
     m_RotationOrder: 4
   maxLevel: 100
   startingXPRequirement: 1000
-  xpGrowthMultiplier: 1.15
+  xpGrowthMultiplier: 1.25
   rankThresholds:
   - rankName: Bronze
     minSR: 0
