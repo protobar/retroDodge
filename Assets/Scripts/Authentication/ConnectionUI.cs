@@ -93,7 +93,7 @@ public class ConnectionUI : MonoBehaviour
         SetupInputFieldValidation();
 
         // Setup loading spinner animation
-        SetupLoadingSpinner();
+        //SetupLoadingSpinner();
 
         Debug.Log("[CONNECTION UI] UI setup complete");
     }
@@ -190,13 +190,13 @@ public class ConnectionUI : MonoBehaviour
         }
     }
 
-    private void SetupLoadingSpinner()
+    /*private void SetupLoadingSpinner()
     {
         if (loadingSpinner != null)
         {
             StartCoroutine(AnimateLoadingSpinner());
         }
-    }
+    }*/
 
     #endregion
 
@@ -703,7 +703,7 @@ public class ConnectionUI : MonoBehaviour
 
     #region Loading Animation
 
-    private IEnumerator AnimateLoadingSpinner()
+    /*private IEnumerator AnimateLoadingSpinner()
     {
         while (true)
         {
@@ -713,7 +713,7 @@ public class ConnectionUI : MonoBehaviour
             }
             yield return null;
         }
-    }
+    }*/
 
     #endregion
 

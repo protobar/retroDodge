@@ -13,10 +13,14 @@ MonoBehaviour:
   m_Name: Echo_Data
   m_EditorClassIdentifier: 
   characterName: Echo
-  characterDescription: Trickster
+  characterDescription: A deceptive dodger who thrives on confusion and chaos.
+  characterTagline: The Trickster
   characterIcon: {fileID: -1525437889, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
   characterPrefab: {fileID: 84948438152551402, guid: 355cb54c60ca3ea4686bfba56f3df327,
     type: 3}
+  characterLore: "Once a street magician from Neonvale\u2019s underbelly, Echo turned
+    his illusions into lethal plays. He bends perception, making enemies see what
+    isn\u2019t there \u2014 until it\u2019s too late."
   moveSpeed: 10
   jumpHeight: 12
   canDoubleJump: 0
@@ -28,7 +32,7 @@ MonoBehaviour:
   damageResistance: 1
   normalThrowDamage: 18
   jumpThrowDamage: 15
-  throwSpeedMultiplier: 1.5
+  throwSpeedMultiplier: 1.75
   throwAccuracy: 1
   characterColor: {r: 1, g: 1, b: 1, a: 1}
   dashEffect: {fileID: 0}
@@ -70,6 +74,8 @@ MonoBehaviour:
   powerThrowSpeed: 30
   powerThrowKnockback: 12
   powerThrowScreenShake: 1.2
+  ultimateDescription: Launches a spinning dodgeball that curves mid-air and bounces
+    unpredictably.
   multiThrowCount: 4
   multiThrowDamagePerBall: 12
   multiThrowSpeed: 50
@@ -88,6 +94,8 @@ MonoBehaviour:
     type: 3}
   trickActivationSound: {fileID: 8300000, guid: 1c07cd6eb68cb784b9c65b6b0556697b,
     type: 3}
+  trickDescription: "Temporarily freezes the opponent\u2019s movement, locking them
+    in place."
   slowSpeedMultiplier: 0.3
   slowSpeedDuration: 4
   freezeDuration: 3
@@ -99,6 +107,8 @@ MonoBehaviour:
     type: 3}
   treatActivationSound: {fileID: 8300000, guid: e1c8551f18b6b224ab3f4427eab95c18,
     type: 3}
+  treatDescription: "Teleports to the opponent\u2019s location for a few seconds
+    before snapping back."
   shieldDuration: 4
   teleportRange: 5
   speedBoostMultiplier: 2.5

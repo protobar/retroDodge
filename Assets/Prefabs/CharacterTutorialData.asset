@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f4115162424d1ae44ad9d109a4f851c3, type: 3}
+  m_Name: CharacterTutorialData
+  m_EditorClassIdentifier: 
+  characterName: Grudge
+  characterDescription: Stiker
+  characterIcon: {fileID: 1368295261, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
+  ultimateName: Meteor Strike
+  ultimateDescription: Throws Fireball that deals Damage
+  ultimateInstructions: Press Q when Ult Bar is full
+  ultimateChargeTime: 10
+  ultimateDamage: 25
+  trickName: Instant Damage
+  trickDescription: Gives instant damage to opponent
+  trickInstructions: Press W to activate Trick when bar is full
+  trickCooldown: 8
+  trickEffect: Instant Damage
+  treatName: Tempo Boost
+  treatDescription: Gives your character temporary speed boost
+  treatInstructions: Press E to activate when bar is full
+  treatCooldown: 6
+  treatEffect: Fast Speed
+  specialMechanics: []
+  specialInstructions: []
+  tutorialTips: []
+  advancedTips: []

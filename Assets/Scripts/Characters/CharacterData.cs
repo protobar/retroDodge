@@ -10,8 +10,13 @@ public class CharacterData : ScriptableObject
     [Header("Character Identity")]
     public string characterName = "Unknown Fighter";
     public string characterDescription = "A mysterious dodgeball warrior";
+    public string characterTagline = "The Ultimate Fighter";
     public Sprite characterIcon;
     public GameObject characterPrefab;
+    
+    [Header("Character Lore")]
+    [TextArea(3, 5)]
+    public string characterLore = "A legendary warrior with unique abilities...";
 
     [Header("Movement Stats")]
     [Range(1f, 10f)]
@@ -93,6 +98,10 @@ public class CharacterData : ScriptableObject
     [SerializeField] private float powerThrowSpeed = 30f;
     [SerializeField] private float powerThrowKnockback = 12f;
     [SerializeField] private float powerThrowScreenShake = 1.2f;
+    
+    [Header("Ultimate Description")]
+    [TextArea(2, 3)]
+    public string ultimateDescription = "A powerful throw that deals massive damage and knockback.";
 
     [Header("Ultimate: MultiThrow Settings")]
     [SerializeField] private int multiThrowCount = 4;
@@ -127,6 +136,10 @@ public class CharacterData : ScriptableObject
 
     [Header("Trick Audio")]
     [SerializeField] private AudioClip trickActivationSound; // Sound when trick is used
+    
+    [Header("Trick Description")]
+    [TextArea(2, 3)]
+    public string trickDescription = "A cunning ability that affects your opponent.";
 
     [Header("Trick: Slow Speed Settings")]
     [SerializeField] private float slowSpeedMultiplier = 0.3f;
@@ -156,6 +169,10 @@ public class CharacterData : ScriptableObject
 
     [Header("Treat Audio")]
     [SerializeField] private AudioClip treatActivationSound; // Sound when treat is used
+    
+    [Header("Treat Description")]
+    [TextArea(2, 3)]
+    public string treatDescription = "A beneficial ability that helps you in battle.";
 
     [Header("Treat: Shield Settings")]
     [SerializeField] private float shieldDuration = 4f;

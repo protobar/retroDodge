@@ -13,10 +13,14 @@ MonoBehaviour:
   m_Name: Grudge_Data
   m_EditorClassIdentifier: 
   characterName: Grudge
-  characterDescription: Slow but devastating
+  characterDescription: A powerhouse bruiser who turns every hit into a threat.
+  characterTagline: The Enforcer
   characterIcon: {fileID: 1368295261, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
   characterPrefab: {fileID: 583287291519579574, guid: c21e6b79dca229f479d9ff9a8925ec7b,
     type: 3}
+  characterLore: "A former scrapyard enforcer, Grudge entered RumbleDodge after his
+    brother\u2019s death in a corrupted match. Now, he fights to tear through anyone
+    standing in his way \u2014 one slam at a time."
   moveSpeed: 9
   jumpHeight: 12
   canDoubleJump: 0
@@ -28,7 +32,7 @@ MonoBehaviour:
   damageResistance: 0.8
   normalThrowDamage: 20
   jumpThrowDamage: 15
-  throwSpeedMultiplier: 1.5
+  throwSpeedMultiplier: 1.75
   throwAccuracy: 1
   characterColor: {r: 1, g: 1, b: 1, a: 1}
   dashEffect: {fileID: 0}
@@ -70,6 +74,8 @@ MonoBehaviour:
   powerThrowSpeed: 30
   powerThrowKnockback: 12
   powerThrowScreenShake: 1.2
+  ultimateDescription: Leaps into the air and smashes down, creating a shockwave
+    that deals massive area damage.
   multiThrowCount: 4
   multiThrowDamagePerBall: 12
   multiThrowSpeed: 22
@@ -87,6 +93,8 @@ MonoBehaviour:
   trickEffectVFX: {fileID: 154672, guid: 5dabf78823224e146aff88a3e9452a63, type: 3}
   trickActivationSound: {fileID: 8300000, guid: a20fce45ea96c1949b8c9bc8ad7d056b,
     type: 3}
+  trickDescription: "Delivers a burst of raw force that instantly reduces the opponent\u2019s
+    health."
   slowSpeedMultiplier: 0.3
   slowSpeedDuration: 4
   freezeDuration: 2.5
@@ -98,6 +106,7 @@ MonoBehaviour:
     type: 3}
   treatActivationSound: {fileID: 8300000, guid: 00350704bad08804783f9ad22ffa3899,
     type: 3}
+  treatDescription: Gains a short speed and power boost, making all attacks hit harder.
   shieldDuration: 4
   teleportRange: 8
   speedBoostMultiplier: 1.5

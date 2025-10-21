@@ -13,10 +13,14 @@ MonoBehaviour:
   m_Name: Nova_Data
   m_EditorClassIdentifier: 
   characterName: Nova
-  characterDescription: Fast and evasive
+  characterDescription: A lightning-fast warrior with relentless momentum and precision.
+  characterTagline: The Speed Demon
   characterIcon: {fileID: -1254451046, guid: db9daefe7b596a84d99a935f4ba18ccb, type: 3}
   characterPrefab: {fileID: 8167500664113679454, guid: ac6d0717d9c7db04c91c552004a3f5d6,
     type: 3}
+  characterLore: "Raised in the fast lanes of Sector 4, Nova\u2019s reflexes and
+    instincts make her a blur on the court. She doesn\u2019t play to dodge \u2014
+    she plays to dominate before anyone blinks."
   moveSpeed: 10
   jumpHeight: 12
   canDoubleJump: 1
@@ -28,7 +32,7 @@ MonoBehaviour:
   damageResistance: 1.2
   normalThrowDamage: 15
   jumpThrowDamage: 15
-  throwSpeedMultiplier: 1.5
+  throwSpeedMultiplier: 1.75
   throwAccuracy: 0.7
   characterColor: {r: 1, g: 1, b: 1, a: 1}
   dashEffect: {fileID: 2755417596474721463, guid: 133b20c48d371d94bb543a6b1fe5ed83,
@@ -77,6 +81,8 @@ MonoBehaviour:
   powerThrowSpeed: 30
   powerThrowKnockback: 12
   powerThrowScreenShake: 1.2
+  ultimateDescription: Summons multiple dodgeballs that auto-target nearby enemies
+    for a short duration.
   multiThrowCount: 4
   multiThrowDamagePerBall: 10
   multiThrowSpeed: 25
@@ -95,6 +101,8 @@ MonoBehaviour:
     type: 3}
   trickActivationSound: {fileID: 8300000, guid: 0cc6c19f2a24d0c439974ea7ff051833,
     type: 3}
+  trickDescription: "Reduces opponent\u2019s movement speed drastically for a short
+    time."
   slowSpeedMultiplier: 0.3
   slowSpeedDuration: 3
   freezeDuration: 2.5
@@ -106,12 +114,13 @@ MonoBehaviour:
     type: 3}
   treatActivationSound: {fileID: 8300000, guid: beb9439f7ea924544ba3a2d91552481c,
     type: 3}
+  treatDescription: Activates a temporary energy barrier that blocks all damage.
   shieldDuration: 3
   teleportRange: 5
   speedBoostMultiplier: 2.5
   speedBoostDuration: 5
-  treatChargeRequired: 30
-  treatChargeRate: 3
+  treatChargeRequired: 100
+  treatChargeRate: 1.25
   jumpSounds:
   - {fileID: 8300000, guid: 3dd1971e6cd13644782d1a2b8f336c32, type: 3}
   - {fileID: 8300000, guid: b22495e2599c7cb4ea8bb0f82ec6a443, type: 3}

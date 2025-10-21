@@ -143,6 +143,9 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         
         // Update competitive button state based on level
         UpdateCompetitiveButtonState();
+        
+        // SIMPLE TUTORIAL INTEGRATION: Check for new players and tutorial status
+        CheckSimpleTutorialStatus();
     }
     
     /// <summary>
@@ -1013,6 +1016,78 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
         if (startGameButton != null)
             startGameButton.gameObject.SetActive(PhotonNetwork.IsMasterClient);
     }
+    #endregion
+
+    #region SIMPLE TUTORIAL INTEGRATION
+    
+    /// <summary>
+    /// Check simple tutorial status and show appropriate UI
+    /// </summary>
+    void CheckSimpleTutorialStatus()
+    {
+        // Check if tutorial has been seen
+        bool tutorialSeen = PlayerPrefs.GetInt("TutorialSeen", 0) == 1;
+        
+        // Check if this is a new player
+        bool isNewPlayer = !PlayerPrefs.HasKey("IsNewPlayer");
+        
+        if (debugMode)
+        {
+            Debug.Log($"[MAIN MENU] Simple Tutorial Status - Seen: {tutorialSeen}, New Player: {isNewPlayer}");
+        }
+        
+        // Show tutorial button for new players or if not seen
+        if (isNewPlayer || !tutorialSeen)
+        {
+            ShowTutorialButton();
+        }
+        
+        // Show new player welcome if new player
+        if (isNewPlayer)
+        {
+            ShowNewPlayerWelcome();
+        }
+    }
+    
+    /// <summary>
+    /// Show tutorial button
+    /// </summary>
+    void ShowTutorialButton()
+    {
+        // Add tutorial button to main menu if not already present
+        // This would be implemented based on your UI system
+        if (debugMode)
+        {
+            Debug.Log("[MAIN MENU] Showing simple tutorial button");
+        }
+    }
+    
+    /// <summary>
+    /// Show new player welcome
+    /// </summary>
+    void ShowNewPlayerWelcome()
+    {
+        // Mark as not new player
+        PlayerPrefs.SetInt("IsNewPlayer", 1);
+        PlayerPrefs.Save();
+        
+        // Show welcome message
+        UpdateStatus("Welcome to Retro Dodge Rumble! Check out the tutorial to learn the basics.");
+        
+        if (debugMode)
+        {
+            Debug.Log("[MAIN MENU] New player welcome shown");
+        }
+    }
+    
+    /// <summary>
+    /// Check if tutorial has been seen
+    /// </summary>
+    public bool IsTutorialSeen()
+    {
+        return PlayerPrefs.GetInt("TutorialSeen", 0) == 1;
+    }
+    
     #endregion
 
     #region FIXED: Photon Callbacks
