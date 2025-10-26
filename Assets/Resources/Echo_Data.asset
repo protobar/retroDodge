@@ -30,7 +30,7 @@ MonoBehaviour:
   dashDuration: 0.2
   maxHealth: 100
   damageResistance: 1
-  normalThrowDamage: 18
+  normalThrowDamage: 12
   jumpThrowDamage: 15
   throwSpeedMultiplier: 1.75
   throwAccuracy: 1
@@ -87,11 +87,12 @@ MonoBehaviour:
   curveballAmplitude: 20
   curveballFrequency: 30
   curveballDuration: 2
-  ultimateChargeRequired: 100
-  ultimateChargeRate: 1.25
+  ultimateChargeRequired: 200
+  ultimateChargeRate: 1.2
   trickType: 1
   trickEffectVFX: {fileID: 7980599541491969784, guid: ddbc779ed0c2149428a536de6ee267da,
     type: 3}
+  trickUIEffect: {fileID: 21300000, guid: 12f87fa0c8bebdf40a61eee74d4938cb, type: 3}
   trickActivationSound: {fileID: 8300000, guid: 1c07cd6eb68cb784b9c65b6b0556697b,
     type: 3}
   trickDescription: "Temporarily freezes the opponent\u2019s movement, locking them
@@ -101,12 +102,15 @@ MonoBehaviour:
   freezeDuration: 3
   instantDamageAmount: 15
   trickChargeRequired: 100
-  trickChargeRate: 1.5
+  trickChargeRate: 1.2
   treatType: 1
   treatEffectVFX: {fileID: 5059734141994152730, guid: f6f59fb1229f8334c9663951ccb48969,
     type: 3}
+  treatUIEffect: {fileID: 21300000, guid: c2647358dd544c1499f51cb53f7543cd, type: 3}
   treatActivationSound: {fileID: 8300000, guid: e1c8551f18b6b224ab3f4427eab95c18,
     type: 3}
+  stunEffectVFX: {fileID: 109542, guid: cd198156fe95bad47b3223b9e1e78861, type: 3}
+  stunVFXOffset: {x: 0, y: 4, z: 0}
   treatDescription: "Teleports to the opponent\u2019s location for a few seconds
     before snapping back."
   shieldDuration: 4
@@ -114,7 +118,7 @@ MonoBehaviour:
   speedBoostMultiplier: 2.5
   speedBoostDuration: 5
   treatChargeRequired: 100
-  treatChargeRate: 1.25
+  treatChargeRate: 1.1
   jumpSounds:
   - {fileID: 8300000, guid: f8135e85d23d3724c8b6738be5234e68, type: 3}
   - {fileID: 8300000, guid: 7b5dc9c8e5e7ef84899f52800872b461, type: 3}

@@ -4612,6 +4612,14 @@ MonoBehaviour:
   hasDoubleJumped: 0
   isDashing: 0
   isTeleporting: 0
+  ultimateAnimationDuration: 2.3
+  ultimateHoldTimeout: 1
+  hitsToStun: 4
+  stunDuration: 3
+  consecutiveHitWindow: 3
+  fallAnimationDuration: 0.75
+  groundDuration: 1
+  getUpAnimationDuration: 1
 --- !u!114 &5601460604517676128
 MonoBehaviour:
   m_ObjectHideFlags: 0

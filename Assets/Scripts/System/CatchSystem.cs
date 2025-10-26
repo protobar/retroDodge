@@ -258,6 +258,12 @@ public class CatchSystem : MonoBehaviourPunCallbacks
 
     void HandleCatchInput()
     {
+        // CRITICAL: Can't catch during stun or fallback
+        if (playerCharacter != null && (playerCharacter.IsStunned() || playerCharacter.IsFallen()))
+        {
+            return;
+        }
+        
         if (inputHandler?.GetCatchPressed() == true && isCatchingAvailable)
         {
             AttemptCatch();

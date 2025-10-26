@@ -22,10 +22,26 @@ namespace RetroDodge
 	private enum AIState { SeekBall, ApproachAndPickup, EngageWithBall, Evade }
 	private AIState state = AIState.SeekBall;
 		
-		// Echo-specific teleport strategies
+		// Character-specific strategy flags
 		private bool isEcho = false;
+		private bool isGrudge = false;
+		private bool isNova = false;
+		
+		// Echo-specific teleport strategies
 		private float lastTeleportTime;
 		private float teleportCooldown = 3f;
+		
+		// Grudge-specific aggressive strategies
+		private float lastShieldTime;
+		private float shieldCooldown = 4f;
+		private float aggression = 1.0f; // Grudge is naturally more aggressive
+		
+		// Nova-specific positioning strategies
+		private float lastSpeedBoostTime;
+		private float speedBoostCooldown = 5f;
+		private bool isPositioningForMultiBall = false;
+		
+		// Shared
 		private float lastDodgeTime;
 		private float dodgeCooldown = 1.2f;
         private float lastStateSwitch;
@@ -73,12 +89,29 @@ namespace RetroDodge
 			// Disable human inputs for AI
 			ih?.ConfigureForAI();
 			
-			// Check if this is Echo character
+			// Check character type for specialized strategies
 			var characterData = controlledCharacter?.GetCharacterData();
-			if (characterData != null && characterData.characterName.ToLower().Contains("echo"))
+			if (characterData != null)
 			{
-				isEcho = true;
-				teleportCooldown = 2.5f; // Shorter cooldown for Echo
+				string charName = characterData.characterName.ToLower();
+				
+				if (charName.Contains("echo"))
+				{
+					isEcho = true;
+					teleportCooldown = 2.5f; // Shorter cooldown for Echo
+					if (debugMode) Debug.Log($"[AI] {gameObject.name} identified as ECHO - Teleport strategies active");
+				}
+				else if (charName.Contains("grudge"))
+				{
+					isGrudge = true;
+					aggression = 1.5f; // Grudge is 50% more aggressive
+					if (debugMode) Debug.Log($"[AI] {gameObject.name} identified as GRUDGE - Aggressive tank strategies active");
+				}
+				else if (charName.Contains("nova"))
+				{
+					isNova = true;
+					if (debugMode) Debug.Log($"[AI] {gameObject.name} identified as NOVA - Multi-ball specialist strategies active");
+				}
 			}
 		}
 
@@ -340,13 +373,25 @@ namespace RetroDodge
 								ConsumeAction("dash");
 							}
 							
-							// IMPROVED: Crouch to avoid low throws
-							bool shouldCrouch = incomingBallThreat && Random.value < (parms.dodgeProbability * 0.8f);
-							if (shouldCrouch && actionBudget > 0.5f)
+							// IMPROVED: Intelligent crouch to avoid throws
+							bool shouldCrouch = false;
+							if (incomingBallThreat && actionBudget > 0.3f)
 							{
-								frame.duckHeld = true;
-								ConsumeAction("duck");
-								if (debugMode) Debug.Log($"[AI] {controlledCharacter.name} crouching to avoid ball");
+								// Check ball height to decide if ducking will help
+								float ballHeight = ball.transform.position.y - selfPos.y;
+								bool ballIsHighEnough = ballHeight > 0.5f && ballHeight < 2.5f; // Between knee and head height
+								
+								// Higher chance to duck if ball is at right height
+								float duckChance = ballIsHighEnough ? (parms.dodgeProbability * 1.2f) : (parms.dodgeProbability * 0.4f);
+								
+								shouldCrouch = Random.value < duckChance;
+								
+								if (shouldCrouch)
+								{
+									frame.duckHeld = true;
+									ConsumeAction("duck");
+									if (debugMode) Debug.Log($"[AI] {controlledCharacter.name} crouching to avoid ball (height: {ballHeight:F2})");
+								}
 							}
 						}
 					}
@@ -415,15 +460,29 @@ namespace RetroDodge
 							}
 						}
 						
-						// IMPROVED: Crouch while holding ball to avoid incoming throws
-						bool incomingThreat = targetOpponent != null && targetOpponent.HasBall() && 
-							Vector3.Distance(targetOpponent.transform.position, selfPos) < 6f;
-						bool shouldCrouchWhileHolding = incomingThreat && Random.value < (parms.dodgeProbability * 0.6f);
-						if (shouldCrouchWhileHolding && actionBudget > 0.5f)
+						// IMPROVED: Intelligent crouch while holding ball to avoid incoming throws
+						bool incomingThreat = targetOpponent != null && targetOpponent.HasBall();
+						if (incomingThreat && actionBudget > 0.3f)
 						{
-							frame.duckHeld = true;
-							ConsumeAction("duck");
-							if (debugMode) Debug.Log($"[AI] {controlledCharacter.name} crouching while holding ball");
+							float threatDistance = Vector3.Distance(targetOpponent.transform.position, selfPos);
+							bool opponentFacingUs = Vector3.Dot(
+								targetOpponent.transform.right, 
+								(selfPos - targetOpponent.transform.position).normalized
+							) > 0.5f;
+							
+							// Duck if opponent is close and facing us (likely to throw)
+							bool shouldCrouchWhileHolding = threatDistance < 7f && opponentFacingUs && 
+								Random.value < (parms.dodgeProbability * 0.7f);
+								
+							// Grudge is more likely to duck while holding (tank playstyle)
+							if (isGrudge) shouldCrouchWhileHolding = threatDistance < 9f && Random.value < 0.85f;
+							
+							if (shouldCrouchWhileHolding)
+							{
+								frame.duckHeld = true;
+								ConsumeAction("duck");
+								if (debugMode) Debug.Log($"[AI] {controlledCharacter.name} crouching while holding ball (threat distance: {threatDistance:F1})");
+							}
 						}
 					}
 					break;
@@ -435,46 +494,90 @@ namespace RetroDodge
 			}
 
 			// Use abilities when appropriate
-			if (controlledCharacter.HasBall())
+			// CRITICAL: Only use ultimate when CONFIRMED to have ball
+			bool confirmedHasBall = controlledCharacter.HasBall();
+			if (confirmedHasBall)
 			{
-				// Ultimate - only when charged and holding ball (high damage potential)
-				if (controlledCharacter.GetUltimateChargePercentage() >= 1f && Random.value < 0.08f)
+				// Double-check ball state before ultimate (prevent timing issues)
+				var currentBall = BallManager.Instance?.GetCurrentBall();
+				bool ballActuallyHeld = currentBall != null && currentBall.GetHolder() == controlledCharacter;
+				
+				if (ballActuallyHeld)
 				{
-					frame.ultimatePressed = true;
-				}
-			}
-
-			// Trick - use on opponent when charged (offensive/defensive utility)
-			if (controlledCharacter.GetTrickChargePercentage() >= 1f && Random.value < 0.12f)
-			{
-				frame.trickPressed = true;
-			}
-
-			// Echo-specific teleport strategies
-			if (isEcho)
-			{
-				if (ShouldTeleportDodge() || ShouldTeleportSteal() || ShouldTeleportAttack())
-				{
-					frame.treatPressed = true;
-					ExecuteTeleportStrategy();
-				}
-			}
-			else
-			{
-				// Regular treat usage for non-Echo characters
-				if (controlledCharacter.GetTreatChargePercentage() >= 1f)
-				{
-					var health = controlledCharacter.GetComponent<PlayerHealth>();
-					bool lowHealth = health != null && health.GetCurrentHealth() < health.GetMaxHealth() * 0.4f;
-					bool underPressure = targetOpponent != null && targetOpponent.HasBall() && 
-						Vector3.Distance(targetOpponent.transform.position, controlledCharacter.transform.position) < 4f;
-					
-					if ((lowHealth || underPressure) && Random.value < 0.15f)
+					// Ultimate - only when charged and holding ball (high damage potential)
+					// NOTE: AI just presses ultimate once. The ultimate system will:
+					//   1. Play full activation animation (2.3s)
+					//   2. Wait for timeout (2s) 
+					//   3. Auto-throw (AI doesn't need to release Q)
+					if (controlledCharacter.GetUltimateChargePercentage() >= 1f && Random.value < 0.08f)
 					{
-						frame.treatPressed = true;
+						frame.ultimatePressed = true;
+						if (debugMode) Debug.Log($"[AI] {controlledCharacter.name} activating ultimate (ball confirmed held)");
 					}
 				}
 			}
+
+			// CRITICAL: Can't use abilities during stun or fallback
+			bool canUseAbilities = !controlledCharacter.IsStunned() && !controlledCharacter.IsFallen();
+			
+			if (canUseAbilities)
+			{
+				// Trick - use on opponent when charged (offensive/defensive utility)
+				if (controlledCharacter.GetTrickChargePercentage() >= 1f && Random.value < 0.12f)
+				{
+					frame.trickPressed = true;
+				}
+
+				// ═══════════════════════════════════════════════════════════════
+				// CHARACTER-SPECIFIC ABILITY STRATEGIES
+				// ═══════════════════════════════════════════════════════════════
+				
+				// Echo-specific teleport strategies
+				if (isEcho)
+				{
+					if (ShouldTeleportDodge() || ShouldTeleportSteal() || ShouldTeleportAttack())
+					{
+						frame.treatPressed = true;
+						ExecuteTeleportStrategy();
+					}
+				}
+				// Grudge-specific shield strategies
+				else if (isGrudge)
+				{
+					// Shield: Use defensively when under pressure or before aggressive attack
+					if (ShouldUseShield())
+					{
+						frame.treatPressed = true;
+						ExecuteShieldStrategy();
+					}
+				}
+				// Nova-specific speed boost strategies
+				else if (isNova)
+				{
+					// Speed Boost: Use for positioning, ball steal, or escape
+					if (ShouldUseSpeedBoost())
+					{
+						frame.treatPressed = true;
+						ExecuteSpeedBoostStrategy();
+					}
+				}
+				else
+				{
+					// Fallback treat usage for unknown characters
+					if (controlledCharacter.GetTreatChargePercentage() >= 1f)
+					{
+						var health = controlledCharacter.GetComponent<PlayerHealth>();
+						bool lowHealth = health != null && health.GetCurrentHealth() < health.GetMaxHealth() * 0.4f;
+						bool underPressure = targetOpponent != null && targetOpponent.HasBall() && 
+							Vector3.Distance(targetOpponent.transform.position, controlledCharacter.transform.position) < 4f;
+						
+						if ((lowHealth || underPressure) && Random.value < 0.15f)
+						{
+							frame.treatPressed = true;
+						}
+					}
+				}
+			} // End canUseAbilities check
 
 			return frame;
 		}
@@ -605,6 +708,259 @@ namespace RetroDodge
 			if (debugMode)
 			{
 				Debug.Log($"[ECHO AI] Executed teleport strategy");
+			}
+		}
+		
+		// ═══════════════════════════════════════════════════════════════
+		// GRUDGE SHIELD STRATEGIES (TANK/AGGRESSIVE PLAYSTYLE)
+		// ═══════════════════════════════════════════════════════════════
+		
+		bool CanUseShield()
+		{
+			return isGrudge && 
+				   Time.time - lastShieldTime > shieldCooldown && 
+				   controlledCharacter.GetTreatChargePercentage() >= 1f;
+		}
+		
+		// Scenario 1: Defensive Shield - Under heavy pressure
+		bool ShouldUseShieldDefensive()
+		{
+			if (!CanUseShield()) return false;
+			
+			// Shield when opponent has ball and is close (imminent throw threat)
+			if (targetOpponent != null && targetOpponent.HasBall())
+			{
+				float distance = Vector3.Distance(controlledCharacter.transform.position, targetOpponent.transform.position);
+				bool opponentFacingUs = Vector3.Dot(
+					targetOpponent.transform.right,
+					(controlledCharacter.transform.position - targetOpponent.transform.position).normalized
+				) > 0.6f;
+				
+				// Activate shield if opponent is close and facing us
+				if (distance < 8f && opponentFacingUs && Random.value < 0.4f)
+				{
+					if (debugMode) Debug.Log($"[GRUDGE AI] Defensive shield - opponent threat at {distance:F1}m");
+					return true;
+				}
+			}
+			
+			// Shield when ball is thrown at us
+			if (ball != null && ball.GetBallState() == BallController.BallState.Thrown)
+			{
+				Vector3 ballPos = ball.transform.position;
+				Vector3 ballVel = ball.GetVelocity();
+				Vector3 ourPos = controlledCharacter.transform.position;
+				
+				// Predict if ball will hit us
+				float ballDistance = Vector3.Distance(ballPos, ourPos);
+				if (ballDistance < 5f && Vector3.Dot(ballVel.normalized, (ourPos - ballPos).normalized) > 0.5f)
+				{
+					if (debugMode) Debug.Log($"[GRUDGE AI] Emergency shield - incoming ball at {ballDistance:F1}m");
+					return Random.value < 0.5f; // 50% chance to shield instead of dodge
+				}
+			}
+			
+			return false;
+		}
+		
+		// Scenario 2: Aggressive Shield - Tank push with ball
+		bool ShouldUseShieldAggressive()
+		{
+			if (!CanUseShield() || !controlledCharacter.HasBall()) return false;
+			
+			// Shield before aggressive ultimate or when closing distance
+			if (targetOpponent != null)
+			{
+				float distance = Vector3.Distance(controlledCharacter.transform.position, targetOpponent.transform.position);
+				
+				// Shield when moving toward opponent with ball (tank push)
+				bool isMovingToward = Vector3.Dot(
+					(targetOpponent.transform.position - controlledCharacter.transform.position).normalized,
+					controlledCharacter.transform.right
+				) > 0.5f;
+				
+				// Ultimate is ready - shield and push for guaranteed hit
+				bool ultimateReady = controlledCharacter.GetUltimateChargePercentage() >= 1f;
+				if (ultimateReady && distance < 12f && Random.value < 0.6f)
+				{
+					if (debugMode) Debug.Log($"[GRUDGE AI] Aggressive shield - ultimate tank push");
+					return true;
+				}
+				
+				// Shield when at medium range for safe positioning
+				if (distance > 6f && distance < 10f && isMovingToward && Random.value < 0.25f)
+				{
+					if (debugMode) Debug.Log($"[GRUDGE AI] Tank shield - safe positioning");
+					return true;
+				}
+			}
+			
+			return false;
+		}
+		
+		// Scenario 3: Low Health Shield - Survival
+		bool ShouldUseShieldSurvival()
+		{
+			if (!CanUseShield()) return false;
+			
+			var health = controlledCharacter.GetComponent<PlayerHealth>();
+			if (health != null)
+			{
+				float healthPercent = (float)health.GetCurrentHealth() / health.GetMaxHealth();
+				
+				// Shield when low on health (below 40%)
+				if (healthPercent < 0.4f && Random.value < 0.7f)
+				{
+					if (debugMode) Debug.Log($"[GRUDGE AI] Survival shield - low health ({healthPercent * 100:F0}%)");
+					return true;
+				}
+			}
+			
+			return false;
+		}
+		
+		bool ShouldUseShield()
+		{
+			return ShouldUseShieldDefensive() || ShouldUseShieldAggressive() || ShouldUseShieldSurvival();
+		}
+		
+		void ExecuteShieldStrategy()
+		{
+			lastShieldTime = Time.time;
+			controlledCharacter.ActivateTreat(); // Trigger shield
+			
+			if (debugMode)
+			{
+				Debug.Log($"[GRUDGE AI] Executed shield strategy");
+			}
+		}
+		
+		// ═══════════════════════════════════════════════════════════════
+		// NOVA SPEED BOOST STRATEGIES (MULTI-BALL SPECIALIST)
+		// ═══════════════════════════════════════════════════════════════
+		
+		bool CanUseSpeedBoost()
+		{
+			return isNova && 
+				   Time.time - lastSpeedBoostTime > speedBoostCooldown && 
+				   controlledCharacter.GetTreatChargePercentage() >= 1f;
+		}
+		
+		// Scenario 1: Speed Boost for Ball Steal
+		bool ShouldSpeedBoostSteal()
+		{
+			if (!CanUseSpeedBoost() || ball == null) return false;
+			
+			// Use speed boost when ball is free and we can steal it
+			if (ball.GetBallState() == BallController.BallState.Free)
+			{
+				float ourDistance = Vector3.Distance(controlledCharacter.transform.position, ball.transform.position);
+				
+				if (targetOpponent != null)
+				{
+					float opponentDistance = Vector3.Distance(targetOpponent.transform.position, ball.transform.position);
+					
+					// Boost if opponent is closer and racing for ball
+					if (opponentDistance < ourDistance && ourDistance < 10f && Random.value < 0.45f)
+					{
+						if (debugMode) Debug.Log($"[NOVA AI] Speed boost - ball steal race");
+						return true;
+					}
+				}
+				
+				// Boost if ball is far but gettable
+				if (ourDistance > 6f && ourDistance < 12f && Random.value < 0.3f)
+				{
+					if (debugMode) Debug.Log($"[NOVA AI] Speed boost - closing distance to ball");
+					return true;
+				}
+			}
+			
+			return false;
+		}
+		
+		// Scenario 2: Speed Boost for Ultimate Positioning
+		bool ShouldSpeedBoostPosition()
+		{
+			if (!CanUseSpeedBoost() || !controlledCharacter.HasBall()) return false;
+			
+			// Use speed boost when ultimate is ready to get perfect positioning
+			bool ultimateReady = controlledCharacter.GetUltimateChargePercentage() >= 1f;
+			if (ultimateReady && targetOpponent != null)
+			{
+				float distance = Vector3.Distance(controlledCharacter.transform.position, targetOpponent.transform.position);
+				
+				// Too far - boost to get into optimal multi-ball range (8-12 units)
+				if (distance > 12f && Random.value < 0.5f)
+				{
+					isPositioningForMultiBall = true;
+					if (debugMode) Debug.Log($"[NOVA AI] Speed boost - multi-ball positioning");
+					return true;
+				}
+				
+				// Good range - prepare for multi-ball ult
+				if (distance > 8f && distance < 14f && Random.value < 0.35f)
+				{
+					isPositioningForMultiBall = true;
+					if (debugMode) Debug.Log($"[NOVA AI] Speed boost - optimal multi-ball setup");
+					return true;
+				}
+			}
+			
+			return false;
+		}
+		
+		// Scenario 3: Speed Boost for Escape/Evasion
+		bool ShouldSpeedBoostEscape()
+		{
+			if (!CanUseSpeedBoost()) return false;
+			
+			// Use speed boost to escape when opponent has ball and is close
+			if (targetOpponent != null && targetOpponent.HasBall())
+			{
+				float distance = Vector3.Distance(controlledCharacter.transform.position, targetOpponent.transform.position);
+				
+				// Opponent too close with ball - speed boost to create distance
+				if (distance < 6f && Random.value < 0.4f)
+				{
+					if (debugMode) Debug.Log($"[NOVA AI] Speed boost - escape from threat");
+					return true;
+				}
+			}
+			
+			// Escape when ball is thrown at us (alternative to dodging)
+			if (ball != null && ball.GetBallState() == BallController.BallState.Thrown)
+			{
+				Vector3 ballPos = ball.transform.position;
+				Vector3 ballVel = ball.GetVelocity();
+				Vector3 ourPos = controlledCharacter.transform.position;
+				
+				float ballDistance = Vector3.Distance(ballPos, ourPos);
+				bool ballComingToUs = Vector3.Dot(ballVel.normalized, (ourPos - ballPos).normalized) > 0.5f;
+				
+				if (ballDistance < 6f && ballComingToUs && Random.value < 0.3f)
+				{
+					if (debugMode) Debug.Log($"[NOVA AI] Speed boost - evade incoming ball");
+					return true;
+				}
+			}
+			
+			return false;
+		}
+		
+		bool ShouldUseSpeedBoost()
+		{
+			return ShouldSpeedBoostSteal() || ShouldSpeedBoostPosition() || ShouldSpeedBoostEscape();
+		}
+		
+		void ExecuteSpeedBoostStrategy()
+		{
+			lastSpeedBoostTime = Time.time;
+			controlledCharacter.ActivateTreat(); // Trigger speed boost
+			
+			if (debugMode)
+			{
+				Debug.Log($"[NOVA AI] Executed speed boost strategy");
 			}
 		}
 		

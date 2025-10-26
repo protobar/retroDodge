@@ -69,6 +69,8 @@ public class PlayerInputHandler : MonoBehaviourPun
     private bool pickupPressed = false;
     private bool dashPressed = false;
     private bool ultimatePressed = false;
+    private bool ultimateHeld = false; // NEW: Track if ultimate key is being held
+    private bool ultimateReleased = false; // NEW: Track if ultimate key was released this frame
     private bool trickPressed = false;
     private bool treatPressed = false;
 
@@ -370,6 +372,7 @@ public class PlayerInputHandler : MonoBehaviourPun
         pickupPressed = false;
         dashPressed = false;
         ultimatePressed = false;
+        ultimateReleased = false; // NEW: Reset ultimate release state
         trickPressed = false;
         treatPressed = false;
     }
@@ -440,11 +443,20 @@ public class PlayerInputHandler : MonoBehaviourPun
             lastDashInput = Time.time;
         }
 
-        // Ultimate input
+        // Ultimate input - NEW: Track press, hold, and release
         if (Input.GetKeyDown(ultimateKey))
         {
             ultimatePressed = true;
             lastUltimateInput = Time.time;
+        }
+        
+        // NEW: Track held state for ultimate charging
+        ultimateHeld = Input.GetKey(ultimateKey);
+        
+        // NEW: Track key release
+        if (Input.GetKeyUp(ultimateKey))
+        {
+            ultimateReleased = true;
         }
 
         // Trick input
@@ -860,6 +872,18 @@ public class PlayerInputHandler : MonoBehaviourPun
     public bool GetUltimatePressed()
     {
         return ultimatePressed;
+    }
+
+    // NEW: Get ultimate key held state
+    public bool GetUltimateHeld()
+    {
+        return ultimateHeld;
+    }
+
+    // NEW: Get ultimate key released state
+    public bool GetUltimateReleased()
+    {
+        return ultimateReleased;
     }
 
     public bool GetTrickPressed()

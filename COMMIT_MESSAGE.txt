@@ -1,0 +1,55 @@
+feat: Implement Ultimate Cinematic System, Stun/Fallback Mechanics, and VFX Fixes
+
+## Major Features
+- ✨ Cinematic ultimate camera zoom with charge shake (KOF/Street Fighter style)
+- ✨ Stun system: 3-5 consecutive hits trigger 3s stun with break mechanic
+- ✨ Ultimate fallback: Ultimate hits cause fall → ground → get up sequence
+- ✨ Movement lock during 2.3s ultimate activation animation
+- ✨ Ultimate hold/release flow: Animation → Idle → Throw on Q release/timeout
+
+## Critical Fixes
+- 🐛 Fixed Grudge's ultimate fire trail VFX not appearing (moved attachment to animation event path)
+- 🐛 Fixed all character ultimate ball VFX trails (Echo energy, Nova multi-ball)
+- 🐛 Fixed stun VFX rotation spawning incorrectly
+- 🐛 Fixed stun animation continuing after stun break
+- 🐛 Fixed AI ultimate activation before holding ball
+- 🐛 Fixed AI ultimate effects not applying (separated AI/human systems)
+
+## VFX Improvements
+- 🎨 All ultimate ball trails working with proper attachment timing
+- 🎨 Character-specific stun VFX with correct rotation
+- 🎨 Proper VFX cleanup on player hit, ground bounce, and dodge
+- 🎨 Camera shake during ultimate charge (2.3s continuous vibration)
+- 🎨 P1/P2 camera rotation auto-mirroring for cinematic zoom
+
+## Gameplay Changes
+- 🎮 Players cannot catch/throw during stun or fallback
+- 🎮 Trick/Treat abilities no longer require holding ball
+- 🎮 Ultimate MUST be used with ball (enforced for human and AI)
+- 🎮 Stun breaks immediately when stunned player is hit (fighting game style)
+- 🎮 Movement disabled during ultimate activation for dramatic effect
+
+## Technical
+- Added stun/fallback animation parameters (IS_STUNNED, IS_FALLEN, STUN, FALL, GET_UP)
+- Separated AI ultimate system (instant execution) from human (cinematic)
+- Added ResetToIdle() for proper animation state cleanup
+- Extensive debug logging for VFX attachment troubleshooting
+- Camera zoom settings fully exposed in Inspector (distance, height, rotation, shake)
+
+## Files Changed
+- PlayerCharacter.cs - Ultimate flow, stun/fallback, VFX attachment
+- CameraController.cs - Cinematic zoom, rotation mirroring, charge shake
+- PlayerAnimationController.cs - Stun/fallback triggers, ResetToIdle()
+- BallController.cs - DestroyAttachedVFX(), state transition cleanup
+- CollisionDamageSystem.cs - VFX cleanup on hit, ultimate detection
+- VFXManager.cs - AttachUltimateBallVFX() with extensive logging
+- CatchSystem.cs - Stun/fallback catch prevention
+- AIControllerBrain.cs - Ball requirement checks
+
+## Documentation
+- Created comprehensive guides for all systems
+- Added Inspector setting references
+- Documented testing procedures
+
+Ready for playtesting! 🎮
+

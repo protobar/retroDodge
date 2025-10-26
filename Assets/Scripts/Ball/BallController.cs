@@ -453,6 +453,13 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         if (isGrounded && velocity.y <= 0)
         {
             velocity.y = -velocity.y * bounceMultiplier;
+            
+            // Destroy VFX on first ground bounce for ultimate throws
+            if (currentThrowType == ThrowType.Ultimate && currentWallBounces == 0)
+            {
+                DestroyAttachedVFX();
+            }
+            
             if (velocity.magnitude < 5f)
             {
                 SetBallState(BallState.Free);
@@ -1072,6 +1079,33 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
         Debug.Log($"  - Speed: {currentThrowSpeed}");
     }
 
+    /// <summary>
+    /// Destroy all attached VFX (called when ball hits player or ground)
+    /// </summary>
+    public void DestroyAttachedVFX()
+    {
+        // Find all child particle systems and destroy them
+        ParticleSystem[] particles = GetComponentsInChildren<ParticleSystem>();
+        foreach (var ps in particles)
+        {
+            if (ps != null && ps.gameObject != gameObject)
+            {
+                Destroy(ps.gameObject);
+            }
+        }
+        
+        // Also destroy any child GameObjects that aren't the ball itself
+        foreach (Transform child in transform)
+        {
+            if (child != null && child.gameObject != gameObject)
+            {
+                Destroy(child.gameObject);
+            }
+        }
+        
+        Debug.Log("[BALL] Destroyed attached VFX");
+    }
+    
     public void ResetBall()
     {
         Vector3 spawnPosition = new Vector3(0, 2f, fixedZPosition); // NEW: Use fixedZPosition
@@ -1108,6 +1142,16 @@ public class BallController : MonoBehaviourPunCallbacks, IPunObservable
 
     public void SetBallState(BallState newState)
     {
+        // Cleanup VFX when ball becomes free (dodged ultimates)
+        if (newState == BallState.Free && currentState == BallState.Thrown)
+        {
+            if (currentThrowType == ThrowType.Ultimate)
+            {
+                DestroyAttachedVFX();
+                Debug.Log("[BALL] Ball dodged - destroyed ultimate VFX");
+            }
+        }
+        
         currentState = newState;
 
         switch (newState)

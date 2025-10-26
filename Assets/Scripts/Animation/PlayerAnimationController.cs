@@ -21,6 +21,8 @@ namespace RetroDodgeRumble.Animation
         private static readonly int IS_DUCKING_HASH = Animator.StringToHash("IsDucking");
         private static readonly int HAS_BALL_HASH = Animator.StringToHash("HasBall");
         private static readonly int IS_DASHING_HASH = Animator.StringToHash("IsDashing");
+        private static readonly int IS_STUNNED_HASH = Animator.StringToHash("IsStunned");
+        private static readonly int IS_FALLEN_HASH = Animator.StringToHash("IsFallen");
 
         // Trigger Parameters
         private static readonly int JUMP_HASH = Animator.StringToHash("Jump");
@@ -36,6 +38,9 @@ namespace RetroDodgeRumble.Animation
         private static readonly int DEATH_HASH = Animator.StringToHash("Death");
         private static readonly int VICTORY_HASH = Animator.StringToHash("Victory");
         private static readonly int DEFEAT_HASH = Animator.StringToHash("Defeat");
+        private static readonly int STUN_HASH = Animator.StringToHash("Stun");
+        private static readonly int FALL_HASH = Animator.StringToHash("Fall");
+        private static readonly int GET_UP_HASH = Animator.StringToHash("GetUp");
 
         #endregion
 
@@ -109,6 +114,24 @@ namespace RetroDodgeRumble.Animation
         {
             if (!animator) return;
             animator.SetBool(IS_DASHING_HASH, dashing);
+        }
+
+        /// <summary>
+        /// Set stunned state
+        /// </summary>
+        public void SetStunned(bool stunned)
+        {
+            if (!animator) return;
+            animator.SetBool(IS_STUNNED_HASH, stunned);
+        }
+
+        /// <summary>
+        /// Set fallen state
+        /// </summary>
+        public void SetFallen(bool fallen)
+        {
+            if (!animator) return;
+            animator.SetBool(IS_FALLEN_HASH, fallen);
         }
 
         #endregion
@@ -248,6 +271,33 @@ namespace RetroDodgeRumble.Animation
         {
             if (!animator) return;
             animator.SetTrigger(TREAT_HASH);
+        }
+
+        /// <summary>
+        /// Trigger stun animation (after consecutive hits)
+        /// </summary>
+        public void TriggerStun()
+        {
+            if (!animator) return;
+            animator.SetTrigger(STUN_HASH);
+        }
+
+        /// <summary>
+        /// Trigger fall animation (when hit by ultimate)
+        /// </summary>
+        public void TriggerFall()
+        {
+            if (!animator) return;
+            animator.SetTrigger(FALL_HASH);
+        }
+
+        /// <summary>
+        /// Trigger get up animation (after falling)
+        /// </summary>
+        public void TriggerGetUp()
+        {
+            if (!animator) return;
+            animator.SetTrigger(GET_UP_HASH);
         }
 
         #endregion

@@ -321,7 +321,10 @@ public class CollisionDamageSystem : MonoBehaviour
         bool attemptedCatch = false;
         bool successfulCatch = false;
 
-        if (catchSystem != null)
+        // CRITICAL: Can't catch if stunned or fallen
+        bool canCatch = !hitPlayer.IsStunned() && !hitPlayer.IsFallen();
+
+        if (catchSystem != null && canCatch)
         {
             if (catchSystem.IsBallInRange())
             {
@@ -354,6 +357,9 @@ public class CollisionDamageSystem : MonoBehaviour
             CreateEnhancedImpactEffects(hitPlayer, hitType, attemptedCatch);
             HandlePostImpactPhysics(hitPlayer, attemptedCatch);
         }
+        
+        // Destroy any attached VFX (ultimate ball trail effects)
+        ballController.DestroyAttachedVFX();
 
         // Mark collision properly
         hasHitThisThrow = true;
@@ -449,7 +455,8 @@ public class CollisionDamageSystem : MonoBehaviour
         {
             // Offline: apply damage locally with proper attacker reference
             PlayerCharacter thrower = ballController.GetThrower();
-            playerHealth.TakeDamage(damage, thrower);
+            bool isUltimateHit = (hitType == HitType.Ultimate);
+            playerHealth.TakeDamage(damage, thrower, isUltimateHit);
             
             // Track damage dealt for progression
             if (thrower != null)
@@ -463,7 +470,7 @@ public class CollisionDamageSystem : MonoBehaviour
             
             if (debugMode)
             {
-                Debug.Log($"Applied {damage} damage OFFLINE to {hitPlayer.name} from {thrower?.name ?? "unknown"}");
+                Debug.Log($"Applied {damage} damage OFFLINE to {hitPlayer.name} from {thrower?.name ?? "unknown"} (Ultimate: {isUltimateHit})");
             }
         }
         else
@@ -491,16 +498,19 @@ public class CollisionDamageSystem : MonoBehaviour
                     }
                 }
 
+                bool isUltimateHit = (hitType == HitType.Ultimate);
+                
                 if (debugMode)
                 {
                     Debug.Log($"DAMAGE RPC: Sending {damage} damage to {hitPlayer.name} (ViewID: {hitPlayerView.ViewID}) from thrower ViewID: {attackerViewID}");
                     Debug.Log($"  - Ball Owner: {ballController.photonView.Owner?.NickName}");
                     Debug.Log($"  - Hit Type: {hitType}");
+                    Debug.Log($"  - Ultimate Hit: {isUltimateHit}");
                     Debug.Log($"  - Attempted Catch: {attemptedCatch}");
                 }
 
                 // Send RPC ONLY to the hit player's client (not RpcTarget.All)
-                hitPlayerView.RPC("TakeDamageFromBall", hitPlayerView.Owner, damage, attackerViewID);
+                hitPlayerView.RPC("TakeDamageFromBall", hitPlayerView.Owner, damage, attackerViewID, isUltimateHit);
             }
             else
             {
@@ -601,11 +611,6 @@ public class CollisionDamageSystem : MonoBehaviour
 
     void HandlePostImpactPhysics(PlayerCharacter hitPlayer, bool attemptedCatch)
     {
-        if (ballController != null)
-        {
-            ballController.RemoveUltimateBallVFX();
-        }
-
         // Authentic Super Dodge Ball bounce physics
         Vector3 ballPos = transform.position;
         Vector3 playerPos = hitPlayer.transform.position;

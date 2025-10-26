@@ -37,6 +37,15 @@ public class CameraController : MonoBehaviour
     [SerializeField] private float baseShakeDuration = 0.3f;
     [SerializeField] private float maxShakeIntensity = 10.0f; // Increased for testing
     [SerializeField] private bool allowShakeStacking = true;
+    
+    [Header("Ultimate Cinematic Zoom (KOF/SF Style)")]
+    [SerializeField] private float ultimateZoomDistance = 6f; // How close to zoom (lower = closer)
+    [SerializeField] private float ultimateZoomHeight = 5f; // Camera height during zoom
+    [SerializeField] private Vector3 ultimatePlayerOffset = new Vector3(0f, 1.5f, 0f); // Focus point offset above player
+    [SerializeField] private Vector3 ultimateZoomRotation = new Vector3(30f, 0f, 0f); // Camera rotation during zoom (Euler angles)
+    [SerializeField] private float ultimateZoomInSpeed = 8f; // How fast to zoom in
+    [SerializeField] private float ultimateZoomOutSpeed = 5f; // How fast to zoom out
+    [SerializeField] private float ultimateChargeShakeIntensity = 0.3f; // Camera shake intensity during zoom (0 = no shake)
 
     // Player references
     private Transform player1;
@@ -51,6 +60,10 @@ public class CameraController : MonoBehaviour
     // Camera shake - improved system
     private List<ShakeData> activeShakes = new List<ShakeData>();
     private Vector3 shakeOffset = Vector3.zero;
+    
+    // Ultimate cinematic zoom
+    private bool isUltimateZoomActive = false;
+    private Coroutine ultimateZoomCoroutine = null;
 
     [System.Serializable]
     private class ShakeData
@@ -135,7 +148,11 @@ public class CameraController : MonoBehaviour
             return;
         }
 
-        UpdateCameraPosition();
+        // Skip normal camera logic if ultimate zoom is active
+        if (!isUltimateZoomActive)
+        {
+            UpdateCameraPosition();
+        }
     }
 
     void UpdateCameraPosition()
@@ -348,6 +365,191 @@ public class CameraController : MonoBehaviour
     public float GetPlayerDistance()
     {
         return playerDistance;
+    }
+    
+    // ══════════════════════════════════════════════════════════
+    // ULTIMATE CINEMATIC ZOOM (KOF/Street Fighter Style)
+    // ══════════════════════════════════════════════════════════
+    
+    /// <summary>
+    /// Start cinematic zoom on player activating ultimate (KOF/SF style)
+    /// LOCAL ONLY - Call this only for the local player
+    /// </summary>
+    public void StartUltimateZoom(Transform player, float duration)
+    {
+        // Stop any existing zoom
+        if (ultimateZoomCoroutine != null)
+        {
+            StopCoroutine(ultimateZoomCoroutine);
+        }
+        
+        ultimateZoomCoroutine = StartCoroutine(UltimateZoomSequence(player, duration));
+        
+        if (showDebugInfo)
+        {
+            Debug.Log($"[CAMERA] Starting ultimate zoom on {player.name} for {duration}s");
+        }
+    }
+    
+    /// <summary>
+    /// Ultimate zoom sequence: Zoom in → Hold → Zoom out
+    /// </summary>
+    IEnumerator UltimateZoomSequence(Transform targetPlayer, float duration)
+    {
+        isUltimateZoomActive = true;
+        
+        // Save current camera state
+        Vector3 originalPosition = transform.position;
+        Quaternion originalRotation = transform.rotation;
+        
+        // Detect if target is P1 or P2 and mirror rotation for P2
+        bool isPlayer2 = (targetPlayer == player2);
+        Vector3 adjustedRotation = ultimateZoomRotation;
+        
+        if (isPlayer2)
+        {
+            // Mirror Y rotation for P2 (right side player)
+            adjustedRotation.y = -adjustedRotation.y;
+            
+            if (showDebugInfo)
+            {
+                Debug.Log($"[CAMERA] P2 detected - Mirrored Y rotation from {ultimateZoomRotation.y} to {adjustedRotation.y}");
+            }
+        }
+        
+        // Convert ultimate rotation to Quaternion
+        Quaternion targetRotation = Quaternion.Euler(adjustedRotation);
+        
+        // Trigger intense charge vibration for the full ultimate duration
+        if (ultimateChargeShakeIntensity > 0f)
+        {
+            ShakeCamera(ultimateChargeShakeIntensity, duration); // Shake for full ultimate duration (2.3s)
+            
+            if (showDebugInfo)
+            {
+                Debug.Log($"[CAMERA] Ultimate charge shake triggered (intensity: {ultimateChargeShakeIntensity}, duration: {duration}s)");
+            }
+        }
+        
+        // Calculate zoom target position (closer to player, focus on them)
+        Vector3 playerFocusPoint = targetPlayer.position + ultimatePlayerOffset;
+        Vector3 zoomTargetPosition = new Vector3(
+            playerFocusPoint.x,
+            ultimateZoomHeight,
+            playerFocusPoint.z - ultimateZoomDistance
+        );
+        
+        // Phase 1: Zoom in (quick)
+        float zoomInDuration = 0.4f; // Quick zoom in
+        float elapsed = 0f;
+        
+        while (elapsed < zoomInDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / zoomInDuration;
+            
+            // Smooth ease-in using quadratic easing
+            float smoothT = 1f - (1f - t) * (1f - t);
+            
+            // Update player focus point dynamically as player might move
+            playerFocusPoint = targetPlayer.position + ultimatePlayerOffset;
+            zoomTargetPosition = new Vector3(
+                playerFocusPoint.x,
+                ultimateZoomHeight,
+                playerFocusPoint.z - ultimateZoomDistance
+            );
+            
+            // Lerp camera position and rotation
+            transform.position = Vector3.Lerp(originalPosition, zoomTargetPosition, smoothT);
+            transform.rotation = Quaternion.Slerp(originalRotation, targetRotation, smoothT);
+            
+            // Apply camera shake if any
+            UpdateCameraShake();
+            transform.position += shakeOffset;
+            
+            yield return null;
+        }
+        
+        // Phase 2: Hold zoom on player (during animation)
+        float holdDuration = duration - zoomInDuration - 0.5f; // Subtract zoom in/out times
+        elapsed = 0f;
+        
+        while (elapsed < holdDuration)
+        {
+            elapsed += Time.deltaTime;
+            
+            // Keep camera focused on player as they might move
+            playerFocusPoint = targetPlayer.position + ultimatePlayerOffset;
+            Vector3 holdTargetPosition = new Vector3(
+                playerFocusPoint.x,
+                ultimateZoomHeight,
+                playerFocusPoint.z - ultimateZoomDistance
+            );
+            
+            // Smoothly follow player during hold
+            transform.position = Vector3.Lerp(transform.position, holdTargetPosition, Time.deltaTime * ultimateZoomInSpeed);
+            
+            // Keep custom rotation during hold
+            transform.rotation = targetRotation;
+            
+            // Apply camera shake if any
+            UpdateCameraShake();
+            transform.position += shakeOffset;
+            
+            yield return null;
+        }
+        
+        // Phase 3: Zoom out (smooth return to normal)
+        float zoomOutDuration = 0.5f;
+        elapsed = 0f;
+        Vector3 startZoomOutPosition = transform.position;
+        Quaternion startZoomOutRotation = transform.rotation;
+        
+        while (elapsed < zoomOutDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / zoomOutDuration;
+            
+            // Smooth ease-out using quadratic easing
+            float smoothT = t * t;
+            
+            // Calculate current normal camera position (in case players moved)
+            midpoint = (player1.position + player2.position) * 0.5f;
+            playerDistance = Vector3.Distance(player1.position, player2.position);
+            float currentTargetZoom = Mathf.Clamp(playerDistance * distanceMultiplier, minDistance, maxDistance);
+            
+            Vector3 currentNormalPosition = new Vector3(
+                midpoint.x,
+                basePosition.y,
+                basePosition.z - currentTargetZoom
+            );
+            
+            // Apply bounds
+            if (enableBounds)
+            {
+                currentNormalPosition.x = Mathf.Clamp(currentNormalPosition.x, leftBound, rightBound);
+                currentNormalPosition.y = Mathf.Clamp(currentNormalPosition.y, bottomBound, topBound);
+            }
+            
+            // Lerp back to normal camera position and rotation
+            transform.position = Vector3.Lerp(startZoomOutPosition, currentNormalPosition, smoothT);
+            transform.rotation = Quaternion.Slerp(startZoomOutRotation, fixedRotation, smoothT);
+            
+            // Apply camera shake if any
+            UpdateCameraShake();
+            transform.position += shakeOffset;
+            
+            yield return null;
+        }
+        
+        // Reset state
+        isUltimateZoomActive = false;
+        transform.rotation = fixedRotation; // Ensure rotation is reset
+        
+        if (showDebugInfo)
+        {
+            Debug.Log("[CAMERA] Ultimate zoom sequence complete");
+        }
     }
 
     // Debug visualization

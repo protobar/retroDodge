@@ -93,7 +93,7 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
     /// <summary>
     /// Simplified damage method - authority on owner only
     /// </summary>
-    public void TakeDamage(int damage, PlayerCharacter attacker)
+    public void TakeDamage(int damage, PlayerCharacter attacker, bool isUltimateHit = false)
     {
         if (!PhotonNetwork.OfflineMode && (!photonView.IsMine || isDead || isInvulnerable)) return;
         if (PhotonNetwork.OfflineMode && (isDead || isInvulnerable)) return;
@@ -105,8 +105,8 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         // Track damage taken for progression
         damageTaken += actualDamage;
 
-        // Add ability charges
-        playerCharacter?.OnDamageTaken(actualDamage);
+        // Add ability charges and trigger stun/fallback systems
+        playerCharacter?.OnDamageTaken(actualDamage, isUltimateHit);
 
         // NEW: Trigger hit animation when taking damage (but not when dead)
         if (currentHealth > 0)
@@ -154,10 +154,10 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
 
 
     /// <summary>
-    /// Ball damage RPC - simplified
+    /// Ball damage RPC - simplified (with ultimate hit support)
     /// </summary>
     [PunRPC]
-    void TakeDamageFromBall(int damage, int attackerViewID)
+    void TakeDamageFromBall(int damage, int attackerViewID, bool isUltimateHit = false)
     {
         if (!photonView.IsMine || isDead || isInvulnerable) return;
 
@@ -168,8 +168,8 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
             attacker = attackerView?.GetComponent<PlayerCharacter>();
         }
 
-        // TakeDamage will handle the hit animation
-        TakeDamage(damage, attacker);
+        // TakeDamage will handle the hit animation and stun/fallback systems
+        TakeDamage(damage, attacker, isUltimateHit);
     }
 
     /// <summary>

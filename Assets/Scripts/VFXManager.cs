@@ -239,7 +239,67 @@ public class VFXManager : MonoBehaviour
         }
     }
 
-    
+    /// <summary>
+    /// Stage 2: Attach ultimate ball VFX to the ball during flight (trail effect)
+    /// </summary>
+    public void AttachUltimateBallVFX(GameObject ball, PlayerCharacter caster)
+    {
+        Debug.Log($"[VFX] AttachUltimateBallVFX called - Ball: {ball?.name}, Caster: {caster?.name}");
+        
+        if (ball == null)
+        {
+            Debug.LogError("[VFX] Ball is NULL!");
+            return;
+        }
+        
+        if (caster == null)
+        {
+            Debug.LogError("[VFX] Caster is NULL!");
+            return;
+        }
+
+        CharacterData casterData = caster.GetCharacterData();
+        if (casterData == null)
+        {
+            Debug.LogError($"[VFX] CharacterData is NULL for {caster.name}!");
+            return;
+        }
+        
+        Debug.Log($"[VFX] Character: {casterData.characterName}, UltimateType: {casterData.ultimateType}");
+
+        // Get character-specific ultimate ball VFX (fire trail, energy trail, etc.)
+        GameObject ballVFXPrefab = casterData.GetUltimateBallVFX();
+        
+        if (ballVFXPrefab == null)
+        {
+            Debug.LogWarning($"[VFX] Ultimate Ball VFX prefab is NULL for {casterData.characterName}! Please assign it in CharacterData inspector.");
+            return;
+        }
+        
+        Debug.Log($"[VFX] VFX Prefab found: {ballVFXPrefab.name}");
+        
+        // Instantiate and attach to ball
+        GameObject ballVFX = Instantiate(ballVFXPrefab, ball.transform.position, Quaternion.identity);
+        ballVFX.transform.SetParent(ball.transform); // Attach to ball so it follows
+        ballVFX.transform.localPosition = Vector3.zero; // Center on ball
+        
+        Debug.Log($"[VFX] VFX instantiated and parented to ball: {ballVFX.name}");
+        
+        // Auto-play particle systems
+        ParticleSystem[] particles = ballVFX.GetComponentsInChildren<ParticleSystem>();
+        Debug.Log($"[VFX] Found {particles.Length} particle systems in VFX");
+        
+        foreach (var ps in particles)
+        {
+            if (!ps.isPlaying)
+            {
+                ps.Play();
+                Debug.Log($"[VFX] Started particle system: {ps.name}");
+            }
+        }
+        
+        Debug.Log($"🔥 SUCCESS: Attached ultimate ball VFX '{ballVFXPrefab.name}' to ball for {casterData.characterName}");
+    }
 
     /// <summary>
     /// Stage 3: Ultimate impact when ball hits opponent

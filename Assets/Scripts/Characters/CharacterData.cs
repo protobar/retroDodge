@@ -134,6 +134,9 @@ public class CharacterData : ScriptableObject
     [Header("Trick VFX - Spawns on Opponent Only")]
     [SerializeField] private GameObject trickEffectVFX; // Effect that spawns on opponent (damage, slow, freeze effect)
 
+    [Header("Trick UI Effect - Shows on Opponent Screen")]
+    [SerializeField] private Sprite trickUIEffect; // UI image shown on opponent's screen when trick is used
+
     [Header("Trick Audio")]
     [SerializeField] private AudioClip trickActivationSound; // Sound when trick is used
     
@@ -167,8 +170,25 @@ public class CharacterData : ScriptableObject
     [Header("Treat VFX - Spawns on Self Only")]
     [SerializeField] private GameObject treatEffectVFX; // Effect that spawns on self (shield, speed boost, teleport effect)
 
+    [Header("Treat UI Effect - Shows on Self Screen")]
+    [SerializeField] private Sprite treatUIEffect; // UI image shown on own screen when treat is used
+
     [Header("Treat Audio")]
     [SerializeField] private AudioClip treatActivationSound; // Sound when treat is used
+    
+    // ═══════════════════════════════════════════════════════════════
+    // STUN VFX SYSTEM
+    // ═══════════════════════════════════════════════════════════════
+    
+    [Header("═══════════════════════════════════")]
+    [Header("STUN VFX (When Stunned)")]
+    [Header("═══════════════════════════════════")]
+    
+    [Header("Stun VFX - Spawns on Player When Stunned")]
+    [SerializeField] private GameObject stunEffectVFX; // Effect that spawns on player when stunned (stars, dizzy effect)
+    
+    [Header("Stun VFX Position Offset")]
+    [SerializeField] private Vector3 stunVFXOffset = new Vector3(0f, 2.0f, 0f); // Offset from player position (above head)
     
     [Header("Treat Description")]
     [TextArea(2, 3)]
@@ -279,6 +299,11 @@ public class CharacterData : ScriptableObject
         return trickEffectVFX;
     }
 
+    public Sprite GetTrickUIEffect()
+    {
+        return trickUIEffect;
+    }
+
     public AudioClip GetTrickActivationSound()
     {
         return trickActivationSound;
@@ -291,9 +316,26 @@ public class CharacterData : ScriptableObject
         return treatEffectVFX;
     }
 
+    public Sprite GetTreatUIEffect()
+    {
+        return treatUIEffect;
+    }
+
     public AudioClip GetTreatActivationSound()
     {
         return treatActivationSound;
+    }
+    #endregion
+    
+    #region Stun VFX (Effect on Stunned Player)
+    public GameObject GetStunEffectVFX()
+    {
+        return stunEffectVFX;
+    }
+    
+    public Vector3 GetStunVFXOffset()
+    {
+        return stunVFXOffset;
     }
     #endregion
 

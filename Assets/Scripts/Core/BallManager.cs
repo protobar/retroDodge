@@ -610,6 +610,12 @@ public class BallManager : MonoBehaviourPunCallbacks
                 float angleOffset = (i - (throwCount - 1) * 0.5f) * (spreadAngle / throwCount);
                 throwDir = Quaternion.Euler(0, angleOffset, 0) * throwDir;
 
+                // Attach ultimate ball VFX (trail effect) BEFORE throwing - LOCAL ONLY
+                if (thrower.IsLocalPlayer() && VFXManager.Instance != null)
+                {
+                    VFXManager.Instance.AttachUltimateBallVFX(tempBallObj, thrower);
+                }
+                
                 tempBall.ThrowBallInternal(throwDir.normalized, 1f);
 
                 // Auto-destroy temp balls after time

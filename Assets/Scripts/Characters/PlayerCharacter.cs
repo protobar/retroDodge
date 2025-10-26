@@ -69,6 +69,51 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     private float[] abilityCharges = new float[3]; // Ultimate, Trick, Treat
     private bool[] abilityCooldowns = new bool[3];
     private readonly float[] cooldownTimes = { 3f, 8f, 10f };
+    
+    // Ultimate System - Animation-based with timeout
+    [Header("Ultimate Settings")]
+    [SerializeField] [Range(1f, 5f)] [Tooltip("Duration of ultimate activation animation")]
+    private float ultimateAnimationDuration = 2.3f;
+    
+    [SerializeField] [Range(1f, 5f)] [Tooltip("Max time to hold after animation before auto-throw")]
+    private float ultimateHoldTimeout = 2f;
+    
+    private bool isUltimateActive = false; // Player is in ultimate state
+    private bool isUltimateReadyToThrow = false; // Animation finished, ready to throw
+    private bool qReleasedDuringAnimation = false; // Track if Q was released during animation
+    private Coroutine ultimateSequenceCoroutine = null;
+    private bool isAIControlled = false; // Cached check for AI control
+
+    // Stun System - Consecutive hits trigger stun
+    [Header("Stun Settings")]
+    [SerializeField] [Range(3, 5)] [Tooltip("Number of consecutive hits before stun")]
+    private int hitsToStun = 3;
+    
+    [SerializeField] [Range(1f, 5f)] [Tooltip("Duration of stun effect")]
+    private float stunDuration = 3f;
+    
+    [SerializeField] [Range(0.5f, 3f)] [Tooltip("Time window for consecutive hits")]
+    private float consecutiveHitWindow = 2f;
+    
+    private int consecutiveHits = 0;
+    private float lastHitTime = 0f;
+    private bool isStunned = false;
+    private Coroutine stunCoroutine = null;
+    private GameObject activeStunVFX = null; // Track active stun VFX for cleanup
+    
+    // Ultimate Fallback System - Fall when hit by ultimate
+    [Header("Ultimate Fallback Settings")]
+    [SerializeField] [Range(0.5f, 2f)] [Tooltip("Duration of fall animation")]
+    private float fallAnimationDuration = 0.5f;
+    
+    [SerializeField] [Range(0.5f, 3f)] [Tooltip("Duration on ground")]
+    private float groundDuration = 1f;
+    
+    [SerializeField] [Range(0.5f, 2f)] [Tooltip("Duration of get up animation")]
+    private float getUpAnimationDuration = 0.8f;
+    
+    private bool isFallen = false;
+    private Coroutine fallbackCoroutine = null;
 
     // Collider cache for ducking
     private float originalColliderHeight;
@@ -132,6 +177,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         
         // Initialize AFK System
         InitializeAFKSystem();
+        
+        // Cache AI check for ultimate system
+        isAIControlled = gameObject.name.Contains("AI") || GetComponent("AIControllerBrain") != null;
     }
 
     void CacheComponents()
@@ -466,10 +514,31 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
             PerformDash();
         }
 
-        // Abilities - only in fighting state
-        if (IsMatchStateAllowingAbilities())
+        // Abilities - only in fighting state and NOT stunned/fallen
+        if (IsMatchStateAllowingAbilities() && !isStunned && !isFallen)
         {
-            if (inputHandler.GetUltimatePressed() && CanUseAbility(0)) ActivateUltimate();
+            // Ultimate: Press Q to activate (MUST have ball!)
+            if (inputHandler.GetUltimatePressed() && CanUseAbility(0) && !isUltimateActive && hasBall)
+            {
+                ActivateUltimate();
+            }
+            
+            // Track Q release during animation (will throw when animation finishes)
+            // IMPORTANT: Don't track this for AI - AI uses timeout system
+            if (!isAIControlled && isUltimateActive && !isUltimateReadyToThrow && inputHandler.GetUltimateReleased())
+            {
+                qReleasedDuringAnimation = true;
+                Debug.Log($"[ULTIMATE] Q released during animation - will throw when animation finishes");
+            }
+            
+            // Release Q to throw ultimate (after animation finishes)
+            // IMPORTANT: Don't allow this for AI - AI uses timeout system
+            if (!isAIControlled && isUltimateReadyToThrow && inputHandler.GetUltimateReleased())
+            {
+                ThrowUltimate();
+            }
+            
+            // Trick and Treat: Don't require ball, just charge
             if (inputHandler.GetTrickPressed() && CanUseAbility(1)) ActivateTrick();
             if (inputHandler.GetTreatPressed() && CanUseAbility(2)) ActivateTreat();
         }
@@ -480,12 +549,13 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     bool ShouldProcessInput()
     {
         return inputHandler != null && characterData != null &&
-               inputEnabled && (PhotonNetwork.OfflineMode || (photonView?.IsMine != false));
+               inputEnabled && !isStunned && !isFallen && 
+               (PhotonNetwork.OfflineMode || (photonView?.IsMine != false));
     }
 
     void HandleMovement()
     {
-        if (!movementEnabled || isDashing || isDucking) return;
+        if (!movementEnabled || isDashing || isDucking || isStunned || isFallen) return;
 
         float horizontal = inputHandler.GetHorizontal();
 
@@ -742,6 +812,12 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     void HandleBallInteraction()
     {
         if (BallManager.Instance == null || !IsMatchStateAllowingAbilities()) return;
+        
+        // CRITICAL: Can't interact with ball during stun or fallback
+        if (isStunned || isFallen)
+        {
+            return;
+        }
 
         // Pickup
         if (inputHandler.GetPickupPressed() && !hasBall)
@@ -865,6 +941,31 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         animationController?.SetHasBall(false);
 
         BallManager.Instance.RequestBallThrowWithCharacterData(this, characterData, throwType, damage);
+        
+        // CRITICAL FIX: Attach Ultimate Ball VFX after ball is thrown via animation event
+        if (throwType == ThrowType.Ultimate)
+        {
+            var ball = BallManager.Instance?.GetCurrentBall();
+            if (ball != null)
+            {
+                Debug.Log($"[THROW] Ultimate detected! Attaching VFX - IsLocalPlayer: {IsLocalPlayer()}, VFXManager: {VFXManager.Instance != null}");
+                
+                if (IsLocalPlayer() && VFXManager.Instance != null)
+                {
+                    Debug.Log($"[THROW] Calling AttachUltimateBallVFX for {characterData?.characterName}");
+                    VFXManager.Instance.AttachUltimateBallVFX(ball.gameObject, this);
+                    Debug.Log($"[THROW] ✅ Ultimate Ball VFX attached for {characterData?.characterName}!");
+                }
+                else
+                {
+                    Debug.LogWarning($"[THROW] VFX NOT attached - IsLocalPlayer: {IsLocalPlayer()}, VFXManager: {VFXManager.Instance != null}");
+                }
+            }
+            else
+            {
+                Debug.LogError("[THROW] Ball is NULL after RequestBallThrow!");
+            }
+        }
 
         PlayCharacterSound(CharacterAudioType.Throw);
 
@@ -1006,32 +1107,288 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         abilityCooldowns[abilityIndex] = false;
     }
 
+
     // ══════════════════════════════════════════════════════════
-    // SPECIFIC ABILITIES (UNCHANGED - WORKING)
+    // SPECIFIC ABILITIES (MODIFIED FOR CINEMATIC ULTIMATE)
     // ══════════════════════════════════════════════════════════
 
     void ActivateUltimate()
     {
+        // CRITICAL: Must have ball to use ultimate
+        if (!hasBall)
+        {
+            if (debugMode) Debug.LogWarning($"[ULTIMATE] {name} tried to activate ultimate without ball!");
+            return;
+        }
+        
+        // ADDITIONAL CHECK: Verify ball is actually held
+        var currentBall = BallManager.Instance?.GetCurrentBall();
+        if (currentBall == null || currentBall.GetHolder() != this)
+        {
+            if (debugMode) Debug.LogWarning($"[ULTIMATE] {name} hasBall=true but ball holder mismatch!");
+            SetHasBall(false); // Fix state
+            return;
+        }
+        
+        // Consume charge and start cooldown
         abilityCharges[0] = 0f;
         StartCoroutine(AbilityCooldown(0));
         
-        // Animation
-        animationController?.TriggerUltimate();
-        
-        // FIXED: Only sync in online mode, not offline
+        // Sync with others (they see animation, not our input state)
         if (!PhotonNetwork.OfflineMode && photonView.IsMine)
         {
             photonView.RPC("SyncPlayerAction", RpcTarget.Others, "Ultimate");
         }
 
         SpawnUltimateVFX();
-
+        
+        // AI: Use old simple system (no hold/release, just execute immediately)
+        if (isAIControlled)
+        {
+            Debug.Log($"[ULTIMATE] AI {characterData.characterName} using simple ultimate system");
+            
+            // Execute the ultimate based on type (old system - immediate)
+            switch (characterData.ultimateType)
+            {
+                case UltimateType.PowerThrow: ExecutePowerThrow(); break;
+                case UltimateType.MultiThrow: StartCoroutine(ExecuteMultiThrow()); break;
+                case UltimateType.Curveball: ExecuteCurveball(); break;
+            }
+            return;
+        }
+        
+        // HUMAN PLAYERS ONLY: Use new animation-based system with hold/release
+        isUltimateActive = true;
+        isUltimateReadyToThrow = false;
+        qReleasedDuringAnimation = false; // Reset flag
+        
+        // Disable movement during ultimate activation animation
+        movementEnabled = false;
+        
+        // Play activation animation
+        animationController?.TriggerUltimate();
+        
+        // CINEMATIC: Trigger camera zoom (KOF/SF style) - LOCAL ONLY
+        CameraController cameraController = FindObjectOfType<CameraController>();
+        if (cameraController != null)
+        {
+            cameraController.StartUltimateZoom(transform, ultimateAnimationDuration);
+            Debug.Log($"[ULTIMATE] Camera zoom triggered for {ultimateAnimationDuration}s");
+        }
+        
+        // Start the full sequence
+        if (ultimateSequenceCoroutine != null)
+        {
+            StopCoroutine(ultimateSequenceCoroutine);
+        }
+        ultimateSequenceCoroutine = StartCoroutine(UltimateSequence());
+        
+        Debug.Log($"[ULTIMATE] Activated! Playing animation for {ultimateAnimationDuration}s - movement disabled");
+    }
+    
+    /// <summary>
+    /// Full ultimate sequence: Animation → Idle → Timeout/Throw (HUMAN PLAYERS ONLY)
+    /// </summary>
+    IEnumerator UltimateSequence()
+    {
+        // Step 1: Wait for activation animation to complete (2.3 seconds)
+        Debug.Log($"[ULTIMATE] Playing activation animation...");
+        yield return new WaitForSeconds(ultimateAnimationDuration);
+        
+        // Step 2: Animation finished - back to idle with ball, ready to throw
+        // Re-enable movement now that animation is done
+        movementEnabled = true;
+        Debug.Log($"[ULTIMATE] Animation finished! Movement re-enabled. Now waiting for Q release or timeout ({ultimateHoldTimeout}s)");
+        isUltimateReadyToThrow = true;
+        
+        // Step 3: Check if Q was released during animation - if so, throw immediately!
+        if (qReleasedDuringAnimation)
+        {
+            Debug.Log($"[ULTIMATE] Q was released during animation - throwing now!");
+            ThrowUltimate();
+            yield break;
+        }
+        
+        // Step 4: Wait for full timeout (auto-throw)
+        yield return new WaitForSeconds(ultimateHoldTimeout);
+        
+        // Step 5: Timeout reached - auto-throw if still holding
+        if (isUltimateReadyToThrow)
+        {
+            Debug.Log($"[ULTIMATE] Timeout reached - auto-throwing!");
+            ThrowUltimate();
+        }
+    }
+    
+    /// <summary>
+    /// Throw the ultimate (called on Q release or timeout)
+    /// </summary>
+    void ThrowUltimate()
+    {
+        if (!isUltimateReadyToThrow) return; // Animation not finished yet
+        
+        isUltimateActive = false;
+        isUltimateReadyToThrow = false;
+        
+        // Ensure movement is re-enabled (safety check)
+        movementEnabled = true;
+        
+        // Stop sequence coroutine if running
+        if (ultimateSequenceCoroutine != null)
+        {
+            StopCoroutine(ultimateSequenceCoroutine);
+            ultimateSequenceCoroutine = null;
+        }
+        
+        Debug.Log($"[ULTIMATE] Executing ultimate throw!");
+        
+        // IMPORTANT: Don't trigger throw animation here - Execute methods handle it
+        // The ultimate execution methods have their own animation/throw logic
+        
+        // Execute the ultimate throw based on type
         switch (characterData.ultimateType)
         {
             case UltimateType.PowerThrow: ExecutePowerThrow(); break;
             case UltimateType.MultiThrow: StartCoroutine(ExecuteMultiThrow()); break;
             case UltimateType.Curveball: ExecuteCurveball(); break;
         }
+    }
+    
+    // ══════════════════════════════════════════════════════════
+    // STUN SYSTEM
+    // ══════════════════════════════════════════════════════════
+    
+    /// <summary>
+    /// Stun sequence: Freeze player for duration after consecutive hits
+    /// </summary>
+    IEnumerator StunSequence()
+    {
+        isStunned = true;
+        movementEnabled = false;
+        inputEnabled = false;
+        
+        // Set animation state
+        animationController?.SetStunned(true);
+        animationController?.TriggerStun();
+        
+        // Spawn stun VFX
+        if (characterData != null)
+        {
+            GameObject stunVFXPrefab = characterData.GetStunEffectVFX();
+            if (stunVFXPrefab != null)
+            {
+                Vector3 stunPosition = transform.position + characterData.GetStunVFXOffset();
+                // Use prefab's original rotation (don't force Quaternion.identity)
+                activeStunVFX = Instantiate(stunVFXPrefab, stunPosition, stunVFXPrefab.transform.rotation);
+                activeStunVFX.transform.SetParent(transform); // Parent to player so it follows
+                
+                Debug.Log($"[STUN] Spawned stun VFX at offset: {characterData.GetStunVFXOffset()} with prefab rotation");
+            }
+        }
+        
+        Debug.Log($"[STUN] {name} stunned for {stunDuration} seconds!");
+        
+        yield return new WaitForSeconds(stunDuration);
+        
+        // End stun (only if not already broken)
+        if (isStunned)
+        {
+            isStunned = false;
+            movementEnabled = true;
+            inputEnabled = true;
+            consecutiveHits = 0; // Reset hit counter
+            
+            animationController?.SetStunned(false);
+            
+            // Destroy stun VFX
+            if (activeStunVFX != null)
+            {
+                Destroy(activeStunVFX);
+                activeStunVFX = null;
+            }
+            
+            Debug.Log($"[STUN] {name} recovered from stun!");
+        }
+    }
+    
+    /// <summary>
+    /// Breaks the stun immediately (called when stunned player is hit again)
+    /// </summary>
+    void BreakStun()
+    {
+        if (!isStunned) return; // Not stunned, nothing to break
+        
+        // Stop stun coroutine
+        if (stunCoroutine != null)
+        {
+            StopCoroutine(stunCoroutine);
+            stunCoroutine = null;
+        }
+        
+        // Reset stun state
+        isStunned = false;
+        movementEnabled = true;
+        inputEnabled = true;
+        consecutiveHits = 0; // Reset hit counter
+        
+        // Reset animation
+        animationController?.SetStunned(false);
+        
+        // Force transition back to idle/normal animation
+        if (animationController != null)
+        {
+            // Reset to idle by resetting all animation parameters
+            animationController.ResetToIdle();
+        }
+        
+        // Destroy stun VFX
+        if (activeStunVFX != null)
+        {
+            Destroy(activeStunVFX);
+            activeStunVFX = null;
+        }
+        
+        Debug.Log($"[STUN] {name} stun broken by hit - animation reset to idle!");
+    }
+    
+    // ══════════════════════════════════════════════════════════
+    // ULTIMATE FALLBACK SYSTEM
+    // ══════════════════════════════════════════════════════════
+    
+    /// <summary>
+    /// Ultimate fallback sequence: Fall → Stay on ground → Get up
+    /// </summary>
+    IEnumerator UltimateFallbackSequence()
+    {
+        isFallen = true;
+        movementEnabled = false;
+        inputEnabled = false;
+        
+        // Set animation state
+        animationController?.SetFallen(true);
+        
+        // Phase 1: Falling animation
+        animationController?.TriggerFall();
+        Debug.Log($"[FALLBACK] {name} falling...");
+        yield return new WaitForSeconds(fallAnimationDuration);
+        
+        // Phase 2: Stay on ground
+        Debug.Log($"[FALLBACK] {name} on ground for {groundDuration}s");
+        yield return new WaitForSeconds(groundDuration);
+        
+        // Phase 3: Get up animation
+        animationController?.TriggerGetUp();
+        Debug.Log($"[FALLBACK] {name} getting up...");
+        yield return new WaitForSeconds(getUpAnimationDuration);
+        
+        // End fallback
+        isFallen = false;
+        movementEnabled = true;
+        inputEnabled = true;
+        
+        animationController?.SetFallen(false);
+        
+        Debug.Log($"[FALLBACK] {name} back to normal!");
     }
 
     void ActivateTrick()
@@ -1054,6 +1411,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         {
             SpawnTrickVFX(opponent);
             ExecuteTrick(opponent);
+            
+            // NEW: Show trick UI effect on opponent's screen
+            ShowTrickUIEffectOnOpponent(opponent);
         }
     }
 
@@ -1074,6 +1434,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         // Always execute treat locally (affects self)
         SpawnTreatVFX();
         ExecuteTreat();
+        
+        // NEW: Show treat UI effect on own screen
+        ShowTreatUIEffectOnSelf();
     }
 
     void ExecutePowerThrow()
@@ -1083,6 +1446,9 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         var ball = BallManager.Instance.GetCurrentBall();
         if (ball != null)
         {
+            // Trigger throw animation
+            animationController?.TriggerThrow();
+            
             if (useAnimationEvents)
             {
                 // Queue ultimate throw for animation event
@@ -1133,13 +1499,28 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
             float powerMultiplier = isGrounded ? 1.5f : 2.0f;
 
             ball.SetThrowData(ThrowType.Ultimate, damage, speed);
+            
+            Debug.Log($"[POWERTHROW] About to attach VFX - IsLocalPlayer: {IsLocalPlayer()}, VFXManager exists: {VFXManager.Instance != null}");
+            
+            // Attach ultimate ball VFX (trail effect) BEFORE throwing - LOCAL ONLY
+            if (IsLocalPlayer() && VFXManager.Instance != null)
+            {
+                Debug.Log($"[POWERTHROW] Calling AttachUltimateBallVFX for {characterData?.characterName}");
+                VFXManager.Instance.AttachUltimateBallVFX(ball.gameObject, this);
+                Debug.Log($"[POWERTHROW VFX] Attached VFX for {characterData?.characterName}");
+            }
+            else
+            {
+                Debug.LogWarning($"[POWERTHROW] VFX NOT attached - IsLocalPlayer: {IsLocalPlayer()}, VFXManager: {VFXManager.Instance != null}");
+            }
+            
             ball.ThrowBall(throwDirection, powerMultiplier);
             SetHasBall(false);
 
             float shakeIntensity = characterData.GetPowerThrowScreenShake() * 1.5f;
             CameraShakeManager.Instance.TriggerShake(shakeIntensity, 0.8f, $"PowerThrow_{characterData?.characterName ?? "Unknown"}");
 
-            Debug.Log($"[ULTIMATE] Ball thrown! Damage: {damage}, Speed: {speed}");
+            Debug.Log($"[ULTIMATE] PowerThrow ball thrown! Damage: {damage}, Speed: {speed}");
         }
     }
 
@@ -1147,61 +1528,57 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     {
         if (!hasBall) yield break;
 
-        int count = characterData.GetMultiThrowCount();
-        int damage = characterData.GetUltimateDamage();
-        float speed = characterData.GetUltimateSpeed();
-        float delay = characterData.GetMultiThrowDelay();
+        // Trigger throw animation
+        animationController?.TriggerThrow();
 
-        Vector3 throwDir = GetThrowDirection();
-
-        // FIXED: First throw the original ball, then spawn multi-balls
-        var originalBall = BallManager.Instance.GetCurrentBall();
+        // FIXED: Throw the original ball first
+        var originalBall = BallManager.Instance?.GetCurrentBall();
         if (originalBall != null)
         {
-            // Throw the original ball first
+            int damage = characterData.GetUltimateDamage();
+            float speed = characterData.GetUltimateSpeed();
+            Vector3 throwDirection = GetThrowDirection();
+            
             originalBall.SetThrowData(ThrowType.Ultimate, damage, speed);
-            originalBall.ThrowBall(throwDir, 1.5f);
-            SetHasBall(false); // FIXED: Set hasBall to false after throwing original ball
+            
+            Debug.Log($"[MULTITHROW] About to attach VFX - IsLocalPlayer: {IsLocalPlayer()}, VFXManager exists: {VFXManager.Instance != null}");
+            
+            // Attach ultimate ball VFX (trail effect) BEFORE throwing - LOCAL ONLY
+            if (IsLocalPlayer() && VFXManager.Instance != null)
+            {
+                Debug.Log($"[MULTITHROW] Calling AttachUltimateBallVFX for {characterData?.characterName}");
+                VFXManager.Instance.AttachUltimateBallVFX(originalBall.gameObject, this);
+                Debug.Log($"[MULTITHROW VFX] Attached VFX for {characterData?.characterName}");
+            }
+            else
+            {
+                Debug.LogWarning($"[MULTITHROW] VFX NOT attached - IsLocalPlayer: {IsLocalPlayer()}, VFXManager: {VFXManager.Instance != null}");
+            }
+            
+            originalBall.ThrowBall(throwDirection, 1.5f);
+            SetHasBall(false);
+            
+            Debug.Log($"[ULTIMATE] Multi-throw: Original ball thrown with VFX");
         }
-
-        // Wait a bit before spawning multi-balls
+        
+        // Wait a tiny bit, then spawn additional balls
         yield return new WaitForSeconds(0.1f);
-
-        // FIXED: Use BallManager for proper network instantiation
+        
+        // Let BallManager spawn and throw additional balls
         if (BallManager.Instance != null)
         {
-            // Use BallManager's MultiThrowCoroutine method for proper network handling
-            BallManager.Instance.StartCoroutine(BallManager.Instance.MultiThrowCoroutine(this, characterData));
+            yield return BallManager.Instance.MultiThrowCoroutine(this, characterData);
         }
-        else
-        {
-            // Fallback: Create balls locally (for testing)
-        for (int i = 0; i < count; i++)
-        {
-            var ballObj = Instantiate(BallManager.Instance.ballPrefab,
-                transform.position + characterData.GetMultiThrowSpawnOffset(), Quaternion.identity);
-
-            var ballController = ballObj.GetComponent<BallController>();
-            if (ballController != null)
-            {
-                float angleOffset = (i - (count - 1) * 0.5f) * (characterData.GetMultiThrowSpread() / count);
-                Vector3 spreadDir = Quaternion.Euler(0, angleOffset, 0) * throwDir;
-
-                ballController.SetThrowData(ThrowType.Ultimate, damage, speed);
-                ballController.SetThrower(this);
-                    ballController.ThrowBallInternal(spreadDir.normalized, 1f);
-
-                Destroy(ballObj, 4f);
-            }
-
-            yield return new WaitForSeconds(delay);
-            }
-        }
+        
+        Debug.Log($"[ULTIMATE] Multi-throw completed for {characterData.characterName}");
     }
 
     void ExecuteCurveball()
     {
         if (!hasBall) return;
+
+        // Trigger throw animation
+        animationController?.TriggerThrow();
 
         var ball = BallManager.Instance.GetCurrentBall();
         if (ball != null)
@@ -1212,6 +1589,21 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
             float speed = characterData.GetUltimateSpeed();
 
             ball.SetThrowData(ThrowType.Ultimate, damage, speed);
+            
+            Debug.Log($"[CURVEBALL] About to attach VFX - IsLocalPlayer: {IsLocalPlayer()}, VFXManager exists: {VFXManager.Instance != null}");
+            
+            // Attach ultimate ball VFX (trail effect) BEFORE throwing - LOCAL ONLY
+            if (IsLocalPlayer() && VFXManager.Instance != null)
+            {
+                Debug.Log($"[CURVEBALL] Calling AttachUltimateBallVFX for {characterData?.characterName}");
+                VFXManager.Instance.AttachUltimateBallVFX(ball.gameObject, this);
+                Debug.Log($"[CURVEBALL VFX] Attached VFX for {characterData?.characterName}");
+            }
+            else
+            {
+                Debug.LogWarning($"[CURVEBALL] VFX NOT attached - IsLocalPlayer: {IsLocalPlayer()}, VFXManager: {VFXManager.Instance != null}");
+            }
+            
             ball.ThrowBall(throwDir, 1f);
             SetHasBall(false); // FIXED: Set hasBall to false after throwing
 
@@ -1484,8 +1876,7 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
         // FIXED: Don't process ability RPCs for AI characters
         // Check for AI component using reflection to avoid compilation errors
-        if (gameObject.CompareTag("AI") || gameObject.name.Contains("AI") || 
-            GetComponent("AIControllerBrain") != null) return;
+        if (gameObject.name.Contains("AI") || GetComponent("AIControllerBrain") != null) return;
 
         switch (actionType)
         {
@@ -1580,6 +1971,159 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
                 StartCoroutine(ApplySpeedBoost());
                 break;
         }
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // UI EFFECT METHODS (NEW)
+    // ══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Show trick UI effect on opponent's screen
+    /// </summary>
+    void ShowTrickUIEffectOnOpponent(PlayerCharacter opponent)
+    {
+        if (opponent == null || characterData == null) return;
+
+        Sprite trickUISprite = characterData.GetTrickUIEffect();
+        if (trickUISprite == null) return;
+
+        // Get duration based on trick type
+        float duration = GetTrickEffectDuration();
+
+        if (PhotonNetwork.OfflineMode)
+        {
+            // Offline mode: Only show if opponent is the human player (not AI)
+            // Check if opponent has AI component
+            bool opponentIsAI = opponent.GetComponent("AIControllerBrain") != null;
+            
+            // Only show if we (attacker) are AI and opponent is human
+            // OR if both are human (shouldn't happen in AI mode but just in case)
+            bool weAreAI = GetComponent("AIControllerBrain") != null;
+            
+            // Show effect only if the VICTIM (opponent) is the human player
+            if (!opponentIsAI && weAreAI)
+            {
+                ShowTrickUIEffectLocal(trickUISprite, duration);
+            }
+        }
+        else if (photonView.IsMine && opponent.photonView != null)
+        {
+            // Online mode: Send RPC to opponent to show effect on their screen
+            opponent.photonView.RPC("ShowTrickUIEffectRPC", RpcTarget.All, photonView.ViewID, duration);
+        }
+    }
+
+    /// <summary>
+    /// Show treat UI effect on own screen
+    /// </summary>
+    void ShowTreatUIEffectOnSelf()
+    {
+        if (characterData == null) return;
+
+        Sprite treatUISprite = characterData.GetTreatUIEffect();
+        if (treatUISprite == null) return;
+
+        // Get duration based on treat type
+        float duration = GetTreatEffectDuration();
+
+        // FIXED: Only show if this is the human player (not AI)
+        if (PhotonNetwork.OfflineMode)
+        {
+            // Offline mode: Only show if we are NOT AI
+            bool weAreAI = GetComponent("AIControllerBrain") != null;
+            if (!weAreAI)
+            {
+                ShowTreatUIEffectLocal(treatUISprite, duration);
+            }
+        }
+        else if (photonView.IsMine)
+        {
+            // Online mode: Only show on our own screen
+            ShowTreatUIEffectLocal(treatUISprite, duration);
+        }
+    }
+
+    /// <summary>
+    /// Local method to show trick UI effect
+    /// </summary>
+    void ShowTrickUIEffectLocal(Sprite effectSprite, float duration)
+    {
+        var uiManager = FindObjectOfType<AbilityUIEffectManager>();
+        if (uiManager != null)
+        {
+            uiManager.ShowTrickEffect(effectSprite, duration);
+        }
+    }
+
+    /// <summary>
+    /// Local method to show treat UI effect
+    /// </summary>
+    void ShowTreatUIEffectLocal(Sprite effectSprite, float duration)
+    {
+        var uiManager = FindObjectOfType<AbilityUIEffectManager>();
+        if (uiManager != null)
+        {
+            uiManager.ShowTreatEffect(effectSprite, duration);
+        }
+    }
+
+    /// <summary>
+    /// Get trick effect duration for UI display
+    /// </summary>
+    float GetTrickEffectDuration()
+    {
+        switch (characterData.trickType)
+        {
+            case TrickType.SlowSpeed:
+                return characterData.GetSlowSpeedDuration();
+            case TrickType.Freeze:
+                return characterData.GetFreezeDuration();
+            case TrickType.InstantDamage:
+                return 2f; // Short duration for instant damage
+            default:
+                return 3f;
+        }
+    }
+
+    /// <summary>
+    /// Get treat effect duration for UI display
+    /// </summary>
+    float GetTreatEffectDuration()
+    {
+        switch (characterData.treatType)
+        {
+            case TreatType.Shield:
+                return characterData.GetShieldDuration();
+            case TreatType.SpeedBoost:
+                return characterData.GetSpeedBoostDuration();
+            case TreatType.Teleport:
+                return 1f; // Short duration for teleport
+            default:
+                return 3f;
+        }
+    }
+
+    /// <summary>
+    /// RPC to show trick UI effect on this player's screen
+    /// Called when opponent uses trick on us
+    /// </summary>
+    [PunRPC]
+    void ShowTrickUIEffectRPC(int casterViewID, float duration)
+    {
+        // Only show on our own screen (the target of the trick)
+        if (!photonView.IsMine) return;
+
+        // Get the caster's character data to get the correct UI sprite
+        PhotonView casterView = PhotonView.Find(casterViewID);
+        if (casterView == null) return;
+
+        PlayerCharacter caster = casterView.GetComponent<PlayerCharacter>();
+        if (caster == null || caster.characterData == null) return;
+
+        Sprite trickUISprite = caster.characterData.GetTrickUIEffect();
+        if (trickUISprite == null) return;
+
+        ShowTrickUIEffectLocal(trickUISprite, duration);
     }
 
     public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
@@ -1906,13 +2450,60 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
     public void SetMovementEnabled(bool enabled) => movementEnabled = enabled;
     public int GetPlayerSide() => playerSide;
     public bool IsFacingRight() => facingRight;
+    public bool IsStunned() => isStunned;
+    public bool IsFallen() => isFallen;
 
-    public void OnDamageTaken(int damage)
+    public void OnDamageTaken(int damage, bool isUltimateHit = false)
     {
         if (!IsLocalPlayer()) return;
+        
+        // Add ability charges
         AddAbilityCharge(0, damage * 0.5f);
         AddAbilityCharge(1, damage * 0.3f);
         AddAbilityCharge(2, damage * 0.4f);
+        
+        // STUN BREAK: If already stunned, break stun when hit again (like most fighting games)
+        if (isStunned)
+        {
+            Debug.Log($"[STUN] {name} was stunned but got hit - breaking stun!");
+            BreakStun();
+            // Continue to process damage normally after breaking stun
+        }
+        
+        // ULTIMATE FALLBACK: If hit by ultimate, trigger fallback sequence
+        if (isUltimateHit && !isFallen && !isStunned)
+        {
+            Debug.Log($"[FALLBACK] {name} hit by ultimate - triggering fallback!");
+            if (fallbackCoroutine != null) StopCoroutine(fallbackCoroutine);
+            fallbackCoroutine = StartCoroutine(UltimateFallbackSequence());
+            return; // Don't track for stun if fallen
+        }
+        
+        // STUN SYSTEM: Track consecutive hits
+        float timeSinceLastHit = Time.time - lastHitTime;
+        
+        if (timeSinceLastHit <= consecutiveHitWindow)
+        {
+            // Within the consecutive hit window - increment counter
+            consecutiveHits++;
+            Debug.Log($"[STUN] {name} consecutive hits: {consecutiveHits}/{hitsToStun}");
+            
+            if (consecutiveHits >= hitsToStun && !isStunned && !isFallen)
+            {
+                // Trigger stun!
+                Debug.Log($"[STUN] {name} stunned after {consecutiveHits} consecutive hits!");
+                if (stunCoroutine != null) StopCoroutine(stunCoroutine);
+                stunCoroutine = StartCoroutine(StunSequence());
+            }
+        }
+        else
+        {
+            // Outside window - reset counter
+            consecutiveHits = 1; // This hit is the first of a new sequence
+            Debug.Log($"[STUN] {name} hit counter reset (time gap: {timeSinceLastHit:F1}s)");
+        }
+        
+        lastHitTime = Time.time;
     }
 
     public void OnSuccessfulCatch()

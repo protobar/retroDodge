@@ -29,11 +29,11 @@ MonoBehaviour:
   dashCooldown: 1.5
   dashDuration: 0.15
   maxHealth: 100
-  damageResistance: 1.2
-  normalThrowDamage: 15
+  damageResistance: 1
+  normalThrowDamage: 12
   jumpThrowDamage: 15
   throwSpeedMultiplier: 1.75
-  throwAccuracy: 0.7
+  throwAccuracy: 1
   characterColor: {r: 1, g: 1, b: 1, a: 1}
   dashEffect: {fileID: 2755417596474721463, guid: 133b20c48d371d94bb543a6b1fe5ed83,
     type: 3}
@@ -94,11 +94,12 @@ MonoBehaviour:
   curveballAmplitude: 25
   curveballFrequency: 25
   curveballDuration: 2
-  ultimateChargeRequired: 150
-  ultimateChargeRate: 1.5
+  ultimateChargeRequired: 200
+  ultimateChargeRate: 1.2
   trickType: 0
   trickEffectVFX: {fileID: 2755417596474721463, guid: 133b20c48d371d94bb543a6b1fe5ed83,
     type: 3}
+  trickUIEffect: {fileID: 21300000, guid: dca7dbf7e69c5e0499eb4a1224946fd0, type: 3}
   trickActivationSound: {fileID: 8300000, guid: 0cc6c19f2a24d0c439974ea7ff051833,
     type: 3}
   trickDescription: "Reduces opponent\u2019s movement speed drastically for a short
@@ -108,19 +109,22 @@ MonoBehaviour:
   freezeDuration: 2.5
   instantDamageAmount: 15
   trickChargeRequired: 100
-  trickChargeRate: 1.25
+  trickChargeRate: 1.2
   treatType: 0
   treatEffectVFX: {fileID: 1876188362804903397, guid: e00f5d66cb034644292554ac7e9aeca5,
     type: 3}
+  treatUIEffect: {fileID: 21300000, guid: 2106259ccd3f5bd4784037bd990b198c, type: 3}
   treatActivationSound: {fileID: 8300000, guid: beb9439f7ea924544ba3a2d91552481c,
     type: 3}
+  stunEffectVFX: {fileID: 109542, guid: cd198156fe95bad47b3223b9e1e78861, type: 3}
+  stunVFXOffset: {x: 0, y: 4, z: 0}
   treatDescription: Activates a temporary energy barrier that blocks all damage.
   shieldDuration: 3
   teleportRange: 5
   speedBoostMultiplier: 2.5
   speedBoostDuration: 5
   treatChargeRequired: 100
-  treatChargeRate: 1.25
+  treatChargeRate: 1.35
   jumpSounds:
   - {fileID: 8300000, guid: 3dd1971e6cd13644782d1a2b8f336c32, type: 3}
   - {fileID: 8300000, guid: b22495e2599c7cb4ea8bb0f82ec6a443, type: 3}
