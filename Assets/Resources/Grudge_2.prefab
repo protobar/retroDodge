@@ -808,6 +808,21 @@ MonoBehaviour:
   - Type: 9
     SynchronizeType: 1
     Name: Defeat
+  - Type: 4
+    SynchronizeType: 0
+    Name: IsStunned
+  - Type: 4
+    SynchronizeType: 0
+    Name: IsFallen
+  - Type: 9
+    SynchronizeType: 0
+    Name: Stun
+  - Type: 9
+    SynchronizeType: 0
+    Name: Fall
+  - Type: 9
+    SynchronizeType: 0
+    Name: GetUp
   m_SynchronizeLayers:
   - SynchronizeType: 1
     LayerIndex: 0

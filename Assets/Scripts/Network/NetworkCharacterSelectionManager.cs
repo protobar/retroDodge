@@ -706,13 +706,16 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
 
         yield return new WaitForSeconds(2f);
 
+        // Decide which gameplay scene to load based on selected map / mode
+        string sceneToLoad = ResolveGameplaySceneName();
+
         if (PhotonNetwork.OfflineMode)
         {
-            SceneManager.LoadScene(gameplayScene);
+            SceneManager.LoadScene(sceneToLoad);
         }
         else if (PhotonNetwork.IsMasterClient)
         {
-            PhotonNetwork.LoadLevel(gameplayScene);
+            PhotonNetwork.LoadLevel(sceneToLoad);
         }
     }
 
@@ -746,6 +749,107 @@ public class NetworkCharacterSelectionManager : MonoBehaviourPunCallbacks
         {
             SceneManager.LoadScene("MainMenu");
         }
+    }
+
+    #endregion
+
+    #region Map / Scene Resolution
+
+    /// <summary>
+    /// Resolve the gameplay scene name based on room properties (online)
+    /// or AI session config / random map (offline).
+    /// </summary>
+    string ResolveGameplaySceneName()
+    {
+        // OFFLINE: AI / local play uses MapRegistry for a fresh random pick every time
+        if (PhotonNetwork.OfflineMode)
+        {
+            var cfg = RetroDodge.AISessionConfig.Instance;
+            var registry = MapRegistry.Instance;
+
+            if (registry != null)
+            {
+                var maps = registry.GetUnlockedMaps();
+                if (maps != null && maps.Length > 0)
+                {
+                    int index = UnityEngine.Random.Range(0, maps.Length);
+                    string sceneName = maps[index].sceneName;
+
+                    if (cfg != null)
+                    {
+                        cfg.gameplaySceneName = sceneName;
+                    }
+
+                    if (debugMode)
+                    {
+                        Debug.Log($"[NET CHAR SELECT] OFFLINE random map selected: {maps[index].mapId} -> scene '{sceneName}'");
+                    }
+
+                    return sceneName;
+                }
+            }
+
+            // Fallback to existing config value, then serialized default
+            if (cfg != null && !string.IsNullOrEmpty(cfg.gameplaySceneName))
+            {
+                if (debugMode)
+                {
+                    Debug.Log($"[NET CHAR SELECT] OFFLINE using AISessionConfig scene '{cfg.gameplaySceneName}' (no maps from registry)");
+                }
+                return cfg.gameplaySceneName;
+            }
+
+            if (debugMode)
+            {
+                Debug.Log($"[NET CHAR SELECT] OFFLINE fallback to default gameplayScene '{gameplayScene}'");
+            }
+            return gameplayScene;
+        }
+
+        // ONLINE: use room properties to determine map, then MapRegistry for scene
+        string mapId = null;
+        if (PhotonNetwork.CurrentRoom != null &&
+            PhotonNetwork.CurrentRoom.CustomProperties != null)
+        {
+            var props = PhotonNetwork.CurrentRoom.CustomProperties;
+
+            // Competitive / some modes use RoomStateManager.ROOM_SELECTED_MAP ("SelectedMap")
+            if (props.ContainsKey(RoomStateManager.ROOM_SELECTED_MAP))
+            {
+                mapId = props[RoomStateManager.ROOM_SELECTED_MAP] as string;
+            }
+            // Quick / Custom rooms use SELECTED_MAP_KEY ("SM")
+            else if (props.ContainsKey("SM"))
+            {
+                mapId = props["SM"] as string;
+            }
+        }
+
+        var mapRegistry = MapRegistry.Instance;
+        if (!string.IsNullOrEmpty(mapId) && mapRegistry != null)
+        {
+            var map = mapRegistry.GetMapById(mapId);
+            if (map != null && !string.IsNullOrEmpty(map.sceneName))
+            {
+                if (debugMode)
+                {
+                    Debug.Log($"[NET CHAR SELECT] ONLINE mapId='{mapId}' -> scene '{map.sceneName}'");
+                }
+                return map.sceneName;
+            }
+
+            if (debugMode)
+            {
+                Debug.Log($"[NET CHAR SELECT] ONLINE mapId='{mapId}' not found in registry, falling back to default scene '{gameplayScene}'");
+            }
+        }
+        else if (debugMode)
+        {
+            Debug.Log($"[NET CHAR SELECT] ONLINE no valid mapId in room properties, using default scene '{gameplayScene}'");
+        }
+
+        // Fallback: default gameplay scene
+        return gameplayScene;
     }
 
     #endregion

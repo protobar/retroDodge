@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections;
+using System.Linq;
 using Photon.Pun;
 using Photon.Realtime;
 using Hashtable = ExitGames.Client.Photon.Hashtable;
@@ -303,11 +304,28 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
             aiDifficultyDropdown.value = 1; // Default to Normal
         }
 
-        // Setup map selection dropdown - using fallback if MapRegistry doesn't exist
+        // Setup map selection dropdown - prefer MapRegistry, fallback to hardcoded names
         if (mapSelectionDropdown != null)
         {
             mapSelectionDropdown.ClearOptions();
-            var mapNames = new List<string> { "Arena1", "Arena2", "Arena3" }; // Fallback maps
+
+            List<string> mapNames = null;
+            var registry = MapRegistry.Instance;
+            if (registry != null)
+            {
+                var unlockedMaps = registry.GetUnlockedMaps();
+                if (unlockedMaps != null && unlockedMaps.Length > 0)
+                {
+                    mapNames = unlockedMaps.Select(m => m.mapName).ToList();
+                }
+            }
+
+            if (mapNames == null || mapNames.Count == 0)
+            {
+                // Fallback maps if registry is missing or empty
+                mapNames = new List<string> { "Arena1", "Arena2", "Arena3" };
+            }
+
             mapSelectionDropdown.AddOptions(mapNames);
             mapSelectionDropdown.value = 0;
         }
@@ -465,11 +483,24 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     
     Hashtable CreateCompetitiveRoomProperties()
     {
+        // Pick a random competitive map (fallback to any unlocked map, then Arena1)
+        string mapId = "Arena1";
+        var registry = MapRegistry.Instance;
+        if (registry != null)
+        {
+            mapId = registry.GetRandomUnlockedMapId(true);
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"[MAIN MENU] Competitive Match selected random mapId='{mapId}'");
+        }
+
         return new Hashtable
         {
             { RoomStateManager.ROOM_TYPE_KEY, 2 }, // 2 = Competitive
             { RoomStateManager.ROOM_MATCH_LENGTH, 90 }, // 90 seconds for competitive
-            { RoomStateManager.ROOM_SELECTED_MAP, "Arena1" }
+            { RoomStateManager.ROOM_SELECTED_MAP, mapId }
         };
     }
     #endregion
@@ -501,11 +532,24 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
 
     Hashtable CreateQuickMatchProperties()
     {
+        // Pick a random unlocked map for quick match (fallback to Arena1)
+        string mapId = "Arena1";
+        var registry = MapRegistry.Instance;
+        if (registry != null)
+        {
+            mapId = registry.GetRandomUnlockedMapId(false);
+        }
+
+        if (debugMode)
+        {
+            Debug.Log($"[MAIN MENU] Quick Match selected random mapId='{mapId}'");
+        }
+
         return new Hashtable
         {
             { RoomStateManager.ROOM_TYPE_KEY, 0 }, // 0 = Quick Match
             { MATCH_LENGTH_KEY, 60 }, // 60 seconds default
-            { SELECTED_MAP_KEY, "Arena1" }
+            { SELECTED_MAP_KEY, mapId }
         };
     }
 
@@ -858,9 +902,25 @@ public class MainMenuManager : MonoBehaviourPunCallbacks
     {
         if (mapSelectionDropdown == null) return "Arena1";
 
+        var registry = MapRegistry.Instance;
+        if (registry != null)
+        {
+            var unlockedMaps = registry.GetUnlockedMaps();
+            int index = mapSelectionDropdown.value;
+            if (unlockedMaps != null && unlockedMaps.Length > 0 &&
+                index >= 0 && index < unlockedMaps.Length)
+            {
+                return unlockedMaps[index].mapId;
+            }
+
+            var def = registry.GetDefaultMap();
+            if (def != null) return def.mapId;
+        }
+
+        // Fallback to hardcoded list if registry not available
         List<string> maps = new List<string> { "Arena1", "Arena2", "Arena3" };
-        int index = mapSelectionDropdown.value;
-        return (index >= 0 && index < maps.Count) ? maps[index] : "Arena1";
+        int fallbackIndex = mapSelectionDropdown.value;
+        return (fallbackIndex >= 0 && fallbackIndex < maps.Count) ? maps[fallbackIndex] : "Arena1";
     }
 
     // FIXED: Join room using room code - search through visible rooms

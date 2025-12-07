@@ -23,7 +23,7 @@ The AI system consists of three primary components:
 
 The AI system is designed with the following principles:
 - **Human-like Behavior**: AI makes mistakes and has reaction delays
-- **Scalable Difficulty**: Three distinct difficulty levels (Easy, Normal, Hard)
+- **Scalable Difficulty**: Four distinct difficulty levels (Easy, Normal, Hard & Nightmare)
 - **Character-Specific Adaptations**: Special behaviors for unique characters
 - **Action Economy**: Prevents AI from performing actions faster than humanly possible
 - **Balanced Decision Making**: AI occasionally makes suboptimal choices

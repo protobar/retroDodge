@@ -215,6 +215,34 @@ public class MapRegistry : MonoBehaviour
     {
         return availableMaps?.Where(m => m != null && m.isUnlocked && m.isCompetitive).ToArray() ?? new MapData[0];
     }
+
+    /// <summary>
+    /// Get a random unlocked map ID.
+    /// If competitiveOnly is true, prefers competitive maps and falls back to any unlocked map.
+    /// Returns the default map ID (or \"Arena1\") if no maps are available.
+    /// </summary>
+    public string GetRandomUnlockedMapId(bool competitiveOnly = false)
+    {
+        MapData[] candidateMaps = null;
+
+        if (competitiveOnly)
+        {
+            candidateMaps = GetCompetitiveMaps();
+        }
+
+        if (candidateMaps == null || candidateMaps.Length == 0)
+        {
+            candidateMaps = GetUnlockedMaps();
+        }
+
+        if (candidateMaps == null || candidateMaps.Length == 0)
+        {
+            return defaultMap != null ? defaultMap.mapId : "Arena1";
+        }
+
+        int index = UnityEngine.Random.Range(0, candidateMaps.Length);
+        return candidateMaps[index].mapId;
+    }
     
     // ═══════════════════════════════════════════════════════════════
     // EDITOR HELPERS
