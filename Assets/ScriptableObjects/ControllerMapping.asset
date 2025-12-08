@@ -1,0 +1,63 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0e1e789b9ac7b3a4ba7756038fb64316, type: 3}
+  m_Name: ControllerMapping
+  m_EditorClassIdentifier: 
+  jumpMapping:
+    inputType: 0
+    button: 0
+    trigger: 1
+    triggerThreshold: 0.3019608
+  throwMapping:
+    inputType: 1
+    button: 1
+    trigger: 1
+    triggerThreshold: 0.4
+  catchMapping:
+    inputType: 1
+    button: 2
+    trigger: 0
+    triggerThreshold: 0.39607844
+  pickupMapping:
+    inputType: 0
+    button: 1
+    trigger: 1
+    triggerThreshold: 0.5
+  dashMapping:
+    inputType: 0
+    button: 10
+    trigger: 1
+    triggerThreshold: 0.5
+  ultimateMapping:
+    inputType: 0
+    button: 3
+    trigger: 1
+    triggerThreshold: 0.5
+  trickMapping:
+    inputType: 0
+    button: 4
+    trigger: 1
+    triggerThreshold: 0.5
+  treatMapping:
+    inputType: 0
+    button: 5
+    trigger: 0
+    triggerThreshold: 0.5
+  duckMapping:
+    inputType: 0
+    button: 2
+    trigger: 1
+    triggerThreshold: 0.5
+  movementStick: 0
+  movementDeadzone: 0.2
+  triggerReleaseThreshold: 0.3
+  description: Default controller mapping

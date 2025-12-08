@@ -6847,6 +6847,58 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: -20, y: -20}
   m_Pivot: {x: 0.5, y: 0.5}
+--- !u!1 &570501507
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 570501509}
+  - component: {fileID: 570501508}
+  m_Layer: 0
+  m_Name: HapticFeedbackManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &570501508
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 570501507}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 60e435b7f0abeb44f98e0cd09a8e578f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  enableHaptics: 1
+  lightVibration: 0.15
+  mediumVibration: 0.4
+  strongVibration: 0.7
+  lightDuration: 0.1
+  mediumDuration: 0.2
+  strongDuration: 0.3
+  debugMode: 0
+--- !u!4 &570501509
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 570501507}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 1920, y: 1080, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &586454358
 GameObject:
   m_ObjectHideFlags: 0
@@ -37672,6 +37724,7 @@ MonoBehaviour:
   playerType: 0
   enableKeyboardInput: 1
   enableMobileInput: 0
+  enableGamepadInput: 1
   enableInputPrediction: 1
   inputSendRate: 30
   useCustomKeys: 0
@@ -37691,6 +37744,7 @@ MonoBehaviour:
   autoDetectOwnership: 1
   forceLocalControl: 0
   inputBufferTime: 0.15
+  gamepadDeadzone: 0.2
   showDebugInfo: 0
   forceMobileMode: 0
   autoRegisterInSinglePlayer: 0
@@ -60974,3 +61028,4 @@ SceneRoots:
   - {fileID: 419423358}
   - {fileID: 1142638454}
   - {fileID: 1360694246}
+  - {fileID: 570501509}

@@ -237,6 +237,7 @@ MonoBehaviour:
   playerType: 0
   enableKeyboardInput: 1
   enableMobileInput: 0
+  enableGamepadInput: 1
   enableInputPrediction: 1
   inputSendRate: 30
   useCustomKeys: 0
@@ -256,6 +257,8 @@ MonoBehaviour:
   autoDetectOwnership: 1
   forceLocalControl: 0
   inputBufferTime: 0.15
+  gamepadDeadzone: 0.2
+  controllerMapping: {fileID: 11400000, guid: 408db50d803111842ab58bff39ae0cd8, type: 2}
   showDebugInfo: 0
   forceMobileMode: 0
   autoRegisterInSinglePlayer: 0

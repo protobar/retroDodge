@@ -1,6 +1,10 @@
 using UnityEngine;
 using Photon.Pun;
 
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
+
 /// <summary>
 /// FIXED: PlayerInputHandler with proper PUN2 ownership model
 /// Each player processes their own input regardless of master client status
@@ -12,6 +16,7 @@ public class PlayerInputHandler : MonoBehaviourPun
     [SerializeField] private PlayerInputType playerType = PlayerInputType.Player1;
     [SerializeField] private bool enableKeyboardInput = true;
     [SerializeField] public bool enableMobileInput = true;
+    [SerializeField] private bool enableGamepadInput = true;
 
     [Header("Network Input Settings")]
     [SerializeField] private bool enableInputPrediction = true;
@@ -47,6 +52,10 @@ public class PlayerInputHandler : MonoBehaviourPun
 
     [Header("Input Buffer Settings")]
     [SerializeField] private float inputBufferTime = 0.15f;
+    
+    [Header("Gamepad Settings")]
+    [SerializeField] [Range(0.1f, 0.5f)] private float gamepadDeadzone = 0.2f;
+    [SerializeField] private ControllerMappingData controllerMapping;
 
     [Header("Debug")]
     [SerializeField] private bool showDebugInfo = false;
@@ -154,8 +163,25 @@ public class PlayerInputHandler : MonoBehaviourPun
     {
         if (PhotonNetwork.OfflineMode)
         {
+            // CRITICAL: In offline mode, check if this is an AI character
+            // AI characters should NOT respond to human controller input
+            bool isAI = gameObject.name.Contains("AI") || GetComponent("AIControllerBrain") != null;
+            
+            if (isAI)
+            {
+                // This is an AI character - disable human input
+                isMyCharacter = false;
+                isNetworkReady = false;
+                if (showDebugInfo)
+                    Debug.Log($"{gameObject.name} - Ownership: AI CHARACTER (human input disabled)");
+                return;
+            }
+            
+            // This is the human player character
             isMyCharacter = true;
             isNetworkReady = false;
+            if (showDebugInfo)
+                Debug.Log($"{gameObject.name} - Ownership: HUMAN PLAYER (offline mode)");
             return;
         }
 
@@ -293,6 +319,11 @@ public class PlayerInputHandler : MonoBehaviourPun
         if (enableMobileInput)
         {
             HandleMobileInput();
+        }
+        
+        if (enableGamepadInput && isMyCharacter)
+        {
+            HandleGamepadInput();
         }
 
         // Apply external input override if provided this frame
@@ -576,6 +607,417 @@ public class PlayerInputHandler : MonoBehaviourPun
             Debug.Log($"{gameObject.name} - Mobile Input: L:{mobileLeftPressed} R:{mobileRightPressed} H:{horizontalInput}");
         }
     }
+    
+#if ENABLE_INPUT_SYSTEM
+    /// <summary>
+    /// Handle gamepad/controller input using Unity Input System
+    /// Supports PS5 DualSense, Xbox controllers, and generic gamepads
+    /// CRITICAL: Only processes input for local player's character
+    /// </summary>
+    void HandleGamepadInput()
+    {
+        // CRITICAL: Only process gamepad input for this player's character
+        if (!isMyCharacter) return;
+        
+        if (Gamepad.current == null) return;
+        
+        var gamepad = Gamepad.current;
+        
+        // Use custom mapping if provided, otherwise use defaults
+        ControllerMappingData mapping = controllerMapping;
+        float deadzone = mapping != null ? mapping.movementDeadzone : gamepadDeadzone;
+        float triggerRelease = mapping != null ? mapping.triggerReleaseThreshold : 0.3f;
+        
+        // Horizontal movement from stick (based on mapping)
+        ControllerMappingData.ControllerStick movementStick = mapping != null ? mapping.movementStick : ControllerMappingData.ControllerStick.LeftStick;
+        Vector2 stickValue = GetStickValue(gamepad, movementStick);
+        float stickX = stickValue.x;
+        
+        // Apply deadzone
+        if (Mathf.Abs(stickX) > deadzone)
+        {
+            // Only override horizontal input if gamepad is providing input
+            // This allows keyboard/mobile to work simultaneously
+            if (Mathf.Abs(stickX) > Mathf.Abs(horizontalInput))
+            {
+                horizontalInput = Mathf.Clamp(stickX, -1f, 1f);
+            }
+        }
+        
+        // Process each action using flexible mapping (button OR trigger)
+        ProcessActionMapping(gamepad, mapping != null ? mapping.jumpMapping : GetDefaultJumpMapping(), 
+                            ref jumpPressed, ref lastJumpInput, 
+                            () => { if (HapticFeedbackManager.Instance != null) HapticFeedbackManager.Instance.VibrateLight(); });
+        
+        // Throw - special handling for held state
+        var throwMapping = mapping != null ? mapping.throwMapping : GetDefaultThrowMapping();
+        if (throwMapping.inputType == ControllerMappingData.ActionMapping.InputType.Button)
+        {
+            if (GetButtonPressed(gamepad, throwMapping.button))
+            {
+                throwPressed = true;
+                lastThrowInput = Time.time;
+            }
+            throwHeld = GetButtonHeld(gamepad, throwMapping.button);
+        }
+        else // Trigger
+        {
+            float triggerValue = GetTriggerValue(gamepad, throwMapping.trigger);
+            if (triggerValue > throwMapping.triggerThreshold)
+            {
+                if (!throwPressed)
+                {
+                    throwPressed = true;
+                    lastThrowInput = Time.time;
+                }
+                throwHeld = true;
+            }
+            else
+            {
+                throwHeld = false;
+            }
+        }
+        
+        ProcessActionMapping(gamepad, mapping != null ? mapping.catchMapping : GetDefaultCatchMapping(), 
+                            ref catchPressed, ref lastCatchInput, 
+                            () => { if (HapticFeedbackManager.Instance != null) HapticFeedbackManager.Instance.VibrateMedium(); });
+        
+        ProcessActionMapping(gamepad, mapping != null ? mapping.pickupMapping : GetDefaultPickupMapping(), 
+                            ref pickupPressed, ref lastPickupInput, 
+                            () => { if (HapticFeedbackManager.Instance != null) HapticFeedbackManager.Instance.VibrateMedium(0.15f); });
+        
+        ProcessActionMapping(gamepad, mapping != null ? mapping.dashMapping : GetDefaultDashMapping(), 
+                            ref dashPressed, ref lastDashInput, 
+                            () => { if (HapticFeedbackManager.Instance != null) HapticFeedbackManager.Instance.VibrateLight(0.15f); });
+        
+        // Ultimate - special handling for hold/release
+        ProcessUltimateMapping(gamepad, mapping != null ? mapping.ultimateMapping : GetDefaultUltimateMapping(), triggerRelease);
+        
+        ProcessActionMapping(gamepad, mapping != null ? mapping.trickMapping : GetDefaultTrickMapping(), 
+                            ref trickPressed, ref lastTrickInput, null);
+        
+        ProcessActionMapping(gamepad, mapping != null ? mapping.treatMapping : GetDefaultTreatMapping(), 
+                            ref treatPressed, ref lastTreatInput, null);
+        
+        // Duck - special handling for hold/release
+        ProcessDuckMapping(gamepad, mapping != null ? mapping.duckMapping : GetDefaultDuckMapping());
+        
+        if (showDebugInfo && (Mathf.Abs(stickX) > deadzone || jumpPressed || throwPressed))
+        {
+            Debug.Log($"{gameObject.name} - Gamepad Input: StickX={stickX:F2}, Jump={jumpPressed}, Throw={throwPressed}");
+        }
+    }
+    
+    /// <summary>
+    /// Process action mapping (button OR trigger) - flexible system
+    /// </summary>
+    void ProcessActionMapping(Gamepad gamepad, ControllerMappingData.ActionMapping mapping, 
+                              ref bool pressed, ref float lastInputTime, 
+                              System.Action onPressCallback = null)
+    {
+        bool? dummy = null;
+        ProcessActionMapping(gamepad, mapping, ref pressed, ref lastInputTime, onPressCallback, ref dummy);
+    }
+    
+    /// <summary>
+    /// Process action mapping (button OR trigger) - with held parameter
+    /// </summary>
+    void ProcessActionMapping(Gamepad gamepad, ControllerMappingData.ActionMapping mapping, 
+                              ref bool pressed, ref float lastInputTime, 
+                              System.Action onPressCallback, ref bool? held)
+    {
+        if (mapping.inputType == ControllerMappingData.ActionMapping.InputType.Button)
+        {
+            if (GetButtonPressed(gamepad, mapping.button))
+            {
+                pressed = true;
+                lastInputTime = Time.time;
+                onPressCallback?.Invoke();
+            }
+            // Note: held parameter is not used in this overload, handled separately for throw
+        }
+        else // Trigger
+        {
+            float triggerValue = GetTriggerValue(gamepad, mapping.trigger);
+            if (triggerValue > mapping.triggerThreshold)
+            {
+                if (!pressed)
+                {
+                    pressed = true;
+                    lastInputTime = Time.time;
+                    onPressCallback?.Invoke();
+                }
+            }
+            else
+            {
+                pressed = false;
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Process ultimate mapping with hold/release support
+    /// </summary>
+    void ProcessUltimateMapping(Gamepad gamepad, ControllerMappingData.ActionMapping mapping, float triggerRelease)
+    {
+        if (mapping.inputType == ControllerMappingData.ActionMapping.InputType.Button)
+        {
+            // Button mode - treat as toggle
+            if (GetButtonPressed(gamepad, mapping.button))
+            {
+                if (!ultimateHeld)
+                {
+                    ultimatePressed = true;
+                    ultimateHeld = true;
+                    lastUltimateInput = Time.time;
+                    if (HapticFeedbackManager.Instance != null)
+                        HapticFeedbackManager.Instance.StartContinuousVibration(0.7f);
+                }
+            }
+            else if (GetButtonReleased(gamepad, mapping.button))
+            {
+                ultimateReleased = true;
+                ultimateHeld = false;
+                if (HapticFeedbackManager.Instance != null)
+                {
+                    HapticFeedbackManager.Instance.StopContinuousVibration();
+                    HapticFeedbackManager.Instance.VibrateStrong(0.4f);
+                }
+            }
+        }
+        else // Trigger mode
+        {
+            float triggerValue = GetTriggerValue(gamepad, mapping.trigger);
+            if (triggerValue > mapping.triggerThreshold && !ultimateHeld)
+            {
+                ultimatePressed = true;
+                ultimateHeld = true;
+                lastUltimateInput = Time.time;
+                if (HapticFeedbackManager.Instance != null)
+                    HapticFeedbackManager.Instance.StartContinuousVibration(0.7f);
+            }
+            else if (triggerValue <= triggerRelease && ultimateHeld)
+            {
+                ultimateReleased = true;
+                ultimateHeld = false;
+                if (HapticFeedbackManager.Instance != null)
+                {
+                    HapticFeedbackManager.Instance.StopContinuousVibration();
+                    HapticFeedbackManager.Instance.VibrateStrong(0.4f);
+                }
+            }
+            else if (triggerValue > mapping.triggerThreshold)
+            {
+                ultimateHeld = true;
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Process duck mapping with hold/release support
+    /// </summary>
+    void ProcessDuckMapping(Gamepad gamepad, ControllerMappingData.ActionMapping mapping)
+    {
+        if (mapping.inputType == ControllerMappingData.ActionMapping.InputType.Button)
+        {
+            if (GetButtonPressed(gamepad, mapping.button))
+            {
+                if (useDuckSystem && duckSystem != null)
+                {
+                    duckHeld = duckSystem.CanDuck();
+                }
+                else
+                {
+                    duckHeld = true;
+                }
+            }
+            else if (GetButtonReleased(gamepad, mapping.button))
+            {
+                duckHeld = false;
+            }
+        }
+        else // Trigger mode
+        {
+            float triggerValue = GetTriggerValue(gamepad, mapping.trigger);
+            if (triggerValue > mapping.triggerThreshold)
+            {
+                if (useDuckSystem && duckSystem != null)
+                {
+                    duckHeld = duckSystem.CanDuck();
+                }
+                else
+                {
+                    duckHeld = true;
+                }
+            }
+            else
+            {
+                duckHeld = false;
+            }
+        }
+    }
+    
+    // Default mappings (used when no ScriptableObject is assigned)
+    ControllerMappingData.ActionMapping GetDefaultJumpMapping()
+    {
+        return new ControllerMappingData.ActionMapping { inputType = ControllerMappingData.ActionMapping.InputType.Button, button = ControllerMappingData.ControllerButton.ButtonSouth };
+    }
+    
+    ControllerMappingData.ActionMapping GetDefaultThrowMapping()
+    {
+        return new ControllerMappingData.ActionMapping { inputType = ControllerMappingData.ActionMapping.InputType.Button, button = ControllerMappingData.ControllerButton.ButtonWest };
+    }
+    
+    ControllerMappingData.ActionMapping GetDefaultCatchMapping()
+    {
+        return new ControllerMappingData.ActionMapping { inputType = ControllerMappingData.ActionMapping.InputType.Button, button = ControllerMappingData.ControllerButton.ButtonEast };
+    }
+    
+    ControllerMappingData.ActionMapping GetDefaultPickupMapping()
+    {
+        return new ControllerMappingData.ActionMapping { inputType = ControllerMappingData.ActionMapping.InputType.Button, button = ControllerMappingData.ControllerButton.ButtonNorth };
+    }
+    
+    ControllerMappingData.ActionMapping GetDefaultDashMapping()
+    {
+        return new ControllerMappingData.ActionMapping { inputType = ControllerMappingData.ActionMapping.InputType.Button, button = ControllerMappingData.ControllerButton.RightShoulder };
+    }
+    
+    ControllerMappingData.ActionMapping GetDefaultUltimateMapping()
+    {
+        return new ControllerMappingData.ActionMapping { inputType = ControllerMappingData.ActionMapping.InputType.Trigger, trigger = ControllerMappingData.ControllerTrigger.RightTrigger, triggerThreshold = 0.5f };
+    }
+    
+    ControllerMappingData.ActionMapping GetDefaultTrickMapping()
+    {
+        return new ControllerMappingData.ActionMapping { inputType = ControllerMappingData.ActionMapping.InputType.Button, button = ControllerMappingData.ControllerButton.LeftShoulder };
+    }
+    
+    ControllerMappingData.ActionMapping GetDefaultTreatMapping()
+    {
+        return new ControllerMappingData.ActionMapping { inputType = ControllerMappingData.ActionMapping.InputType.Trigger, trigger = ControllerMappingData.ControllerTrigger.LeftTrigger, triggerThreshold = 0.5f };
+    }
+    
+    ControllerMappingData.ActionMapping GetDefaultDuckMapping()
+    {
+        return new ControllerMappingData.ActionMapping { inputType = ControllerMappingData.ActionMapping.InputType.Button, button = ControllerMappingData.ControllerButton.DPadDown };
+    }
+    
+    /// <summary>
+    /// Get stick value based on mapping
+    /// </summary>
+    Vector2 GetStickValue(Gamepad gamepad, ControllerMappingData.ControllerStick stick)
+    {
+        switch (stick)
+        {
+            case ControllerMappingData.ControllerStick.LeftStick:
+                return gamepad.leftStick.ReadValue();
+            case ControllerMappingData.ControllerStick.RightStick:
+                return gamepad.rightStick.ReadValue();
+            default:
+                return gamepad.leftStick.ReadValue();
+        }
+    }
+    
+    /// <summary>
+    /// Check if button is pressed based on mapping
+    /// </summary>
+    bool GetButtonPressed(Gamepad gamepad, ControllerMappingData.ControllerButton button)
+    {
+        switch (button)
+        {
+            case ControllerMappingData.ControllerButton.ButtonSouth: return gamepad.buttonSouth.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.ButtonWest: return gamepad.buttonWest.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.ButtonEast: return gamepad.buttonEast.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.ButtonNorth: return gamepad.buttonNorth.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.LeftShoulder: return gamepad.leftShoulder.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.RightShoulder: return gamepad.rightShoulder.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.LeftStick: return gamepad.leftStickButton.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.RightStick: return gamepad.rightStickButton.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.DPadUp: return gamepad.dpad.up.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.DPadDown: return gamepad.dpad.down.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.DPadLeft: return gamepad.dpad.left.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.DPadRight: return gamepad.dpad.right.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.Start: return gamepad.startButton.wasPressedThisFrame;
+            case ControllerMappingData.ControllerButton.Select: return gamepad.selectButton.wasPressedThisFrame;
+            default: return false;
+        }
+    }
+    
+    /// <summary>
+    /// Check if button is held based on mapping
+    /// </summary>
+    bool GetButtonHeld(Gamepad gamepad, ControllerMappingData.ControllerButton button)
+    {
+        switch (button)
+        {
+            case ControllerMappingData.ControllerButton.ButtonSouth: return gamepad.buttonSouth.isPressed;
+            case ControllerMappingData.ControllerButton.ButtonWest: return gamepad.buttonWest.isPressed;
+            case ControllerMappingData.ControllerButton.ButtonEast: return gamepad.buttonEast.isPressed;
+            case ControllerMappingData.ControllerButton.ButtonNorth: return gamepad.buttonNorth.isPressed;
+            case ControllerMappingData.ControllerButton.LeftShoulder: return gamepad.leftShoulder.isPressed;
+            case ControllerMappingData.ControllerButton.RightShoulder: return gamepad.rightShoulder.isPressed;
+            case ControllerMappingData.ControllerButton.LeftStick: return gamepad.leftStickButton.isPressed;
+            case ControllerMappingData.ControllerButton.RightStick: return gamepad.rightStickButton.isPressed;
+            case ControllerMappingData.ControllerButton.DPadUp: return gamepad.dpad.up.isPressed;
+            case ControllerMappingData.ControllerButton.DPadDown: return gamepad.dpad.down.isPressed;
+            case ControllerMappingData.ControllerButton.DPadLeft: return gamepad.dpad.left.isPressed;
+            case ControllerMappingData.ControllerButton.DPadRight: return gamepad.dpad.right.isPressed;
+            case ControllerMappingData.ControllerButton.Start: return gamepad.startButton.isPressed;
+            case ControllerMappingData.ControllerButton.Select: return gamepad.selectButton.isPressed;
+            default: return false;
+        }
+    }
+    
+    /// <summary>
+    /// Check if button is released based on mapping
+    /// </summary>
+    bool GetButtonReleased(Gamepad gamepad, ControllerMappingData.ControllerButton button)
+    {
+        switch (button)
+        {
+            case ControllerMappingData.ControllerButton.ButtonSouth: return gamepad.buttonSouth.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.ButtonWest: return gamepad.buttonWest.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.ButtonEast: return gamepad.buttonEast.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.ButtonNorth: return gamepad.buttonNorth.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.LeftShoulder: return gamepad.leftShoulder.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.RightShoulder: return gamepad.rightShoulder.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.LeftStick: return gamepad.leftStickButton.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.RightStick: return gamepad.rightStickButton.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.DPadUp: return gamepad.dpad.up.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.DPadDown: return gamepad.dpad.down.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.DPadLeft: return gamepad.dpad.left.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.DPadRight: return gamepad.dpad.right.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.Start: return gamepad.startButton.wasReleasedThisFrame;
+            case ControllerMappingData.ControllerButton.Select: return gamepad.selectButton.wasReleasedThisFrame;
+            default: return false;
+        }
+    }
+    
+    /// <summary>
+    /// Get trigger value based on mapping
+    /// </summary>
+    float GetTriggerValue(Gamepad gamepad, ControllerMappingData.ControllerTrigger trigger)
+    {
+        switch (trigger)
+        {
+            case ControllerMappingData.ControllerTrigger.LeftTrigger:
+                return gamepad.leftTrigger.ReadValue();
+            case ControllerMappingData.ControllerTrigger.RightTrigger:
+                return gamepad.rightTrigger.ReadValue();
+            default:
+                return 0f;
+        }
+    }
+#else
+    /// <summary>
+    /// Stub method when Input System is not available
+    /// </summary>
+    void HandleGamepadInput()
+    {
+        // Input System not available - gamepad input disabled
+    }
+#endif
 
     void HandleInputBuffering()
     {
@@ -940,6 +1382,8 @@ public class PlayerInputHandler : MonoBehaviourPun
     {
         enableKeyboardInput = false;
         enableMobileInput = false;
+        enableGamepadInput = false; // CRITICAL: Disable gamepad input for AI
+        isMyCharacter = false; // Ensure AI doesn't respond to human input
     }
 
 

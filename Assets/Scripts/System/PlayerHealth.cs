@@ -124,6 +124,20 @@ public class PlayerHealth : MonoBehaviourPunCallbacks, IPunObservable
         PlayRandomSound(hurtSounds);
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
         OnDamageTaken?.Invoke(actualDamage, attacker);
+        
+        // Haptic feedback for taking damage (only for local player)
+        if (playerCharacter != null && playerCharacter.IsLocalPlayer() && HapticFeedbackManager.Instance != null)
+        {
+            // Stronger vibration for ultimate hits
+            if (isUltimateHit)
+            {
+                HapticFeedbackManager.Instance.VibrateStrong(0.3f);
+            }
+            else
+            {
+                HapticFeedbackManager.Instance.VibrateMedium(0.3f);
+            }
+        }
 
         if (currentHealth <= 0)
         {

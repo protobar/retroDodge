@@ -634,6 +634,12 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
 
         PlayCharacterSound(CharacterAudioType.Jump);
         SyncPlayerAction("Jump");
+        
+        // Haptic feedback (only for local player)
+        if (IsLocalPlayer() && HapticFeedbackManager.Instance != null)
+        {
+            HapticFeedbackManager.Instance.VibrateLight();
+        }
 
         if (debugMode)
         {
@@ -735,6 +741,13 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         animationController?.SetDashing(true);
         
         SyncPlayerAction("Dash");
+        
+        // Haptic feedback (only for local player)
+        if (IsLocalPlayer() && HapticFeedbackManager.Instance != null)
+        {
+            HapticFeedbackManager.Instance.VibrateLight(0.15f);
+        }
+        
         StartCoroutine(DashCoroutine());
     }
 
@@ -1183,6 +1196,12 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         }
         ultimateSequenceCoroutine = StartCoroutine(UltimateSequence());
         
+        // Haptic feedback - start continuous vibration for ultimate charge (only for local player)
+        if (IsLocalPlayer() && HapticFeedbackManager.Instance != null)
+        {
+            HapticFeedbackManager.Instance.StartContinuousVibration(0.7f);
+        }
+        
         Debug.Log($"[ULTIMATE] Activated! Playing animation for {ultimateAnimationDuration}s - movement disabled");
     }
     
@@ -1242,6 +1261,13 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         
         Debug.Log($"[ULTIMATE] Executing ultimate throw!");
         
+        // Stop continuous vibration and trigger strong release vibration (only for local player)
+        if (IsLocalPlayer() && HapticFeedbackManager.Instance != null)
+        {
+            HapticFeedbackManager.Instance.StopContinuousVibration();
+            HapticFeedbackManager.Instance.VibrateStrong(0.4f);
+        }
+        
         // IMPORTANT: Don't trigger throw animation here - Execute methods handle it
         // The ultimate execution methods have their own animation/throw logic
         
@@ -1287,6 +1313,12 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         }
         
         Debug.Log($"[STUN] {name} stunned for {stunDuration} seconds!");
+        
+        // Haptic feedback for stun (only for local player)
+        if (IsLocalPlayer() && HapticFeedbackManager.Instance != null)
+        {
+            HapticFeedbackManager.Instance.VibrateStrong(0.5f);
+        }
         
         yield return new WaitForSeconds(stunDuration);
         
@@ -2516,6 +2548,12 @@ public class PlayerCharacter : MonoBehaviourPunCallbacks, IPunObservable
         AddAbilityCharge(0, 25f);
         AddAbilityCharge(1, 15f);
         AddAbilityCharge(2, 15f);
+        
+        // Haptic feedback for successful catch
+        if (HapticFeedbackManager.Instance != null)
+        {
+            HapticFeedbackManager.Instance.VibrateMedium();
+        }
     }
 
     public void OnSuccessfulDodge()
