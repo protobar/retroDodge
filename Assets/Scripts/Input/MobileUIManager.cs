@@ -104,6 +104,9 @@ public class MobileUIManager : MonoBehaviour
     void Start()
     {
         SetupMobileUI();
+        
+        // CRITICAL: Try to auto-find and assign local player's input handler
+        AutoFindAndAssignInputHandler();
 
         if (autoShowOnMobile)
         {
@@ -126,6 +129,50 @@ public class MobileUIManager : MonoBehaviour
             }
         }
     }
+    
+    /// <summary>
+    /// Automatically find and assign the local player's input handler
+    /// </summary>
+    void AutoFindAndAssignInputHandler()
+    {
+        // If already assigned, don't search
+        if (isInputHandlerAssigned && assignedInputHandler != null) return;
+        
+        // Find all PlayerInputHandlers in scene
+        PlayerInputHandler[] allHandlers = FindObjectsOfType<PlayerInputHandler>();
+        
+        foreach (var handler in allHandlers)
+        {
+            // Check if this handler is for the local player
+            // We'll check if it has enableMobileInput and is the local player's character
+            if (handler != null && handler.enableMobileInput)
+            {
+                // Try to determine if this is the local player
+                // In offline mode, first non-AI character is usually the player
+                // In online mode, check photonView.IsMine
+                bool isLocalPlayer = true;
+                
+                // Check if it's an AI character (shouldn't be assigned)
+                var playerChar = handler.GetComponent<PlayerCharacter>();
+                if (playerChar != null)
+                {
+                    bool isAI = handler.gameObject.name.Contains("AI") || 
+                               handler.GetComponent("AIControllerBrain") != null;
+                    if (isAI) continue; // Skip AI characters
+                }
+                
+                // Assign this handler
+                AssignInputHandler(handler);
+                
+                if (debugMode)
+                {
+                    Debug.Log($"MobileUIManager: Auto-assigned input handler from {handler.gameObject.name}");
+                }
+                
+                break; // Only assign one (the local player)
+            }
+        }
+    }
 
     void Update()
     {
@@ -138,6 +185,57 @@ public class MobileUIManager : MonoBehaviour
         if (enableAbilityFeedback && assignedPlayerCharacter != null)
         {
             UpdateAbilityButtonFeedback();
+        }
+        
+        // Note: Dash button visibility is updated when input handler is assigned
+        // and can be manually refreshed via RefreshDashButtonVisibility()
+        // No need to check every frame unless character data changes dynamically
+    }
+    
+    /// <summary>
+    /// Update dash button visibility based on character's dash ability
+    /// Only show dash button if character has canDash = true (e.g., Nova)
+    /// </summary>
+    void UpdateDashButtonVisibility()
+    {
+        if (dashButton == null) return;
+        
+        bool shouldShowDash = false;
+        
+        if (assignedPlayerCharacter != null)
+        {
+            var characterData = assignedPlayerCharacter.GetCharacterData();
+            if (characterData != null)
+            {
+                shouldShowDash = characterData.canDash;
+                
+                // Only update if state changed to avoid unnecessary SetActive calls
+                if (dashButton.gameObject.activeSelf != shouldShowDash)
+                {
+                    dashButton.gameObject.SetActive(shouldShowDash);
+                    
+                    if (debugMode)
+                    {
+                        Debug.Log($"MobileUIManager: Dash button visibility updated - Character: {characterData.characterName}, canDash: {characterData.canDash}, Showing: {shouldShowDash}");
+                    }
+                }
+            }
+            else
+            {
+                // Character data not loaded yet - hide dash button
+                if (dashButton.gameObject.activeSelf)
+                {
+                    dashButton.gameObject.SetActive(false);
+                }
+            }
+        }
+        else
+        {
+            // No player character assigned - hide dash button
+            if (dashButton.gameObject.activeSelf)
+            {
+                dashButton.gameObject.SetActive(false);
+            }
         }
     }
 
@@ -706,9 +804,12 @@ public class MobileUIManager : MonoBehaviour
         assignedInputHandler = inputHandler;
         isInputHandlerAssigned = (inputHandler != null);
 
-        // ENHANCED: Also get duck system and player character references (only if feedback enabled)
+        // ENHANCED: Also get duck system and player character references
         if (inputHandler != null)
         {
+            // Always get player character for dash button visibility
+            assignedPlayerCharacter = inputHandler.GetComponent<PlayerCharacter>();
+            
             if (enableDuckSystemFeedback)
             {
                 assignedDuckSystem = inputHandler.GetComponent<DuckSystem>();
@@ -720,12 +821,14 @@ public class MobileUIManager : MonoBehaviour
 
             if (enableAbilityFeedback)
             {
-                assignedPlayerCharacter = inputHandler.GetComponent<PlayerCharacter>();
                 if (assignedPlayerCharacter == null)
                 {
                     Debug.LogWarning("MobileUIManager: Ability feedback enabled but no PlayerCharacter found on player!");
                 }
             }
+            
+            // CRITICAL: Update dash button visibility based on character
+            UpdateDashButtonVisibility();
         }
 
         if (debugMode)
@@ -846,6 +949,15 @@ public class MobileUIManager : MonoBehaviour
     public PlayerCharacter GetAssignedPlayerCharacter()
     {
         return assignedPlayerCharacter;
+    }
+    
+    /// <summary>
+    /// Manually update dash button visibility
+    /// Call this when character changes or after assigning input handler
+    /// </summary>
+    public void RefreshDashButtonVisibility()
+    {
+        UpdateDashButtonVisibility();
     }
 
     #endregion

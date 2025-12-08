@@ -147,15 +147,17 @@ public class PlayerInputHandler : MonoBehaviourPun
 
     void Start()
     {
-        if (autoRegisterInSinglePlayer)
-        {
-            RegisterWithMobileUI();
-        }
-
         inputHandler = GetComponent<PlayerInputHandler>();
 
         // FIXED: Properly determine ownership
         DetermineOwnership();
+        
+        // CRITICAL: Register with MobileUIManager if this is the local player's character
+        // This ensures mobile input only works for the player, not AI
+        if (isMyCharacter && enableMobileInput)
+        {
+            RegisterWithMobileUI();
+        }
     }
 
     // FIXED: New ownership determination method
@@ -219,11 +221,13 @@ public class PlayerInputHandler : MonoBehaviourPun
         if (MobileUIManager.Instance != null)
         {
             MobileUIManager.Instance.AssignInputHandler(this);
-            Debug.Log($"{gameObject.name} - Registered with MobileUIManager for testing");
+            if (showDebugInfo)
+                Debug.Log($"{gameObject.name} - Registered with MobileUIManager (isMyCharacter: {isMyCharacter})");
         }
         else
         {
-            Debug.LogWarning($"{gameObject.name} - MobileUIManager not found! Make sure it exists in the scene.");
+            if (showDebugInfo)
+                Debug.LogWarning($"{gameObject.name} - MobileUIManager not found! It will be created automatically when needed.");
         }
     }
 
@@ -291,7 +295,24 @@ public class PlayerInputHandler : MonoBehaviourPun
         // FIXED: Re-check ownership if network state changes
         if (!isNetworkReady)
         {
+            bool wasMyCharacter = isMyCharacter;
             DetermineOwnership();
+            
+            // If ownership changed to local player, register with mobile UI
+            if (!wasMyCharacter && isMyCharacter && enableMobileInput)
+            {
+                RegisterWithMobileUI();
+            }
+        }
+        
+        // CRITICAL: Ensure mobile UI registration happens (fallback if Start() didn't catch it)
+        if (enableMobileInput && isMyCharacter && MobileUIManager.Instance != null)
+        {
+            if (!MobileUIManager.Instance.HasAssignedInputHandler() || 
+                MobileUIManager.Instance.GetAssignedInputHandler() != this)
+            {
+                RegisterWithMobileUI();
+            }
         }
 
         // FIXED: Only block input for remote players' characters
@@ -316,7 +337,8 @@ public class PlayerInputHandler : MonoBehaviourPun
             HandleKeyboardInput();
         }
 
-        if (enableMobileInput)
+        // CRITICAL: Only process mobile input for local player's character
+        if (enableMobileInput && isMyCharacter)
         {
             HandleMobileInput();
         }

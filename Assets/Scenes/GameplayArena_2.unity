@@ -7101,7 +7101,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &261185936
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -53891,8 +53891,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   playerType: 0
-  enableKeyboardInput: 1
-  enableMobileInput: 0
+  enableKeyboardInput: 0
+  enableMobileInput: 1
+  enableGamepadInput: 0
   enableInputPrediction: 1
   inputSendRate: 30
   useCustomKeys: 0
@@ -53912,8 +53913,10 @@ MonoBehaviour:
   autoDetectOwnership: 1
   forceLocalControl: 0
   inputBufferTime: 0.15
+  gamepadDeadzone: 0.2
+  controllerMapping: {fileID: 0}
   showDebugInfo: 0
-  forceMobileMode: 0
+  forceMobileMode: 1
   autoRegisterInSinglePlayer: 0
 --- !u!1 &3339681227503773903
 GameObject:
